@@ -27,25 +27,21 @@
 // Desc:   The action of this dock update is taking boxes and turning them into money for my ownerplayer
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-#include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 #include "Common/Player.h"
 #include "Common/Xfer.h"
 #include "GameLogic/Module/SupplyCenterDockUpdate.h"
 #include "GameLogic/Module/SupplyTruckAIUpdate.h"
 #include "GameClient/Color.h"
+#include "GameClient/Drawable.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/GameText.h"
 
-#ifdef _INTERNAL
-// for occasional debugging...
-//#pragma optimize("", off)
-//#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
-#endif
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
-SupplyCenterDockUpdateModuleData::SupplyCenterDockUpdateModuleData( void )
+SupplyCenterDockUpdateModuleData::SupplyCenterDockUpdateModuleData()
 {
 	m_grantTemporaryStealthFrames = 0;
 }
@@ -57,15 +53,15 @@ SupplyCenterDockUpdateModuleData::SupplyCenterDockUpdateModuleData( void )
 
 	DockUpdateModuleData::buildFieldParse( p );
 
-	static const FieldParse dataFieldParse[] = 
+	static const FieldParse dataFieldParse[] =
 	{
-		{ "GrantTemporaryStealth",		INI::parseDurationUnsignedInt,  NULL, offsetof( SupplyCenterDockUpdateModuleData, m_grantTemporaryStealthFrames ) },
-		{ 0, 0, 0, 0 }
+		{ "GrantTemporaryStealth",		INI::parseDurationUnsignedInt,  nullptr, offsetof( SupplyCenterDockUpdateModuleData, m_grantTemporaryStealthFrames ) },
+		{ nullptr, nullptr, nullptr, 0 }
 	};
 
   p.add(dataFieldParse);
 
-}  // end buildFieldParse
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -88,21 +84,21 @@ SupplyCenterDockUpdate::~SupplyCenterDockUpdate()
 Bool SupplyCenterDockUpdate::action( Object* docker, Object *drone )
 {
 	const SupplyCenterDockUpdateModuleData *data = getSupplyCenterDockUpdateModuleData();
-	SupplyTruckAIInterface* supplyTruckAI = NULL;
-	if( docker->getAIUpdateInterface() == NULL )
+	SupplyTruckAIInterface* supplyTruckAI = nullptr;
+	if( docker->getAIUpdateInterface() == nullptr )
 		return FALSE;
 
 	supplyTruckAI = docker->getAIUpdateInterface()->getSupplyTruckAIInterface();
 
-	DEBUG_ASSERTCRASH( supplyTruckAI != NULL, ("Something Docking with a Supply Center must have a Supply-truck like AIUpdate") );
-	if( supplyTruckAI == NULL )
+	DEBUG_ASSERTCRASH( supplyTruckAI != nullptr, ("Something Docking with a Supply Center must have a Supply-truck like AIUpdate") );
+	if( supplyTruckAI == nullptr )
 		return FALSE;
 
 	UnsignedInt value = 0;
 	Player *ownerPlayer = getObject()->getControllingPlayer();
 	while( supplyTruckAI->loseOneBox() )
 		value += ownerPlayer->getSupplyBoxValue();
-	
+
 	// Add money boost from upgrades that give extra money
 	value += supplyTruckAI->getUpgradedSupplyBoost();
 
@@ -117,8 +113,8 @@ Bool SupplyCenterDockUpdate::action( Object* docker, Object *drone )
 		{
 			StealthUpdate *stealth = docker->getStealth();
 			//Only grant temporary stealth to the default stealth update. It's
-			//possible that another type of stealth was granted... like the 
-			//GPS scrambler. We want that to take precendence.
+			//possible that another type of stealth was granted... like the
+			//GPS scrambler. We want that to take precedence.
 			if( getObject()->testStatus( OBJECT_STATUS_STEALTHED ) )
 			{
 				if( !stealth )
@@ -132,18 +128,8 @@ Bool SupplyCenterDockUpdate::action( Object* docker, Object *drone )
 			}
 		}
 	}
-	
-	Bool displayMoney = value > 0 ? TRUE : FALSE;
-	if( getObject()->testStatus(OBJECT_STATUS_STEALTHED) )
-	{
-		// OY LOOK!  I AM USING LOCAL PLAYER.  Do not put anything other than TheInGameUI->addFloatingText in the block this controls!!!
-		if( !getObject()->isLocallyControlled() && !getObject()->testStatus(OBJECT_STATUS_DETECTED) )
-		{
-			displayMoney = FALSE;
-		}
-	}
-		
-	if( displayMoney )
+
+	if (value > 0 && getObject()->isLogicallyVisible())
 	{
 		// OY LOOK!  I AM USING LOCAL PLAYER.  Do not put anything other than TheInGameUI->addFloatingText in the block this controls!!!
 		// Setup info for adding a floating text
@@ -156,11 +142,11 @@ Bool SupplyCenterDockUpdate::action( Object* docker, Object *drone )
 		pos.y = dockerPos->y;
 		pos.z = TheTerrainLogic->getGroundHeight(pos.x, pos.y);//dockerPos->z + docker->getGeometryInfo().getHeight();
 		Color color = ownerPlayer->getPlayerColor() | GameMakeColor( 0, 0, 0, 230 );
-		
+
 		TheInGameUI->addFloatingText(moneys, &pos, color);
 	}
 
-		
+
 	return FALSE;
 }
 
@@ -176,7 +162,7 @@ UpdateSleepTime SupplyCenterDockUpdate::update()
 	SupplyCenterCreate* create = (SupplyCenterCreate*)getObject()->findCreateModule(key_SupplyCenterCreate);
 	DEBUG_ASSERTCRASH( create && ! create->shouldDoOnBuildComplete(), ("A Supply center did not call onBuildComplete.") );
 #endif
-	
+
 	return result;
 }
 
@@ -189,7 +175,7 @@ void SupplyCenterDockUpdate::crc( Xfer *xfer )
 	// extend base class
 	DockUpdate::crc( xfer );
 
-}  // end crc
+}
 
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
@@ -207,15 +193,15 @@ void SupplyCenterDockUpdate::xfer( Xfer *xfer )
 	// extend base class
 	DockUpdate::xfer( xfer );
 
-}  // end xfer
+}
 
 // ------------------------------------------------------------------------------------------------
 /** Load post process */
 // ------------------------------------------------------------------------------------------------
-void SupplyCenterDockUpdate::loadPostProcess( void )
+void SupplyCenterDockUpdate::loadPostProcess()
 {
 
 	// extend base class
 	DockUpdate::loadPostProcess();
 
-}  // end loadPostProcess
+}

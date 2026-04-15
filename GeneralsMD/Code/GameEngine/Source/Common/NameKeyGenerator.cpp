@@ -28,32 +28,32 @@
 // Desc:      Name key system to translate between names and unique key ids
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-#include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 // Public Data ////////////////////////////////////////////////////////////////////////////////////
-NameKeyGenerator *TheNameKeyGenerator = NULL;  ///< name key gen. singleton
+NameKeyGenerator *TheNameKeyGenerator = nullptr;  ///< name key gen. singleton
 
-//------------------------------------------------------------------------------------------------- 
+//-------------------------------------------------------------------------------------------------
 NameKeyGenerator::NameKeyGenerator()
 {
 
 	m_nextID = (UnsignedInt)NAMEKEY_INVALID;  // uninitialized system
 
 	for (Int i = 0; i < SOCKET_COUNT; ++i)
-		m_sockets[i] = NULL;
+		m_sockets[i] = nullptr;
 
-}  // end NameKeyGenerator
+}
 
-//------------------------------------------------------------------------------------------------- 
+//-------------------------------------------------------------------------------------------------
 NameKeyGenerator::~NameKeyGenerator()
 {
-	
+
 	// free all system data
 	freeSockets();
 
-}  // end ~NameKeyGenerator
+}
 
-//------------------------------------------------------------------------------------------------- 
+//-------------------------------------------------------------------------------------------------
 void NameKeyGenerator::init()
 {
 	DEBUG_ASSERTCRASH(m_nextID == (UnsignedInt)NAMEKEY_INVALID, ("NameKeyGen already inited"));
@@ -62,17 +62,17 @@ void NameKeyGenerator::init()
 	freeSockets();
 	m_nextID = 1;
 
-}  // end init
+}
 
-//------------------------------------------------------------------------------------------------- 
+//-------------------------------------------------------------------------------------------------
 void NameKeyGenerator::reset()
 {
 	freeSockets();
 	m_nextID = 1;
 
-}  // end reset
+}
 
-//------------------------------------------------------------------------------------------------- 
+//-------------------------------------------------------------------------------------------------
 void NameKeyGenerator::freeSockets()
 {
 	for (Int i = 0; i < SOCKET_COUNT; ++i)
@@ -81,34 +81,34 @@ void NameKeyGenerator::freeSockets()
 		for (Bucket *b = m_sockets[i]; b; b = next)
 		{
 			next = b->m_nextInSocket;
-			b->deleteInstance();
+			deleteInstance(b);
 		}
-		m_sockets[i] = NULL;
+		m_sockets[i] = nullptr;
 	}
 
-}  // end freeSockets
+}
 
-/* ------------------------------------------------------------------------ */
+//-------------------------------------------------------------------------------------------------
 inline UnsignedInt calcHashForString(const char* p)
 {
-	UnsignedInt result = 0; 
+	UnsignedInt result = 0;
 	Byte *pp = (Byte*)p;
-	while (*pp) 
-		result = (result << 5) + result + *pp++; 
+	while (*pp)
+		result = (result << 5) + result + *pp++;
 	return result;
 }
 
-/* ------------------------------------------------------------------------ */
+//-------------------------------------------------------------------------------------------------
 inline UnsignedInt calcHashForLowercaseString(const char* p)
 {
-	UnsignedInt result = 0; 
+	UnsignedInt result = 0;
 	Byte *pp = (Byte*)p;
-	while (*pp) 
-		result = (result << 5) + result + tolower(*pp++); 
+	while (*pp)
+		result = (result << 5) + result + tolower(*pp++);
 	return result;
 }
 
-//------------------------------------------------------------------------------------------------- 
+//-------------------------------------------------------------------------------------------------
 AsciiString NameKeyGenerator::keyToName(NameKeyType key)
 {
 	for (Int i = 0; i < SOCKET_COUNT; ++i)
@@ -122,30 +122,150 @@ AsciiString NameKeyGenerator::keyToName(NameKeyType key)
 	return AsciiString::TheEmptyString;
 }
 
-//------------------------------------------------------------------------------------------------- 
-NameKeyType NameKeyGenerator::nameToKey(const char* nameString)
+//-------------------------------------------------------------------------------------------------
+#if RTS_ZEROHOUR && RETAIL_COMPATIBLE_CRC
+// because the name keys are somehow CRC relevant. It was originally used by the file exist cache
+// of the file system in Zero Hour.
+Bool NameKeyGenerator::addReservedKey()
 {
-	Bucket *b;
+	switch (m_nextID)
+	{
+	case 97: nameToLowercaseKeyImpl("Data\\English\\Language9x.ini"); return true;
+	case 98: nameToLowercaseKeyImpl("Data\\Audio\\Tracks\\English\\GLA_02.mp3"); return true;
+	case 99: nameToLowercaseKeyImpl("Data\\Audio\\Tracks\\GLA_02.mp3"); return true;
+	}
+	return false;
+}
+#endif
 
-	UnsignedInt hash = calcHashForString(nameString) % SOCKET_COUNT;
+//-------------------------------------------------------------------------------------------------
+NameKeyType NameKeyGenerator::nameToKey(const AsciiString& name)
+{
+	const NameKeyType key = nameToKeyImpl(name);
 
-	// hmm, do we have it already?
+#if RTS_ZEROHOUR && RETAIL_COMPATIBLE_CRC
+	while (addReservedKey());
+#endif
+
+	return key;
+}
+
+//-------------------------------------------------------------------------------------------------
+NameKeyType NameKeyGenerator::nameToLowercaseKey(const AsciiString& name)
+{
+	const NameKeyType key = nameToLowercaseKeyImpl(name);
+
+#if RTS_ZEROHOUR && RETAIL_COMPATIBLE_CRC
+	while (addReservedKey());
+#endif
+
+	return key;
+}
+
+//-------------------------------------------------------------------------------------------------
+NameKeyType NameKeyGenerator::nameToKey(const char* name)
+{
+	const NameKeyType key = nameToKeyImpl(name);
+
+#if RTS_ZEROHOUR && RETAIL_COMPATIBLE_CRC
+	while (addReservedKey());
+#endif
+
+	return key;
+}
+
+//-------------------------------------------------------------------------------------------------
+NameKeyType NameKeyGenerator::nameToLowercaseKey(const char *name)
+{
+	const NameKeyType key = nameToLowercaseKeyImpl(name);
+
+#if RTS_ZEROHOUR && RETAIL_COMPATIBLE_CRC
+	while (addReservedKey());
+#endif
+
+	return key;
+}
+
+//-------------------------------------------------------------------------------------------------
+NameKeyType NameKeyGenerator::nameToKeyImpl(const AsciiString& name)
+{
+	const UnsignedInt hash = calcHashForString(name.str()) % SOCKET_COUNT;
+
+	// do we have it already?
+	const Bucket *b;
 	for (b = m_sockets[hash]; b; b = b->m_nextInSocket)
 	{
-		if (strcmp(nameString, b->m_nameString.str()) == 0)
-			return b->m_key; 
+		if (name.compare(b->m_nameString) == 0)
+			return b->m_key;
 	}
 
 	// nope, guess not. let's allocate it.
-	b = newInstance(Bucket);
+	return createNameKey(hash, name);
+}
+
+//-------------------------------------------------------------------------------------------------
+NameKeyType NameKeyGenerator::nameToLowercaseKeyImpl(const AsciiString& name)
+{
+	const UnsignedInt hash = calcHashForLowercaseString(name.str()) % SOCKET_COUNT;
+
+	// do we have it already?
+	const Bucket *b;
+	for (b = m_sockets[hash]; b; b = b->m_nextInSocket)
+	{
+		if (name.compareNoCase(b->m_nameString) == 0)
+			return b->m_key;
+	}
+
+	// nope, guess not. let's allocate it.
+	return createNameKey(hash, name);
+}
+
+//-------------------------------------------------------------------------------------------------
+NameKeyType NameKeyGenerator::nameToKeyImpl(const char* name)
+{
+	const UnsignedInt hash = calcHashForString(name) % SOCKET_COUNT;
+
+	// do we have it already?
+	const Bucket *b;
+	for (b = m_sockets[hash]; b; b = b->m_nextInSocket)
+	{
+		if (strcmp(name, b->m_nameString.str()) == 0)
+			return b->m_key;
+	}
+
+	// nope, guess not. let's allocate it.
+	return createNameKey(hash, name);
+}
+
+//-------------------------------------------------------------------------------------------------
+NameKeyType NameKeyGenerator::nameToLowercaseKeyImpl(const char* name)
+{
+	const UnsignedInt hash = calcHashForLowercaseString(name) % SOCKET_COUNT;
+
+	// do we have it already?
+	const Bucket *b;
+	for (b = m_sockets[hash]; b; b = b->m_nextInSocket)
+	{
+		if (_stricmp(name, b->m_nameString.str()) == 0)
+			return b->m_key;
+	}
+
+	// nope, guess not. let's allocate it.
+	return createNameKey(hash, name);
+}
+
+//-------------------------------------------------------------------------------------------------
+NameKeyType NameKeyGenerator::createNameKey(UnsignedInt hash, const AsciiString& name)
+{
+	Bucket *b = newInstance(Bucket);
 	b->m_key = (NameKeyType)m_nextID++;
-	b->m_nameString = nameString;
+	b->m_nameString = name;
 	b->m_nextInSocket = m_sockets[hash];
 	m_sockets[hash] = b;
 
 	NameKeyType result = b->m_key;
 
-#if defined(_DEBUG) || defined(_INTERNAL)
+#if defined(RTS_DEBUG)
 	// reality-check to be sure our hasher isn't going bad.
 	const Int maxThresh = 3;
 	Int numOverThresh = 0;
@@ -158,76 +278,27 @@ NameKeyType NameKeyGenerator::nameToKey(const char* nameString)
 		if (numInThisSocket > maxThresh)
 			++numOverThresh;
 	}
-	
+
 	// if more than a small percent of the sockets are getting deep, probably want to increase the socket count.
 	if (numOverThresh > SOCKET_COUNT/20)
 	{
-		DEBUG_CRASH(("hmm, might need to increase the number of bucket-sockets for NameKeyGenerator (numOverThresh %d = %f%%)\n",numOverThresh,(Real)numOverThresh/(Real)(SOCKET_COUNT/20)));
+		DEBUG_CRASH(("hmm, might need to increase the number of bucket-sockets for NameKeyGenerator (numOverThresh %d = %f%%)",numOverThresh,(Real)numOverThresh/(Real)(SOCKET_COUNT/20)));
 	}
 #endif
 
 	return result;
+}
 
-}  // end nameToKey
-
-//------------------------------------------------------------------------------------------------- 
-NameKeyType NameKeyGenerator::nameToLowercaseKey(const char* nameString)
-{
-	Bucket *b;
-
-	UnsignedInt hash = calcHashForLowercaseString(nameString) % SOCKET_COUNT;
-
-	// hmm, do we have it already?
-	for (b = m_sockets[hash]; b; b = b->m_nextInSocket)
-	{
-		if (_stricmp(nameString, b->m_nameString.str()) == 0)
-			return b->m_key; 
-	}
-
-	// nope, guess not. let's allocate it.
-	b = newInstance(Bucket);
-	b->m_key = (NameKeyType)m_nextID++;
-	b->m_nameString = nameString;
-	b->m_nextInSocket = m_sockets[hash];
-	m_sockets[hash] = b;
-
-	NameKeyType result = b->m_key;
-
-#if defined(_DEBUG) || defined(_INTERNAL)
-	// reality-check to be sure our hasher isn't going bad.
-	const Int maxThresh = 3;
-	Int numOverThresh = 0;
-	for (Int i = 0; i < SOCKET_COUNT; ++i)
-	{
-		Int numInThisSocket = 0;
-		for (b = m_sockets[i]; b; b = b->m_nextInSocket)
-			++numInThisSocket;
-
-		if (numInThisSocket > maxThresh)
-			++numOverThresh;
-	}
-	
-	// if more than a small percent of the sockets are getting deep, probably want to increase the socket count.
-	if (numOverThresh > SOCKET_COUNT/20)
-	{
-		DEBUG_CRASH(("hmm, might need to increase the number of bucket-sockets for NameKeyGenerator (numOverThresh %d = %f%%)\n",numOverThresh,(Real)numOverThresh/(Real)(SOCKET_COUNT/20)));
-	}
-#endif
-
-	return result;
-
-}  // end nameToLowercaseKey
-
-//------------------------------------------------------------------------------------------------- 
+//-------------------------------------------------------------------------------------------------
 // Get a string out of the INI. Store it into a NameKeyType
-//------------------------------------------------------------------------------------------------- 
+//-------------------------------------------------------------------------------------------------
 void NameKeyGenerator::parseStringAsNameKeyType( INI *ini, void *instance, void *store, const void* userData )
 {
   *(NameKeyType *)store = TheNameKeyGenerator->nameToKey( ini->getNextToken() );
 }
 
 
-//------------------------------------------------------------------------------------------------- 
+//-------------------------------------------------------------------------------------------------
 NameKeyType StaticNameKey::key() const
 {
 	if (m_key == NAMEKEY_INVALID)

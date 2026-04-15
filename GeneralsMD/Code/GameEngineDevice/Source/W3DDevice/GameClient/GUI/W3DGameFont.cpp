@@ -24,12 +24,12 @@
 
 // FILE: W3DGameFont.cpp //////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-//                                                                          
-//                       Westwood Studios Pacific.                          
-//                                                                          
-//                       Confidential Information                           
-//                Copyright (C) 2001 - All Rights Reserved                  
-//                                                                          
+//
+//                       Westwood Studios Pacific.
+//
+//                       Confidential Information
+//                Copyright (C) 2001 - All Rights Reserved
+//
 //-----------------------------------------------------------------------------
 //
 // Project:    RTS3
@@ -45,13 +45,16 @@
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include <stdlib.h>
+#include <cstdarg>
+#include <cstring>
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "Common/Debug.h"
+#include "Common/GlobalData.h"
 #include "W3DDevice/GameClient/W3DGameFont.h"
-#include "WW3D2/WW3D.h"
-#include "WW3D2/AssetMgr.h"
-#include "WW3D2/Render2DSentence.h"
+#include "WW3D2/ww3d.h"
+#include "WW3D2/assetmgr.h"
+#include "WW3D2/render2dsentence.h"
 #include "GameClient/GlobalLanguage.h"
 
 // DEFINES ////////////////////////////////////////////////////////////////////
@@ -68,61 +71,55 @@
 // PRIVATE FUNCTIONS //////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 
+static Bool isShellMapFontTraceEnabled()
+{
+	return FALSE;
+}
+
+static void appendShellMapFontTrace(const char *format, ...)
+{
+	return; // Debug logging removed
+}
+
 // W3DFontLibrary::loadFontData ===============================================
 /** Load a font */
 //=============================================================================
 Bool W3DFontLibrary::loadFontData( GameFont *font )
 {
-	FontCharsClass *fontChar;
-
 	// sanity
-	if( font == NULL )
+	if( font == nullptr )
 		return FALSE;
 
-	if ((UnsignedInt)font->pointSize > 100)	//sanity check the size - anything over 100 is probably wrong. -MW
-		fontChar = NULL;
-	else
-	{	// get the font data from the asset manager
-		fontChar = WW3DAssetManager::
-									Get_Instance()->Get_FontChars( font->nameString.str(), font->pointSize,
-																								 font->bold ? true : false );
-	}
+	const char* name = font->nameString.str();
+	const Int size = font->pointSize;
+	const Bool bold = font->bold;
+	appendShellMapFontTrace("W3DFontLibrary: loadFontData begin name=%s size=%d bold=%d", name, size, bold);
 
-	if( fontChar == NULL )
+	// get the font data from the asset manager
+	appendShellMapFontTrace("W3DFontLibrary: Get_FontChars begin name=%s size=%d bold=%d", name, size, bold);
+	FontCharsClass *fontChar = WW3DAssetManager::Get_Instance()->Get_FontChars( name, size, bold );
+	appendShellMapFontTrace("W3DFontLibrary: Get_FontChars end name=%s size=%d bold=%d fontChar=%p", name, size, bold, fontChar);
+
+	if( fontChar == nullptr )
 	{
-
-		DEBUG_LOG(( "W3D load font: unable to find font '%s' from asset manager\n",
-						 font->nameString.str() ));
-		DEBUG_ASSERTCRASH(fontChar, ("Missing or Corrupted Font.  Pleas see log for details"));
+		DEBUG_CRASH(( "Unable to find font '%s' in Asset Manager", name ));
 		return FALSE;
-
-	}  // end if
+	}
 
 	// assign font data
 	font->fontData = fontChar;
 	font->height = fontChar->Get_Char_Height();
+	appendShellMapFontTrace("W3DFontLibrary: font metrics end name=%s height=%d", font->nameString.str(), font->height);
 
-	FontCharsClass *unicodeFontChar = NULL;
+	// load Unicode of same point size
+	name = TheGlobalLanguageData ? TheGlobalLanguageData->m_unicodeFontName.str() : "Arial Unicode MS";
+	appendShellMapFontTrace("W3DFontLibrary: unicode Get_FontChars begin name=%s size=%d bold=%d", name, size, bold);
+	fontChar->AlternateUnicodeFont = WW3DAssetManager::Get_Instance()->Get_FontChars( name, size, bold );
+	appendShellMapFontTrace("W3DFontLibrary: unicode Get_FontChars end name=%s size=%d bold=%d fontChar=%p", name, size, bold, fontChar->AlternateUnicodeFont);
 
-	// load unicode of same point size
-	if(TheGlobalLanguageData)
-		unicodeFontChar = WW3DAssetManager::
-									Get_Instance()->Get_FontChars( TheGlobalLanguageData->m_unicodeFontName.str(), font->pointSize,
-																								 font->bold ? true : false );
-	else
-		unicodeFontChar = WW3DAssetManager::
-									Get_Instance()->Get_FontChars( "Arial Unicode MS", font->pointSize,
-																								 font->bold ? true : false );
-
-	if ( unicodeFontChar )
-	{
-		fontChar->AlternateUnicodeFont = unicodeFontChar;
-	}
-
-	// all done and loaded
+	appendShellMapFontTrace("W3DFontLibrary: loadFontData end name=%s size=%d bold=%d", font->nameString.str(), size, bold);
 	return TRUE;
-
-}  // end loadFont
+}
 
 // W3DFontLibrary::releaseFontData ============================================
 /** Release font data */
@@ -137,10 +134,11 @@ void W3DFontLibrary::releaseFontData( GameFont *font )
 		if(((FontCharsClass *)(font->fontData))->AlternateUnicodeFont)
 			((FontCharsClass *)(font->fontData))->AlternateUnicodeFont->Release_Ref();
 		((FontCharsClass *)(font->fontData))->Release_Ref();
+
+		font->fontData = nullptr;
 	}
-	font->fontData = NULL;
-	
-}  // end releaseFont
+
+}
 
 // PUBLIC FUNCTIONS ///////////////////////////////////////////////////////////
 

@@ -25,7 +25,9 @@
 // FILE: GUIUtil.cpp //////////////////////////////////////////////////////
 // Author: Matthew D. Campbell, Sept 2002
 
-#include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+
+#include <set>
 
 #include "GameNetwork/GUIUtil.h"
 #include "GameNetwork/NetworkDefs.h"
@@ -46,11 +48,6 @@
 #include "GameNetwork/LANAPICallbacks.h" // for acceptTrueColor, etc
 #include "GameClient/ChallengeGenerals.h"
 
-#ifdef _INTERNAL
-// for occasional debugging...
-//#pragma optimize("", off)
-//#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
-#endif
 
 // -----------------------------------------------------------------------------
 
@@ -61,7 +58,7 @@ void EnableSlotListUpdates( Bool val )
 	winInitialized = val;
 }
 
-Bool AreSlotListUpdatesEnabled( void )
+Bool AreSlotListUpdatesEnabled()
 {
 	return winInitialized;
 }
@@ -78,7 +75,7 @@ void EnableAcceptControls(Bool Enabled, GameInfo *myGame, GameWindow *comboPlaye
 
 	Bool isObserver = myGame->getConstSlot(slotNum)->getPlayerTemplate() == PLAYERTEMPLATE_OBSERVER;
 
-	if( !myGame->amIHost() && (buttonStart != NULL) )
+	if( !myGame->amIHost() && (buttonStart != nullptr) )
 		buttonStart->winEnable(Enabled);
 	if(comboColor[slotNum])
 	{
@@ -86,7 +83,19 @@ void EnableAcceptControls(Bool Enabled, GameInfo *myGame, GameWindow *comboPlaye
 		{
 			GadgetComboBoxHideList(comboColor[slotNum]);
 		}
-		comboColor[slotNum]->winEnable(Enabled && !isObserver);
+
+		// Network multiplayer: human players set their color in the
+		// launcher via -color, not from the in-game dropdown — the
+		// launcher is the canonical source of identity. The combo
+		// is still useful for the HOST picking BOT colors, and
+		// skirmish / challenge modes still use it for everything
+		// since no launcher is involved there.
+		Bool colorEditable = !isObserver;
+		const Bool isNetworkGame = (myGame != (GameInfo *)TheSkirmishGameInfo)
+		                        && (myGame != (GameInfo *)TheChallengeGameInfo);
+		if (isNetworkGame && myGame->getConstSlot(slotNum)->isHuman())
+			colorEditable = FALSE;
+		comboColor[slotNum]->winEnable(Enabled && colorEditable);
 	}
 	if(comboPlayerTemplate[slotNum])
 		comboPlayerTemplate[slotNum]->winEnable(Enabled);
@@ -139,10 +148,10 @@ void ShowUnderlyingGUIElements( Bool show, const char *layoutFilename, const cha
 	AsciiString parentNameStr;
 	parentNameStr.format("%s:%s", layoutFilename, parentName);
 	NameKeyType parentID = NAMEKEY(parentNameStr);
-	GameWindow *parent = TheWindowManager->winGetWindowFromId( NULL, parentID );
+	GameWindow *parent = TheWindowManager->winGetWindowFromId( nullptr, parentID );
 	if (!parent)
 	{
-		DEBUG_CRASH(("Window %s not found\n", parentNameStr.str()));
+		DEBUG_CRASH(("Window %s not found", parentNameStr.str()));
 		return;
 	}
 
@@ -188,30 +197,42 @@ void ShowUnderlyingGUIElements( Bool show, const char *layoutFilename, const cha
 
 void PopulateColorComboBox(Int comboBox, GameWindow *comboArray[], GameInfo *myGame, Bool isObserver)
 {
+	// Slot colors are raw 24-bit RGB ints now (not palette indices),
+	// so the combo box stores the RGB as the per-row item data and
+	// the dedup loop compares RGBs directly. The multiplayer.ini
+	// palette is still the source of the displayed presets — players
+	// who want a color outside the presets get one from the launcher
+	// via -color, and we synthesize a "Custom" entry below so the
+	// dropdown can still show + select that color.
 	Int numColors = TheMultiplayerSettings->getNumColors();
 	UnicodeString colorName;
-	std::vector<bool> availableColors;
 
-	for (Int i = 0; i < numColors; i++)
-		availableColors.push_back(true);
-
-	for (i = 0; i < MAX_SLOTS; i++)
+	// Build the set of preset RGBs that other slots have already
+	// claimed, so we can hide them from this slot's dropdown.
+	std::set<Int> takenRgbs;
+	for (Int i = 0; i < MAX_SLOTS; i++)
 	{
-		GameSlot *slot = myGame->getSlot(i);	
-		if( slot && (i != comboBox) && (slot->getColor() >= 0 )&& (slot->getColor() < numColors))
-		{
-			DEBUG_ASSERTCRASH(slot->getColor() >= 0,("We've tried to access array %d and that ain't good",slot->getColor()));
-			availableColors[slot->getColor()] = false;
-		}
+		GameSlot *slot = myGame->getSlot(i);
+		if (slot && (i != comboBox) && slot->getColor() >= 0)
+			takenRgbs.insert(slot->getColor());
 	}
+
+	// Track which RGBs are in the stock palette so the Custom-entry
+	// logic at the bottom can decide whether THIS slot's color
+	// already maps to a preset (no Custom needed) or is a launcher-
+	// supplied custom value (needs a synthesized entry).
+	std::set<Int> presetRgbs;
 
 	Bool wasObserver = (GadgetComboBoxGetLength(comboArray[comboBox]) == 1);
 	GadgetComboBoxReset(comboArray[comboBox]);
 
+	// First entry is always the "random / no choice" sentinel —
+	// item data -1 (no real RGB), display as either "None" (observer)
+	// or the random-pick label.
 	MultiplayerColorDefinition *def = TheMultiplayerSettings->getColor(PLAYERTEMPLATE_RANDOM);
 	Int newIndex = GadgetComboBoxAddEntry(comboArray[comboBox],
 		(isObserver)?TheGameText->fetch("GUI:None"):TheGameText->fetch("GUI:???"), def->getColor());
-	GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)-1);
+	GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, reinterpret_cast<void *>(static_cast<intptr_t>(-1)));
 
 	if (isObserver)
 	{
@@ -219,16 +240,47 @@ void PopulateColorComboBox(Int comboBox, GameWindow *comboArray[], GameInfo *myG
 		return;
 	}
 
-	for (Int c=0; c<numColors; ++c)
+	for (Int c = 0; c < numColors; ++c)
 	{
 		def = TheMultiplayerSettings->getColor(c);
-		if (!def || availableColors[c] == false)
+		if (!def) continue;
+
+		// Item data is the raw 24-bit RGB the slot will be set to
+		// when this entry is picked. Hide presets already taken by
+		// another slot.
+		Int rgb = (Int)(def->getColor() & 0x00FFFFFFu);
+		presetRgbs.insert(rgb);
+		if (takenRgbs.find(rgb) != takenRgbs.end())
 			continue;
 
 		colorName = TheGameText->fetch(def->getTooltipName().str());
 		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], colorName, def->getColor());
-		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)c);
+		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, reinterpret_cast<void *>(static_cast<intptr_t>(rgb)));
 	}
+
+	// Custom-color entry. If THIS slot's current color is a real
+	// RGB (not the random sentinel) and isn't in the preset
+	// palette, synthesize a "Custom" entry whose item data is the
+	// slot's actual RGB and whose displayed swatch text is rendered
+	// in that color. Without this, the dropdown can't represent the
+	// current slot color → it ends up empty / unselected after
+	// UpdateSlotList runs its selection loop, which is what the
+	// user kept seeing for launcher-supplied colors.
+	GameSlot *thisSlot = myGame->getSlot(comboBox);
+	if (thisSlot && thisSlot->getColor() >= 0)
+	{
+		Int slotRgb = thisSlot->getColor() & 0x00FFFFFF;
+		if (presetRgbs.find(slotRgb) == presetRgbs.end())
+		{
+			UnicodeString customLabel;
+			customLabel.translate(AsciiString("Custom"));
+			Color swatchColor = MultiplayerSettings::resolveSlotColor(slotRgb);
+			newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], customLabel, swatchColor);
+			GadgetComboBoxSetItemData(comboArray[comboBox], newIndex,
+				reinterpret_cast<void *>(static_cast<intptr_t>(slotRgb)));
+		}
+	}
+
 	if (wasObserver)
 		GadgetComboBoxSetSelectedPos(comboArray[comboBox], 0);
 }
@@ -244,7 +296,7 @@ void PopulatePlayerTemplateComboBox(Int comboBox, GameWindow *comboArray[], Game
 
 	MultiplayerColorDefinition *def = TheMultiplayerSettings->getColor(PLAYERTEMPLATE_RANDOM);
 	Int newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], TheGameText->fetch("GUI:Random"), def->getColor());
-	GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)PLAYERTEMPLATE_RANDOM);
+	GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, reinterpret_cast<void *>(static_cast<intptr_t>(PLAYERTEMPLATE_RANDOM)));
 
 	std::set<AsciiString> seenSides;
 
@@ -278,7 +330,7 @@ void PopulatePlayerTemplateComboBox(Int comboBox, GameWindow *comboArray[], Game
 		seenSides.insert(side);
 
 		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], TheGameText->fetch(side), def->getColor());
-		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)c);
+		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, reinterpret_cast<void *>(static_cast<intptr_t>(c)));
 	}
 	seenSides.clear();
 
@@ -287,7 +339,7 @@ void PopulatePlayerTemplateComboBox(Int comboBox, GameWindow *comboArray[], Game
 	{
 		def = TheMultiplayerSettings->getColor(PLAYERTEMPLATE_OBSERVER);
 		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], TheGameText->fetch("GUI:Observer"), def->getColor());
-		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)PLAYERTEMPLATE_OBSERVER);
+		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, reinterpret_cast<void *>(static_cast<intptr_t>(PLAYERTEMPLATE_OBSERVER)));
 	}
 	GadgetComboBoxSetSelectedPos(comboArray[comboBox], 0);
 
@@ -304,7 +356,7 @@ void PopulateTeamComboBox(Int comboBox, GameWindow *comboArray[], GameInfo *myGa
 
 	MultiplayerColorDefinition *def = TheMultiplayerSettings->getColor(PLAYERTEMPLATE_RANDOM);
 	Int newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], TheGameText->fetch("Team:0"), def->getColor());
-	GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)-1);
+	GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, reinterpret_cast<void *>(static_cast<intptr_t>(-1)));
 
 	if (isObserver)
 	{
@@ -318,7 +370,7 @@ void PopulateTeamComboBox(Int comboBox, GameWindow *comboArray[], GameInfo *myGa
 		teamStr.format("Team:%d", c + 1);
 		teamName = TheGameText->fetch(teamStr.str());
 		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], teamName, def->getColor());
-		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)c);
+		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, reinterpret_cast<void *>(static_cast<intptr_t>(c)));
 	}
 	GadgetComboBoxSetSelectedPos(comboArray[comboBox], 0);
 }
@@ -335,14 +387,15 @@ void PopulateStartingCashComboBox(GameWindow *comboBox, GameInfo *myGame)
 {
   GadgetComboBoxReset(comboBox);
 
-  const MultiplayerStartingMoneyList & startingCashMap = TheMultiplayerSettings->getStartingMoneyList(); 
+  const MultiplayerStartingMoneyList & startingCashMap = TheMultiplayerSettings->getStartingMoneyList();
   Int currentSelectionIndex = -1;
-  
-  for ( MultiplayerStartingMoneyList::const_iterator it = startingCashMap.begin(); it != startingCashMap.end(); it++ )
+
+  MultiplayerStartingMoneyList::const_iterator it = startingCashMap.begin();
+  for ( ; it != startingCashMap.end(); it++ )
   {
-    Int newIndex = GadgetComboBoxAddEntry(comboBox, formatMoneyForStartingCashComboBox( *it ), 
+    Int newIndex = GadgetComboBoxAddEntry(comboBox, formatMoneyForStartingCashComboBox( *it ),
                                           comboBox->winGetEnabled() ? comboBox->winGetEnabledTextColor() : comboBox->winGetDisabledTextColor());
-    GadgetComboBoxSetItemData(comboBox, newIndex, (void *)it->countMoney());
+    GadgetComboBoxSetItemData(comboBox, newIndex, reinterpret_cast<void *>(static_cast<uintptr_t>(it->countMoney())));
 
     if ( myGame->getStartingCash().amountEqual( *it ) )
     {
@@ -353,9 +406,9 @@ void PopulateStartingCashComboBox(GameWindow *comboBox, GameInfo *myGame)
   if ( currentSelectionIndex == -1 )
   {
     DEBUG_CRASH( ("Current selection for starting cash not found in list") );
-    currentSelectionIndex = GadgetComboBoxAddEntry(comboBox, formatMoneyForStartingCashComboBox( myGame->getStartingCash() ), 
+    currentSelectionIndex = GadgetComboBoxAddEntry(comboBox, formatMoneyForStartingCashComboBox( myGame->getStartingCash() ),
                                           comboBox->winGetEnabled() ? comboBox->winGetEnabledTextColor() : comboBox->winGetDisabledTextColor());
-    GadgetComboBoxSetItemData(comboBox, currentSelectionIndex, (void *)it->countMoney() );
+    GadgetComboBoxSetItemData(comboBox, currentSelectionIndex, reinterpret_cast<void *>(static_cast<uintptr_t>(it->countMoney())) );
   }
 
   GadgetComboBoxSetSelectedPos(comboBox, currentSelectionIndex);
@@ -368,7 +421,7 @@ void PopulateStartingCashComboBox(GameWindow *comboBox, GameInfo *myGame)
 //-------------------------------------------------------------------------------------------------
 void UpdateSlotList( GameInfo *myGame, GameWindow *comboPlayer[],
 										GameWindow *comboColor[], GameWindow *comboPlayerTemplate[],
-										GameWindow *comboTeam[], GameWindow *buttonAccept[], 
+										GameWindow *comboTeam[], GameWindow *buttonAccept[],
 										GameWindow *buttonStart, GameWindow *buttonMapStartPosition[] )
 {
 	if(!AreSlotListUpdatesEnabled())
@@ -391,13 +444,14 @@ void UpdateSlotList( GameInfo *myGame, GameWindow *comboPlayer[],
 		for( int i =0; i < MAX_SLOTS; i++ )
 		{
 			GameSlot * slot = myGame->getSlot(i);
+
 			// if i'm host, enable the controls for AI
-			if(myGame->amIHost() && slot && slot->isAI())
+			if(myGame->amIHost() && slot->isAI())
 			{
 				EnableAcceptControls(TRUE, myGame, comboPlayer, comboColor, comboPlayerTemplate,
 					comboTeam, buttonAccept, buttonStart, buttonMapStartPosition, i);
 			}
-			else if (slot && myGame->getLocalSlotNum() == i)
+			else if (myGame->getLocalSlotNum() == i)
 			{
 				if(slot->isAccepted() && !myGame->amIHost())
 				{
@@ -416,14 +470,14 @@ void UpdateSlotList( GameInfo *myGame, GameWindow *comboPlayer[],
 							comboTeam, buttonAccept, buttonStart, buttonMapStartPosition);
 					}
 				}
-				
+
 			}
 			else if(myGame->amIHost())
 			{
 				EnableAcceptControls(FALSE, myGame, comboPlayer, comboColor, comboPlayerTemplate,
 					comboTeam, buttonAccept, buttonStart, buttonMapStartPosition, i);
 			}
-			if(slot && slot->isHuman())
+			if(slot->isHuman())
 			{
 				UnicodeString newName = slot->getName();
 				UnicodeString oldName = GadgetComboBoxGetText(comboPlayer[i]);
@@ -437,14 +491,14 @@ void UpdateSlotList( GameInfo *myGame, GameWindow *comboPlayer[],
 				//Color In the little accepted boxes
 					if(slot->isAccepted())
 					{
-						if(BitTest(buttonAccept[i]->winGetStatus(), WIN_STATUS_IMAGE	))
+						if(BitIsSet(buttonAccept[i]->winGetStatus(), WIN_STATUS_IMAGE	))
 							buttonAccept[i]->winEnable(TRUE);
 						else
 							GadgetButtonSetEnabledColor(buttonAccept[i], acceptTrueColor );
 					}
 					else
 					{
-						if(BitTest(buttonAccept[i]->winGetStatus(), WIN_STATUS_IMAGE	))
+						if(BitIsSet(buttonAccept[i]->winGetStatus(), WIN_STATUS_IMAGE	))
 							buttonAccept[i]->winEnable(FALSE);
 						else
 							GadgetButtonSetEnabledColor(buttonAccept[i], acceptFalseColor );
@@ -452,7 +506,7 @@ void UpdateSlotList( GameInfo *myGame, GameWindow *comboPlayer[],
 				}
 			}
 			else
-			{				
+			{
 				GadgetComboBoxSetSelectedPos(comboPlayer[i], slot->getState(), TRUE);
         if( buttonAccept &&  buttonAccept[i] )
 				  buttonAccept[i]->winHide(TRUE);
@@ -468,15 +522,25 @@ void UpdateSlotList( GameInfo *myGame, GameWindow *comboPlayer[],
 				if (comboPlayer[i])
 					comboPlayer[i]->winEnable( FALSE );
 			}
-			//if( i == myGame->getLocalSlotNum())
-      if((comboColor[i] != NULL) && BitTest(comboColor[i]->winGetStatus(), WIN_STATUS_ENABLED))
+			// Re-populate the color combo for EVERY slot, not just
+			// enabled ones (the ones the local player can edit).
+			// Disabled combos belong to remote players, and their
+			// slot color can change between updates as the host
+			// rebroadcasts the slot list — without re-populating
+			// the combo, a remote player who picks a launcher-
+			// supplied custom color would never get a "Custom"
+			// entry synthesized for their disabled dropdown, and
+			// the selection loop below would silently fail to find
+			// a matching entry. Re-population is cheap (~8 entries)
+			// and unconditional now.
+			if (comboColor[i] != nullptr)
 				PopulateColorComboBox(i, comboColor, myGame, myGame->getConstSlot(i)->getPlayerTemplate() == PLAYERTEMPLATE_OBSERVER);
 			Int max, idx;
-			if (comboColor[i] != NULL) {
+			if (comboColor[i] != nullptr) {
 				max = GadgetComboBoxGetLength(comboColor[i]);
 				for (idx=0; idx<max; ++idx)
 				{
-					Int color = (Int)GadgetComboBoxGetItemData(comboColor[i], idx);
+					Int color = static_cast<Int>(reinterpret_cast<intptr_t>(GadgetComboBoxGetItemData(comboColor[i], idx)));
 					if (color == slot->getColor())
 					{
 						GadgetComboBoxSetSelectedPos(comboColor[i], idx, TRUE);
@@ -485,11 +549,11 @@ void UpdateSlotList( GameInfo *myGame, GameWindow *comboPlayer[],
 				}
 			}
 
-			if (comboTeam[i] != NULL) {
+			if (comboTeam[i] != nullptr) {
 				max = GadgetComboBoxGetLength(comboTeam[i]);
 				for (idx=0; idx<max; ++idx)
 				{
-					Int team = (Int)GadgetComboBoxGetItemData(comboTeam[i], idx);
+					Int team = static_cast<Int>(reinterpret_cast<intptr_t>(GadgetComboBoxGetItemData(comboTeam[i], idx)));
 					if (team == slot->getTeamNumber())
 					{
 						GadgetComboBoxSetSelectedPos(comboTeam[i], idx, TRUE);
@@ -498,11 +562,11 @@ void UpdateSlotList( GameInfo *myGame, GameWindow *comboPlayer[],
 				}
 			}
 
-			if (comboPlayerTemplate[i] != NULL) {
+			if (comboPlayerTemplate[i] != nullptr) {
 				max = GadgetComboBoxGetLength(comboPlayerTemplate[i]);
 				for (idx=0; idx<max; ++idx)
 				{
-					Int playerTemplate = (Int)GadgetComboBoxGetItemData(comboPlayerTemplate[i], idx);
+					Int playerTemplate = static_cast<Int>(reinterpret_cast<intptr_t>(GadgetComboBoxGetItemData(comboPlayerTemplate[i], idx)));
 					if (playerTemplate == slot->getPlayerTemplate())
 					{
 						GadgetComboBoxSetSelectedPos(comboPlayerTemplate[i], idx, TRUE);

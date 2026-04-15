@@ -28,7 +28,7 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
-#include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 #include "Common/GameEngine.h"
 #include "Common/MessageStream.h"
@@ -49,30 +49,33 @@
 static NameKeyType buttonBack = NAMEKEY_INVALID;
 static NameKeyType buttonOK = NAMEKEY_INVALID;
 static NameKeyType listboxMap = NAMEKEY_INVALID;
-static GameWindow *parent = NULL;
-static GameWindow *mapList = NULL;
+static GameWindow *parent = nullptr;
+static GameWindow *mapList = nullptr;
 
 static NameKeyType radioButtonSystemMapsID = NAMEKEY_INVALID;
 static NameKeyType radioButtonUserMapsID = NAMEKEY_INVALID;
 
-static GameWindow *buttonMapStartPosition[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
-																								NULL,NULL,NULL,NULL };
+static GameWindow *buttonMapStartPosition[MAX_SLOTS] = {0};
 static NameKeyType buttonMapStartPositionID[MAX_SLOTS] = { NAMEKEY_INVALID,NAMEKEY_INVALID,
 																									NAMEKEY_INVALID,NAMEKEY_INVALID,
 																										NAMEKEY_INVALID,NAMEKEY_INVALID,
 																										NAMEKEY_INVALID,NAMEKEY_INVALID };
 
-static GameWindow *winMapPreview = NULL;
+static GameWindow *winMapPreview = nullptr;
 static NameKeyType winMapPreviewID = NAMEKEY_INVALID;
 
 static void NullifyControls()
 {
-	mapList = NULL;
-	winMapPreview = NULL;
-	parent = NULL;
+	parent = nullptr;
+	mapList = nullptr;
+	if (winMapPreview)
+	{
+		winMapPreview->winSetUserData(nullptr);
+		winMapPreview = nullptr;
+	}
 	for (Int i=0; i<MAX_SLOTS; ++i)
 	{
-		buttonMapStartPosition[i] = NULL;
+		buttonMapStartPosition[i] = nullptr;
 	}
 }
 
@@ -96,7 +99,7 @@ static void mapListTooltipFunc(GameWindow *window,
 		return;
 	}
 
-	Int imageItemData = (Int)GadgetListBoxGetItemData(window, row, 1);
+	Int imageItemData = static_cast<Int>(reinterpret_cast<intptr_t>(GadgetListBoxGetItemData(window, row, 1)));
 	UnicodeString tooltip;
 	switch (imageItemData)
 	{
@@ -122,123 +125,49 @@ static void mapListTooltipFunc(GameWindow *window,
 
 // PUBLIC FUNCTIONS ///////////////////////////////////////////////////////////////////////////////
 void positionStartSpots( AsciiString mapName, GameWindow *buttonMapStartPositions[], GameWindow *mapWindow);
-void skirmishPositionStartSpots( void );
-void skirmishUpdateSlotList( void );
+void skirmishPositionStartSpots();
+void skirmishUpdateSlotList();
 void showSkirmishGameOptionsUnderlyingGUIElements( Bool show )
-{                          
-	AsciiString parentName( "SkirmishGameOptionsMenu.wnd:SkirmishGameOptionsMenuParent" );
-	NameKeyType parentID = TheNameKeyGenerator->nameToKey( parentName );
-	GameWindow *parent = TheWindowManager->winGetWindowFromId( NULL, parentID );
+{
+	NameKeyType parentID = TheNameKeyGenerator->nameToKey( "SkirmishGameOptionsMenu.wnd:SkirmishGameOptionsMenuParent" );
+	GameWindow *parent = TheWindowManager->winGetWindowFromId( nullptr, parentID );
 	if (!parent)
 		return;
 
-	// hide some GUI elements of the screen underneath
-	GameWindow *win;
+	// Each lookup may return nullptr when the WND has been revamped and a
+	// previously-required control was renamed or removed. Tolerate missing
+	// controls rather than crashing in winHide / winEnable.
+	auto hideByName = [&](const char* name) {
+		GameWindow* w = TheWindowManager->winGetWindowFromId(
+			parent, TheNameKeyGenerator->nameToKey(const_cast<char*>(name)));
+		if (w) w->winHide(!show);
+	};
+	auto enableByName = [&](const char* name) {
+		GameWindow* w = TheWindowManager->winGetWindowFromId(
+			parent, TheNameKeyGenerator->nameToKey(const_cast<char*>(name)));
+		if (w) w->winEnable(show);
+	};
 
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:MapWindow") );
-	win->winHide( !show );
-
-	//win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:StaticTextTitle") );
-	//win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:StaticTextTeam") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:StaticTextFaction") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:StaticTextColor") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxTeam0") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxTeam1") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxTeam2") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxTeam3") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxTeam4") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxTeam5") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxTeam6") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxTeam7") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxColor0") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxColor1") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxColor2") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxColor3") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxColor4") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxColor5") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxColor6") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxColor7") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxPlayerTemplate0") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxPlayerTemplate1") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxPlayerTemplate2") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxPlayerTemplate3") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxPlayerTemplate4") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxPlayerTemplate5") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxPlayerTemplate6") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ComboBoxPlayerTemplate7") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:TextEntryMapDisplay") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ButtonSelectMap") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ButtonStart") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:StaticTextMapPreview") );
-	win->winHide( !show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ButtonReset") );
-	win->winEnable( show );
-
-	win	= TheWindowManager->winGetWindowFromId( parent, TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:ButtonBack") );
-	win->winEnable( show );
+	hideByName("SkirmishGameOptionsMenu.wnd:MapWindow");
+	hideByName("SkirmishGameOptionsMenu.wnd:StaticTextTeam");
+	hideByName("SkirmishGameOptionsMenu.wnd:StaticTextFaction");
+	hideByName("SkirmishGameOptionsMenu.wnd:StaticTextColor");
+	for (Int i = 0; i < MAX_SLOTS; i++)
+	{
+		AsciiString nm;
+		nm.format("SkirmishGameOptionsMenu.wnd:ComboBoxTeam%d", i);
+		hideByName(nm.str());
+		nm.format("SkirmishGameOptionsMenu.wnd:ComboBoxColor%d", i);
+		hideByName(nm.str());
+		nm.format("SkirmishGameOptionsMenu.wnd:ComboBoxPlayerTemplate%d", i);
+		hideByName(nm.str());
+	}
+	hideByName("SkirmishGameOptionsMenu.wnd:TextEntryMapDisplay");
+	hideByName("SkirmishGameOptionsMenu.wnd:ButtonSelectMap");
+	hideByName("SkirmishGameOptionsMenu.wnd:ButtonStart");
+	hideByName("SkirmishGameOptionsMenu.wnd:StaticTextMapPreview");
+	enableByName("SkirmishGameOptionsMenu.wnd:ButtonReset");
+	enableByName("SkirmishGameOptionsMenu.wnd:ButtonBack");
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -248,9 +177,8 @@ void SkirmishMapSelectMenuInit( WindowLayout *layout, void *userData )
 {
 
 	// set keyboard focus to main parent
-	AsciiString parentName( "SkirmishMapSelectMenu.wnd:SkrimishMapSelectMenuParent" );
-	NameKeyType parentID = TheNameKeyGenerator->nameToKey( parentName );
-	parent = TheWindowManager->winGetWindowFromId( NULL, parentID );
+	NameKeyType parentID = TheNameKeyGenerator->nameToKey( "SkirmishMapSelectMenu.wnd:SkrimishMapSelectMenuParent" );
+	parent = TheWindowManager->winGetWindowFromId( nullptr, parentID );
 
 	TheWindowManager->winSetFocus( parent );
 
@@ -263,13 +191,13 @@ void SkirmishMapSelectMenuInit( WindowLayout *layout, void *userData )
 		usesSystemMapDir = mmd->m_isOfficial;
 	}
 
-	winMapPreviewID = TheNameKeyGenerator->nameToKey( AsciiString("SkirmishMapSelectMenu.wnd:WinMapPreview") );
+	winMapPreviewID = TheNameKeyGenerator->nameToKey( "SkirmishMapSelectMenu.wnd:WinMapPreview" );
 	winMapPreview = TheWindowManager->winGetWindowFromId(parent, winMapPreviewID);
 
 
-	buttonBack = TheNameKeyGenerator->nameToKey( AsciiString("SkirmishMapSelectMenu.wnd:ButtonBack") );
-	buttonOK = TheNameKeyGenerator->nameToKey( AsciiString("SkirmishMapSelectMenu.wnd:ButtonOK") );
-	listboxMap = TheNameKeyGenerator->nameToKey( AsciiString("SkirmishMapSelectMenu.wnd:ListboxMap") );
+	buttonBack = TheNameKeyGenerator->nameToKey( "SkirmishMapSelectMenu.wnd:ButtonBack" );
+	buttonOK = TheNameKeyGenerator->nameToKey( "SkirmishMapSelectMenu.wnd:ButtonOK" );
+	listboxMap = TheNameKeyGenerator->nameToKey( "SkirmishMapSelectMenu.wnd:ListboxMap" );
 
 	radioButtonSystemMapsID = TheNameKeyGenerator->nameToKey( "SkirmishMapSelectMenu.wnd:RadioButtonSystemMaps" );
 	radioButtonUserMapsID = TheNameKeyGenerator->nameToKey( "SkirmishMapSelectMenu.wnd:RadioButtonUserMaps" );
@@ -294,8 +222,7 @@ void SkirmishMapSelectMenuInit( WindowLayout *layout, void *userData )
 	showSkirmishGameOptionsUnderlyingGUIElements(FALSE);
 
 	// get the listbox window
-	AsciiString listString( "SkirmishMapSelectMenu.wnd:ListboxMap" );
-	NameKeyType mapListID = TheNameKeyGenerator->nameToKey( listString );
+	NameKeyType mapListID = TheNameKeyGenerator->nameToKey( "SkirmishMapSelectMenu.wnd:ListboxMap" );
 	mapList = TheWindowManager->winGetWindowFromId( parent, mapListID );
 	if( mapList )
 	{
@@ -313,7 +240,7 @@ void SkirmishMapSelectMenuInit( WindowLayout *layout, void *userData )
 		mapList->winSetTooltipFunc(mapListTooltipFunc);
 	}
 
-}  // end SkirmishMapSelectMenuInit
+}
 
 //-------------------------------------------------------------------------------------------------
 /** MapSelect menu shutdown method */
@@ -323,13 +250,13 @@ void SkirmishMapSelectMenuShutdown( WindowLayout *layout, void *userData )
 
 	// hide menu
 	layout->hide( TRUE );
-	
+
 	NullifyControls();
-	
+
 	// our shutdown is complete
 	TheShell->shutdownComplete( layout );
 
-}  // end LanMapSelectMenuShutdown
+}
 
 //-------------------------------------------------------------------------------------------------
 /** MapSelect menu update method */
@@ -337,7 +264,7 @@ void SkirmishMapSelectMenuShutdown( WindowLayout *layout, void *userData )
 void SkirmishMapSelectMenuUpdate( WindowLayout *layout, void *userData )
 {
 
-}  // end SkirmishMapSelectMenuUpdate
+}
 
 //-------------------------------------------------------------------------------------------------
 /** Map select menu input callback */
@@ -346,7 +273,7 @@ WindowMsgHandledType SkirmishMapSelectMenuInput( GameWindow *window, UnsignedInt
 																				 WindowMsgData mData1, WindowMsgData mData2 )
 {
 
-	switch( msg ) 
+	switch( msg )
 	{
 
 		// --------------------------------------------------------------------------------------------
@@ -361,45 +288,44 @@ WindowMsgHandledType SkirmishMapSelectMenuInput( GameWindow *window, UnsignedInt
 				// ----------------------------------------------------------------------------------------
 				case KEY_ESC:
 				{
-					
+
 					//
 					// send a simulated selected event to the parent window of the
 					// back/exit button
 					//
-					if( BitTest( state, KEY_STATE_UP ) )
+					if( BitIsSet( state, KEY_STATE_UP ) )
 					{
-						AsciiString buttonName( "SkirmishMapSelectMenu.wnd:ButtonBack" );
-						NameKeyType buttonID = TheNameKeyGenerator->nameToKey( buttonName );
+						NameKeyType buttonID = TheNameKeyGenerator->nameToKey( "SkirmishMapSelectMenu.wnd:ButtonBack" );
 						GameWindow *button = TheWindowManager->winGetWindowFromId( window, buttonID );
 
-						TheWindowManager->winSendSystemMsg( window, GBM_SELECTED, 
+						TheWindowManager->winSendSystemMsg( window, GBM_SELECTED,
 																								(WindowMsgData)button, buttonID );
 
-					}  // end if
+					}
 
 					// don't let key fall through anywhere else
 					return MSG_HANDLED;
 
-				}  // end escape
+				}
 
-			}  // end switch( key )
+			}
 
-		}  // end char
+		}
 
-	}  // end switch( msg )
+	}
 
 	return MSG_IGNORED;
 
-}  // end SkirmishMapSelectMenuInput
+}
 
 //-------------------------------------------------------------------------------------------------
 /** MapSelect menu window system callback */
 //-------------------------------------------------------------------------------------------------
-WindowMsgHandledType SkirmishMapSelectMenuSystem( GameWindow *window, UnsignedInt msg, 
+WindowMsgHandledType SkirmishMapSelectMenuSystem( GameWindow *window, UnsignedInt msg,
 																				  WindowMsgData mData1, WindowMsgData mData2 )
 {
-	
-	switch( msg ) 
+
+	switch( msg )
 	{
 
 		// --------------------------------------------------------------------------------------------
@@ -407,7 +333,7 @@ WindowMsgHandledType SkirmishMapSelectMenuSystem( GameWindow *window, UnsignedIn
 		{
 			break;
 
-		}  // end create
+		}
 
 		//---------------------------------------------------------------------------------------------
 		case GWM_DESTROY:
@@ -415,7 +341,7 @@ WindowMsgHandledType SkirmishMapSelectMenuSystem( GameWindow *window, UnsignedIn
 			NullifyControls();
 			break;
 
-		}  // end case
+		}
 
 		// --------------------------------------------------------------------------------------------
 		case GWM_INPUT_FOCUS:
@@ -427,23 +353,23 @@ WindowMsgHandledType SkirmishMapSelectMenuSystem( GameWindow *window, UnsignedIn
 
 			return MSG_HANDLED;
 
-		}  // end input
+		}
 
 		//---------------------------------------------------------------------------------------------
 		case GLM_DOUBLE_CLICKED:
 			{
 				GameWindow *control = (GameWindow *)mData1;
 				Int controlID = control->winGetWindowId();
-				if( controlID == listboxMap ) 
+				if( controlID == listboxMap )
 				{
 					int rowSelected = mData2;
-				
+
 					if (rowSelected >= 0)
 					{
 						GadgetListBoxSetSelected( control, rowSelected );
 						GameWindow *button = TheWindowManager->winGetWindowFromId( window, buttonOK );
 
-						TheWindowManager->winSendSystemMsg( window, GBM_SELECTED, 
+						TheWindowManager->winSendSystemMsg( window, GBM_SELECTED,
 																								(WindowMsgData)button, buttonOK );
 					}
 				}
@@ -456,7 +382,7 @@ WindowMsgHandledType SkirmishMapSelectMenuSystem( GameWindow *window, UnsignedIn
 
 				GameWindow *control = (GameWindow *)mData1;
 				Int controlID = control->winGetWindowId();
-				if( controlID == listboxMap ) 
+				if( controlID == listboxMap )
 				{
 					int rowSelected = mData2;
 					if( rowSelected < 0 )
@@ -524,14 +450,18 @@ WindowMsgHandledType SkirmishMapSelectMenuSystem( GameWindow *window, UnsignedIn
 			{
 				showSkirmishGameOptionsUnderlyingGUIElements(TRUE);
 
-				skirmishMapSelectLayout->destroyWindows();
-				skirmishMapSelectLayout->deleteInstance();
-				skirmishMapSelectLayout = NULL;
+				if (skirmishMapSelectLayout)
+				{
+					skirmishMapSelectLayout->destroyWindows();
+					deleteInstance(skirmishMapSelectLayout);
+					skirmishMapSelectLayout = nullptr;
+				}
+
 				skirmishPositionStartSpots();
 				//TheShell->pop();
 				//do you need this ??
 				//PostToLanGameOptions( MAP_BACK );
-			}  // end if
+			}
 			else if ( controlID == buttonOK )
 			{
 
@@ -586,23 +516,26 @@ WindowMsgHandledType SkirmishMapSelectMenuSystem( GameWindow *window, UnsignedIn
 				skirmishPositionStartSpots();
 				skirmishUpdateSlotList();
 
-				skirmishMapSelectLayout->destroyWindows();
-				skirmishMapSelectLayout->deleteInstance();
-				skirmishMapSelectLayout = NULL;
+				if (skirmishMapSelectLayout)
+				{
+					skirmishMapSelectLayout->destroyWindows();
+					deleteInstance(skirmishMapSelectLayout);
+					skirmishMapSelectLayout = nullptr;
+				}
 					//TheShell->pop();
 
-				}  // end if
-			}  // end else if
+				}
+			}
 
 			break;
 
-		}  // end selected
+		}
 
 		default:
 			return MSG_IGNORED;
 
-	}  // end switch
+	}
 
 	return MSG_HANDLED;
 
-}  // end SkirmishMapSelectMenuSystem*/
+}

@@ -6,34 +6,11 @@
 **	it under the terms of the GNU General Public License as published by
 **	the Free Software Foundation, either version 3 of the License, or
 **	(at your option) any later version.
-**
-**	This program is distributed in the hope that it will be useful,
-**	but WITHOUT ANY WARRANTY; without even the implied warranty of
-**	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-**	GNU General Public License for more details.
-**
-**	You should have received a copy of the GNU General Public License
-**	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-////////////////////////////////////////////////////////////////////////////////
-//																																						//
-//  (c) 2001-2003 Electronic Arts Inc.																				//
-//																																						//
-////////////////////////////////////////////////////////////////////////////////
-
-// FILE: Win32GameEngine.h ////////////////////////////////////////////////////////////////////////
-// Author: Colin Day, April 2001
-// Description: 
-//   Device implementation of the game engine ... this is, of course, the 
-//   highest level of the game that creates the necessary interfaces to the 
-//   devices we need
-///////////////////////////////////////////////////////////////////////////////////////////////////
+// FILE: Win32GameEngine.h - rewritten for D3D11
 
 #pragma once
-
-#ifndef __WIN32GAMEENGINE_H_
-#define __WIN32GAMEENGINE_H_
 
 #include "Common/GameEngine.h"
 #include "GameLogic/GameLogic.h"
@@ -44,64 +21,67 @@
 #include "W3DDevice/Common/W3DModuleFactory.h"
 #include "W3DDevice/GameLogic/W3DGameLogic.h"
 #include "W3DDevice/GameClient/W3DGameClient.h"
-#include "W3DDevice/GameClient/W3DWebBrowser.h"
-#include "W3DDevice/Common/W3DFunctionLexicon.h"
-#include "W3DDevice/Common/W3DRadar.h"
 #include "W3DDevice/Common/W3DFunctionLexicon.h"
 #include "W3DDevice/Common/W3DThingFactory.h"
+#include "GameClient/ParticleSys.h"
+#include "Common/Radar.h"
 
+// Factory function for D3D11 radar (defined in D3D11Shims.cpp)
+extern Radar* CreateD3D11Radar();
 
+// D3D11 particle system manager - renders particles as camera-facing billboard quads
+class D3D11ParticleSystemManager : public ParticleSystemManager
+{
+public:
+	Int getOnScreenParticleCount() override { return m_onScreenParticleCount; }
+	void doParticles(RenderInfoClass &rinfo) override;
+	void queueParticleRender() override {}
+};
 
-
-//-------------------------------------------------------------------------------------------------
-/** Class declaration for the Win32 game engine */
-//-------------------------------------------------------------------------------------------------
 class Win32GameEngine : public GameEngine
 {
-
 public:
-
 	Win32GameEngine();
 	virtual ~Win32GameEngine();
 
-	virtual void init( void );															///< initialization 
-	virtual void reset( void );															///< reset engine
-	virtual void update( void );														///< update the game engine
-	virtual void serviceWindowsOS( void );									///< allow windows maintenance in background
+	virtual void init();
+	virtual void reset();
+	virtual void update();
+	virtual void serviceWindowsOS();
 
 protected:
-
-	virtual GameLogic *createGameLogic( void );							///< factory for game logic
- 	virtual GameClient *createGameClient( void );						///< factory for game client
-	virtual ModuleFactory *createModuleFactory( void );			///< factory for creating modules
-	virtual ThingFactory *createThingFactory( void );				///< factory for the thing factory
-	virtual FunctionLexicon *createFunctionLexicon( void ); ///< factory for function lexicon
-	virtual LocalFileSystem *createLocalFileSystem( void ); ///< factory for local file system
-	virtual ArchiveFileSystem *createArchiveFileSystem( void );	///< factory for archive file system
-	virtual NetworkInterface *createNetwork( void );				///< Factory for the network
-	virtual Radar *createRadar( void );											///< Factory for radar
-	virtual WebBrowser *createWebBrowser( void );						///< Factory for embedded browser
-	virtual AudioManager *createAudioManager( void );				///< Factory for audio device
-	virtual ParticleSystemManager* createParticleSystemManager( void );
-
+	virtual GameLogic *createGameLogic();
+	virtual GameClient *createGameClient();
+	virtual ModuleFactory *createModuleFactory();
+	virtual ThingFactory *createThingFactory();
+	virtual FunctionLexicon *createFunctionLexicon();
+	virtual LocalFileSystem *createLocalFileSystem();
+	virtual ArchiveFileSystem *createArchiveFileSystem();
+	virtual NetworkInterface *createNetwork();
+	virtual Radar *createRadar();
+	virtual WebBrowser *createWebBrowser();
+	virtual AudioManager *createAudioManager();
+	virtual ParticleSystemManager* createParticleSystemManager();
 
 protected:
 	UINT m_previousErrorMode;
-};  // end Win32GameEngine
+};
 
-// INLINE -----------------------------------------------------------------------------------------
-inline GameLogic *Win32GameEngine::createGameLogic( void ) { return NEW W3DGameLogic; }
-inline GameClient *Win32GameEngine::createGameClient( void ) { return NEW W3DGameClient; }
-inline ModuleFactory *Win32GameEngine::createModuleFactory( void ) { return NEW W3DModuleFactory; }
-inline ThingFactory *Win32GameEngine::createThingFactory( void ) { return NEW W3DThingFactory; }
-inline FunctionLexicon *Win32GameEngine::createFunctionLexicon( void ) { return NEW W3DFunctionLexicon; }
-inline LocalFileSystem *Win32GameEngine::createLocalFileSystem( void ) { return NEW Win32LocalFileSystem; }
-inline ArchiveFileSystem *Win32GameEngine::createArchiveFileSystem( void ) { return NEW Win32BIGFileSystem; }
-inline ParticleSystemManager* Win32GameEngine::createParticleSystemManager( void ) { return NEW W3DParticleSystemManager; }
+inline GameLogic *Win32GameEngine::createGameLogic() { return NEW W3DGameLogic; }
+inline GameClient *Win32GameEngine::createGameClient() { return NEW W3DGameClient; }
+inline ModuleFactory *Win32GameEngine::createModuleFactory() { return NEW W3DModuleFactory; }
+inline ThingFactory *Win32GameEngine::createThingFactory() { return NEW W3DThingFactory; }
+inline FunctionLexicon *Win32GameEngine::createFunctionLexicon() { return NEW W3DFunctionLexicon; }
+inline LocalFileSystem *Win32GameEngine::createLocalFileSystem() { return NEW Win32LocalFileSystem; }
+inline ArchiveFileSystem *Win32GameEngine::createArchiveFileSystem() { return NEW Win32BIGFileSystem; }
+inline NetworkInterface *Win32GameEngine::createNetwork() { return NetworkInterface::createNetwork(); }
+#ifdef USE_SDL
+#include "SDLAudioManager.h"
+inline AudioManager *Win32GameEngine::createAudioManager() { return NEW SDLAudioManager; }
+#else
+inline AudioManager *Win32GameEngine::createAudioManager() { return NEW MilesAudioManager; }
+#endif
 
-inline NetworkInterface *Win32GameEngine::createNetwork( void ) { return NetworkInterface::createNetwork(); }
-inline Radar *Win32GameEngine::createRadar( void ) { return NEW W3DRadar; }
-inline WebBrowser *Win32GameEngine::createWebBrowser( void ) { return NEW CComObject<W3DWebBrowser>; }
-inline AudioManager *Win32GameEngine::createAudioManager( void ) { return NEW MilesAudioManager; }
- 
-#endif  // end __WIN32GAMEENGINE_H_
+inline Radar *Win32GameEngine::createRadar() { return CreateD3D11Radar(); }
+inline WebBrowser *Win32GameEngine::createWebBrowser() { return nullptr; }
+inline ParticleSystemManager* Win32GameEngine::createParticleSystemManager() { return NEW D3D11ParticleSystemManager; }

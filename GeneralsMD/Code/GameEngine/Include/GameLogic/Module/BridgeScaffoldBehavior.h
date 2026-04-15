@@ -29,16 +29,13 @@
 
 #pragma once
 
-#ifndef __BRIDGE_SCAFFOLD_BEHAVIOR_H_
-#define __BRIDGE_SCAFFOLD_BEHAVIOR_H_
-
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "GameLogic/Module/BehaviorModule.h"
 #include "GameLogic/Module/UpdateModule.h"
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
-enum ScaffoldTargetMotion
+enum ScaffoldTargetMotion : Int
 {
 	STM_STILL,
 	STM_RISE,
@@ -58,8 +55,8 @@ public:
 														 const Coord3D *riseToPos,
 														 const Coord3D *buildPos ) = 0;
 	virtual void setMotion( ScaffoldTargetMotion targetMotion ) = 0;
-	virtual ScaffoldTargetMotion getCurrentMotion( void ) = 0;
-	virtual void reverseMotion( void ) = 0;
+	virtual ScaffoldTargetMotion getCurrentMotion() = 0;
+	virtual void reverseMotion() = 0;
 	virtual void setLateralSpeed( Real lateralSpeed ) = 0;
 	virtual void setVerticalSpeed( Real verticalSpeed ) = 0;
 
@@ -83,15 +80,15 @@ public:
 	virtual BridgeScaffoldBehaviorInterface* getBridgeScaffoldBehaviorInterface() { return this; }
 
 	// update methods
-	virtual UpdateSleepTime update( void );
+	virtual UpdateSleepTime update();
 
 	// bridge scaffold interface methods
 	virtual void setPositions( const Coord3D *createPos,
 														 const Coord3D *riseToPos,
 														 const Coord3D *buildPos );
 	virtual void setMotion( ScaffoldTargetMotion targetMotion );
-	virtual ScaffoldTargetMotion getCurrentMotion( void ) { return m_targetMotion; }
-	virtual void reverseMotion( void );
+	virtual ScaffoldTargetMotion getCurrentMotion() { return m_targetMotion; }
+	virtual void reverseMotion();
 	virtual void setLateralSpeed( Real lateralSpeed ) { m_lateralSpeed = lateralSpeed; }
 	virtual void setVerticalSpeed( Real verticalSpeed ) { m_verticalSpeed = verticalSpeed; }
 
@@ -100,8 +97,8 @@ public:
 
 protected:
 
-	void doVerticalMotion( void );				///< do rise/sink vertical motion
-	void doLateralmotion( void );					///< do lateral motion
+	void doVerticalMotion();				///< do rise/sink vertical motion
+	void doLateralmotion();					///< do lateral motion
 
 	ScaffoldTargetMotion m_targetMotion;	///< which way our motion should be going (build up, still, tear down etc)
 	Coord3D m_createPos;									///< initial position of object creation (in ground)
@@ -112,6 +109,3 @@ protected:
 	Coord3D m_targetPos;									///< current target position for our motion type
 
 };
-
-
-#endif  // end __BRIDGE_SCAFFOLD_BEHAVIOR_H_

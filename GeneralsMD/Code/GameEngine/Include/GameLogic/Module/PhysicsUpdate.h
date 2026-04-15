@@ -28,18 +28,15 @@
 
 #pragma once
 
-#ifndef _PHYSICSUPDATE_H_
-#define _PHYSICSUPDATE_H_
-
 #include "Common/AudioEventRTS.h"
 #include "Common/GameAudio.h"
 #include "GameLogic/Module/BehaviorModule.h"
 #include "GameLogic/Module/UpdateModule.h"
 #include "GameLogic/Module/CollideModule.h"
 
-enum ObjectID;
+enum ObjectID : Int;
 
-enum PhysicsTurningType
+enum PhysicsTurningType : Int
 {
 	TURN_NEGATIVE = -1,
 	TURN_NONE = 0,
@@ -66,7 +63,7 @@ public:
 	Real	m_minFallSpeedForDamage;
 	Real	m_fallHeightDamageFactor;
 	Real	m_pitchRollYawFactor;
-  
+
 	const WeaponTemplate* m_vehicleCrashesIntoBuildingWeaponTemplate;
 	const WeaponTemplate* m_vehicleCrashesIntoNonBuildingWeaponTemplate;
 
@@ -75,10 +72,10 @@ public:
 };
 
 //-------------------------------------------------------------------------------------------------
-/** 
+/**
  * Simple rigid body physics update module
  */
-class PhysicsBehavior : public UpdateModule, 
+class PhysicsBehavior : public UpdateModule,
 												public CollideModuleInterface
 {
 
@@ -153,9 +150,9 @@ public:
 
 	Bool isMotive() const;
 
-	PhysicsTurningType getTurning(void) const { return m_turning; }		///< 0 = not turning, -1 = turn negative, 1 = turn positive.
+	PhysicsTurningType getTurning() const { return m_turning; }		///< 0 = not turning, -1 = turn negative, 1 = turn positive.
 	void setTurning(PhysicsTurningType turning) { m_turning = turning; }
-	
+
 	/** This is a force scrub for velocity when ai objects are colliding. */
 	void scrubVelocity2D( Real desiredVelocity );
 
@@ -195,7 +192,7 @@ public:
 
 	void setBounceSound(const AudioEventRTS* bounceSound);
 	const AudioEventRTS* getBounceSound() { return m_bounceSound ? &m_bounceSound->m_event : TheAudio->getValidSilentAudioEvent(); }
-	
+
 	/**
 		Reset all values (vel, accel, etc) to starting values.
 		You should ALMOST NEVER use this; it's intended for cases where you need
@@ -209,12 +206,12 @@ public:
 	void setIgnoreCollisionsWith(const Object* obj);
 	Bool isIgnoringCollisionsWith(ObjectID id) const;
 
-	inline Bool getAllowCollideForce() const { return getFlag(ALLOW_COLLIDE_FORCE); }
+	Bool getAllowCollideForce() const { return getFlag(ALLOW_COLLIDE_FORCE); }
 
 protected:
 
 	/*
-		Physics runs in its own phase, after AI, but before all others. 
+		Physics runs in its own phase, after AI, but before all others.
 		It's actually quite important that AI (the thing that drives Locomotors) and Physics
 		run in the same order, relative to each other, for a given object; otherwise,
 		interesting oscillations can occur in some situations, with friction being applied
@@ -237,13 +234,13 @@ protected:
 
 	Bool checkForOverlapCollision(Object *other);
 
-	void testStunnedUnitForDestruction(void);
+	void testStunnedUnitForDestruction();
 
 private:
 
 	enum PhysicsFlagsType
 	{
-		// Note - written out in save/load xfer; don't change these numbers.  
+		// Note - written out in save/load xfer; don't change these numbers.
 		STICK_TO_GROUND									= 0x0001,
 		ALLOW_BOUNCE										= 0x0002,
 		APPLY_FRICTION2D_WHEN_AIRBORNE	= 0x0004,
@@ -259,14 +256,14 @@ private:
 	};
 
 	/*
-		Note: these are private because you should never manipulate these directly, 
+		Note: these are private because you should never manipulate these directly,
 		even if you are a subclass... if you want to change the acceleration, you
-		MUST call applyForce(). 
+		MUST call applyForce().
 	*/
 	Real												m_yawRate;								///< rate of rotation around up vector
 	Real												m_rollRate;								///< rate of rotation around forward vector
 	Real												m_pitchRate;							///< rate or rotation around side vector
-	DynamicAudioEventRTS*				m_bounceSound;						///< The sound for when this thing bounces, or NULL
+	DynamicAudioEventRTS*				m_bounceSound;						///< The sound for when this thing bounces, or nullptr
 	Coord3D											m_accel;									///< current acceleration
 	Coord3D											m_prevAccel;							///< last frame's acceleration
 	Coord3D											m_vel;										///< current velocity
@@ -282,11 +279,12 @@ private:
 	Real												m_extraFriction;					///< modifier to friction(s)
 	ProjectileUpdateInterface*	m_pui;
 	mutable Real								m_velMag;									///< magnitude of cur vel (recalced when m_vel changes)
+	mutable Real								m_forwardSpeed2D;					///< cached forward speed 2D (recalced when m_vel changes)
 
-	Bool												m_originalAllowBounce;		///< orignal state of allow bounce
+	Bool												m_originalAllowBounce;		///< original state of allow bounce
 
-	inline void setFlag(PhysicsFlagsType f, Bool set) { if (set) m_flags |= f; else m_flags &= ~f; }
-	inline Bool getFlag(PhysicsFlagsType f) const { return (m_flags & f) != 0; }
+	void setFlag(PhysicsFlagsType f, Bool set) { if (set) m_flags |= f; else m_flags &= ~f; }
+	Bool getFlag(PhysicsFlagsType f) const { return (m_flags & f) != 0; }
 
 
 };
@@ -307,6 +305,3 @@ inline ObjectID PhysicsBehavior::getLastCollidee() const
 {
 	return m_lastCollidee;
 }
-
-#endif // _PHYSICSUPDATE_H_
-

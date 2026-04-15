@@ -30,9 +30,6 @@
 
 #pragma once
 
-#ifndef _SPAWN_BEHAVIOR_H_
-#define _SPAWN_BEHAVIOR_H_
-
 const Int SPAWN_UPDATE_RATE = LOGICFRAMES_PER_SECOND/2; ///< This is a low priority module that only needs to be called every this many frames
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
@@ -44,7 +41,7 @@ const Int SPAWN_UPDATE_RATE = LOGICFRAMES_PER_SECOND/2; ///< This is a low prior
 
 //-------------------------------------------------------------------------------------------------
 class ThingTemplate;
-enum CanAttackResult;
+enum CanAttackResult : Int;
 
 //-------------------------------------------------------------------------------------------------
 class SpawnBehaviorModuleData : public BehaviorModuleData
@@ -63,43 +60,40 @@ public:
 	DamageTypeFlags m_damageTypesToPropagateToSlaves;
 	std::vector<AsciiString> m_spawnTemplateNameData;
 	DieMuxData m_dieMuxData;
-	
+
 	SpawnBehaviorModuleData()
 	{
 		m_spawnNumberData = 0;
 		m_spawnReplaceDelayData = 0;
-		//Added By Sadullah Nader
-		//Initialization(s) inserted
 		m_spawnStartNumberData = 0;
-		//
 		m_initialBurst = 0;
 		m_isOneShotData = FALSE;
 		m_canReclaimOrphans = FALSE;
-		m_aggregateHealth = FALSE;	
+		m_aggregateHealth = FALSE;
 		m_exitByBudding = FALSE;
 		m_spawnTemplateNameData.clear();
 		m_spawnedRequireSpawner = FALSE;
 		m_slavesHaveFreeWill = FALSE;
 	}
 
-	static void buildFieldParse(MultiIniFieldParse& p) 
+	static void buildFieldParse(MultiIniFieldParse& p)
 	{
     BehaviorModuleData::buildFieldParse(p);
-		static const FieldParse dataFieldParse[] = 
+		static const FieldParse dataFieldParse[] =
 		{
-			{ "SpawnNumber",							INI::parseInt,										NULL, offsetof( SpawnBehaviorModuleData, m_spawnNumberData ) },
-			{ "SpawnReplaceDelay",				INI::parseDurationUnsignedInt,		NULL, offsetof( SpawnBehaviorModuleData, m_spawnReplaceDelayData ) },
-			{ "OneShot",									INI::parseBool,										NULL, offsetof( SpawnBehaviorModuleData, m_isOneShotData ) },
-			{ "CanReclaimOrphans",				INI::parseBool,										NULL,	offsetof( SpawnBehaviorModuleData, m_canReclaimOrphans ) },
-			{ "AggregateHealth",  				INI::parseBool,										NULL, offsetof( SpawnBehaviorModuleData, m_aggregateHealth ) },		
-			{ "ExitByBudding",    				INI::parseBool,										NULL, offsetof( SpawnBehaviorModuleData, m_exitByBudding ) },		
-			{ "SpawnTemplateName",				INI::parseAsciiStringVectorAppend,NULL, offsetof( SpawnBehaviorModuleData, m_spawnTemplateNameData ) },
-			{ "SpawnedRequireSpawner",		INI::parseBool,										NULL,	offsetof( SpawnBehaviorModuleData, m_spawnedRequireSpawner ) },
-			{ "PropagateDamageTypesToSlavesWhenExisting",   INI::parseDamageTypeFlags, NULL, offsetof( SpawnBehaviorModuleData, m_damageTypesToPropagateToSlaves ) },
-			{ "InitialBurst",				      INI::parseInt,						        NULL, offsetof( SpawnBehaviorModuleData, m_initialBurst ) },			
-			{ "SlavesHaveFreeWill",				INI::parseBool,										NULL, offsetof( SpawnBehaviorModuleData, m_slavesHaveFreeWill ) },
+			{ "SpawnNumber",							INI::parseInt,										nullptr, offsetof( SpawnBehaviorModuleData, m_spawnNumberData ) },
+			{ "SpawnReplaceDelay",				INI::parseDurationUnsignedInt,		nullptr, offsetof( SpawnBehaviorModuleData, m_spawnReplaceDelayData ) },
+			{ "OneShot",									INI::parseBool,										nullptr, offsetof( SpawnBehaviorModuleData, m_isOneShotData ) },
+			{ "CanReclaimOrphans",				INI::parseBool,										nullptr,	offsetof( SpawnBehaviorModuleData, m_canReclaimOrphans ) },
+			{ "AggregateHealth",  				INI::parseBool,										nullptr, offsetof( SpawnBehaviorModuleData, m_aggregateHealth ) },
+			{ "ExitByBudding",    				INI::parseBool,										nullptr, offsetof( SpawnBehaviorModuleData, m_exitByBudding ) },
+			{ "SpawnTemplateName",				INI::parseAsciiStringVectorAppend,nullptr, offsetof( SpawnBehaviorModuleData, m_spawnTemplateNameData ) },
+			{ "SpawnedRequireSpawner",		INI::parseBool,										nullptr,	offsetof( SpawnBehaviorModuleData, m_spawnedRequireSpawner ) },
+			{ "PropagateDamageTypesToSlavesWhenExisting",   INI::parseDamageTypeFlags, nullptr, offsetof( SpawnBehaviorModuleData, m_damageTypesToPropagateToSlaves ) },
+			{ "InitialBurst",				      INI::parseInt,						        nullptr, offsetof( SpawnBehaviorModuleData, m_initialBurst ) },
+			{ "SlavesHaveFreeWill",				INI::parseBool,										nullptr, offsetof( SpawnBehaviorModuleData, m_slavesHaveFreeWill ) },
 			{ 0, 0, 0, 0 }
-			
+
 		};
     p.add(dataFieldParse);
 		p.add(DieMuxData::getFieldParse(), offsetof( SpawnBehaviorModuleData, m_dieMuxData ));
@@ -147,8 +141,8 @@ public:
 	// virtual destructor prototype provided by memory pool declaration
 
 	// module methods
-	static Int getInterfaceMask( void ) { return (MODULEINTERFACE_UPDATE) | (MODULEINTERFACE_DIE) | (MODULEINTERFACE_DAMAGE); }
-	virtual void onDelete( void );
+	static Int getInterfaceMask() { return (MODULEINTERFACE_UPDATE) | (MODULEINTERFACE_DIE) | (MODULEINTERFACE_DAMAGE); }
+	virtual void onDelete();
 	virtual UpdateModuleInterface *getUpdate() { return this; }
 	virtual DieModuleInterface *getDie() { return this; }
 	virtual DamageModuleInterface *getDamage() { return this; }
@@ -163,8 +157,8 @@ public:
 	// damage methods
 	virtual void onDamage( DamageInfo *damageInfo );
 	virtual void onHealing( DamageInfo *damageInfo ) { }
-	virtual void onBodyDamageStateChange( const DamageInfo* damageInfo, 
-																				BodyDamageType oldState, 
+	virtual void onBodyDamageStateChange( const DamageInfo* damageInfo,
+																				BodyDamageType oldState,
 																				BodyDamageType newState) { }
 
 	// SpawnBehaviorInterface methods
@@ -189,7 +183,7 @@ public:
 	void stopSpawning();	///< Whoever owns this module may want to turn it off
 	void startSpawning();	///< Whoever owns this module may want to turn it on
 
-	void computeAggregateStates(void);
+	void computeAggregateStates();
 //	void notifySelfTasking( Bool isSelfTasking );
 
 private:
@@ -213,9 +207,9 @@ private:
 	intList m_replacementTimes;			///< A list of frame times that I need to create new spawns
 	objectIDList m_spawnIDs;				///< My darling little spawns.  I need to keep track of them explicitly for the Slave type stuff
 	Bool m_active;									///< Am I currently turned on
-	
 
-	Object *reclaimOrphanSpawn( void );		///< find existing orphaned spawn object if present
+
+	Object *reclaimOrphanSpawn();		///< find existing orphaned spawn object if present
 
 	Bool m_aggregateHealth;			///< should I calc an offset for the healthbox, averaging all my spawn
 	Bool m_initialBurstTimesInited;
@@ -227,5 +221,3 @@ private:
 	std::vector<AsciiString>::const_iterator m_templateNameIterator;
 
 };
-
-#endif

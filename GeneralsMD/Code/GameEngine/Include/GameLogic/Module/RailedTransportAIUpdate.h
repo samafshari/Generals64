@@ -29,9 +29,6 @@
 
 #pragma once
 
-#ifndef __RAILED_TRANSPORT_AI_UPDATE_H_
-#define __RAILED_TRANSPORT_AI_UPDATE_H_
-
 // USER INCLUDES //////////////////////////////////////////////////////////////////////////////////
 #include "GameLogic/Module/AIUpdate.h"
 
@@ -45,7 +42,7 @@ class RailedTransportAIUpdateModuleData : public AIUpdateModuleData
 
 public:
 
-	RailedTransportAIUpdateModuleData( void );
+	RailedTransportAIUpdateModuleData();
 
 	static void buildFieldParse( MultiIniFieldParse &p );
 
@@ -68,7 +65,7 @@ public:
 
 	// AIUpdate interface methods
 	virtual void aiDoCommand( const AICommandParms *parms );
-	virtual UpdateSleepTime update( void );
+	virtual UpdateSleepTime update();
 
 protected:
 
@@ -78,8 +75,8 @@ protected:
 
 	// our methods
 	void setInTransit( Bool inTransit );
-	void loadWaypointData( void );
-	void pickAndMoveToInitialLocation( void );
+	void loadWaypointData();
+	void pickAndMoveToInitialLocation();
 
 	// our data
 	Bool m_inTransit;								///< in transit
@@ -96,7 +93,3 @@ protected:
 	Bool m_waypointDataLoaded;		///< TRUE once we've searched the map to load m_path
 
 };
-
-
-#endif  // end __RAILED_TRANSPORT_AI_UPDATE_H_
-

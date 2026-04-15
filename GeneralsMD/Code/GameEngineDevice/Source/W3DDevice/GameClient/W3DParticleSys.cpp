@@ -26,46 +26,42 @@
 // W3D Particle System implementation
 // Author: Michael S. Booth, November 2001
 
-#include "common/GlobalData.h"
+#include "Common/GlobalData.h"
 #include "GameClient/Color.h"
 #include "W3DDevice/GameClient/W3DParticleSys.h"
 #include "W3DDevice/GameClient/W3DAssetManager.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"
-#include "W3DDevice/GameClient/heightmap.h"
+#include "W3DDevice/GameClient/HeightMap.h"
 #include "W3DDevice/GameClient/W3DSmudge.h"
 #include "W3DDevice/GameClient/W3DSnow.h"
-#include "WW3D2/Camera.h"
+#include "WW3D2/camera.h"
+#include <vector>
+#include <algorithm>
 
-#ifdef _INTERNAL
-// for occasional debugging...
-//#pragma optimize("", off)
-//#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
-#endif
 
-//------------------------------------------------------------------------------ Performance Timers 
+//------------------------------------------------------------------------------ Performance Timers
 //#include "Common/PerfMetrics.h"
 //#include "Common/PerfTimer.h"
 
 //-------------------------------------------------------------------------------------------------
 
 
-#include "Common/QuickTrig.h"
 W3DParticleSystemManager::W3DParticleSystemManager()
 {
-	m_pointGroup = NULL;
-	m_streakLine = NULL;
-	m_posBuffer = NULL;
-	m_RGBABuffer = NULL;
-	m_sizeBuffer = NULL;
-	m_angleBuffer = NULL;
+	m_pointGroup = nullptr;
+	m_streakLine = nullptr;
+	m_posBuffer = nullptr;
+	m_RGBABuffer = nullptr;
+	m_sizeBuffer = nullptr;
+	m_angleBuffer = nullptr;
 	m_readyToRender = false;
 
 	m_onScreenParticleCount = 0;
 
 	m_pointGroup = NEW PointGroupClass();
-	//m_streakLine = NULL;
+	//m_streakLine = nullptr;
 	m_streakLine = NEW StreakLineClass();
-	
+
 	m_posBuffer = NEW_REF( ShareBufferClass<Vector3>, (MAX_POINTS_PER_GROUP, "W3DParticleSystemManager::m_posBuffer") );
 	m_RGBABuffer = NEW_REF( ShareBufferClass<Vector4>, (MAX_POINTS_PER_GROUP, "W3DParticleSystemManager::m_RGBABuffer") );
 	m_sizeBuffer = NEW_REF( ShareBufferClass<float>, (MAX_POINTS_PER_GROUP, "W3DParticleSystemManager::m_sizeBuffer") );
@@ -147,21 +143,31 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 
 	m_fieldParticleCount = 0;
 
-	SmudgeSet *set=NULL;
+	SmudgeSet *set=nullptr;
 	if (TheSmudgeManager)
 		set=TheSmudgeManager->addSmudgeSet();	//global smudge set through which all smudges are rendered.
 
+	// Sort particle systems back-to-front for correct alpha blending
 	ParticleSystemManager::ParticleSystemList &particleSysList = TheParticleSystemManager->getAllParticleSystems();
-	for( ParticleSystemManager::ParticleSystemListIt it = particleSysList.begin(); it != particleSysList.end(); ++it)
+	Vector3 camPosition = rinfo.Camera.Get_Position();
+	struct SysDist { ParticleSystem* sys; float distSq; };
+	std::vector<SysDist> sortedSystems;
+	sortedSystems.reserve(64);
+	for (auto it = particleSysList.begin(); it != particleSysList.end(); ++it)
 	{
-		ParticleSystem *sys = (*it);
-		if (!sys) {
-			continue;
-		}
+		ParticleSystem* s = *it;
+		if (!s || s->isUsingDrawables()) continue;
+		Coord3D sysPos;
+		s->getPosition(&sysPos);
+		float dx = sysPos.x - camPosition.X, dy = sysPos.y - camPosition.Y, dz = sysPos.z - camPosition.Z;
+		sortedSystems.push_back({ s, dx*dx + dy*dy + dz*dz });
+	}
+	std::sort(sortedSystems.begin(), sortedSystems.end(),
+		[](const SysDist& a, const SysDist& b) { return a.distSq > b.distSq; });
 
-		// only look at particle/point style systems
-		if (sys->isUsingDrawables())
-			continue;
+	for (const auto& sd : sortedSystems)
+	{
+		ParticleSystem *sys = sd.sys;
 
 		//temporary hack that checks if texture name starts with "SMUD" - if so, we can assume it's a smudge type
 		if (/*sys->isUsingSmudge()*/ *((DWORD *)sys->getParticleTypeName().str()) == 0x44554D53)
@@ -227,10 +233,10 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 				continue;
 
 			m_fieldParticleCount += ( sys->getPriority() == AREA_EFFECT && sys->m_isGroundAligned != FALSE );
-			
+
 			//@todo lorenzen sez: use pointer arithmetic for these arrays
 			personalities[count] = p->getPersonality();
-			
+
 			posArray[count].X = pos->x;
 			posArray[count].Y = pos->y;
 			posArray[count].Z = pos->z;
@@ -242,9 +248,9 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 			RGBAArray[count].Y = color->green;
 			RGBAArray[count].Z = color->blue;
 			RGBAArray[count].W = p->getAlpha();
-		
+
 			angleArray[count] = (uint8)(p->getAngle() * 255.0f / (2.0f * PI));
-			
+
 			if (++count == MAX_POINTS_PER_GROUP)
 				break;
 		}
@@ -253,8 +259,8 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 			continue;	//this system has no particles to render
 
 		TextureClass *texture = W3DDisplay::m_assetManager->Get_Texture( sys->getParticleTypeName().str() );
-		
-		if ( m_streakLine && sys->isUsingStreak() && (count >= 2) ) 
+
+		if ( m_streakLine && sys->isUsingStreak() && (count >= 2) )
 		{
 			m_streakLine->Reset_Line();
 
@@ -275,9 +281,9 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 					m_streakLine->Set_Shader( ShaderClass::_PresetMultiplicativeSpriteShader );
 					break;
 			}
-			
+
 			//UPDATE THE STREAK'S ARRAYS
-			m_streakLine->Set_LocsWidthsColors( 
+			m_streakLine->Set_LocsWidthsColors(
 				count,
 				m_posBuffer->Get_Array(),
 				m_sizeBuffer->Get_Array(),
@@ -296,9 +302,9 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 
 			//RENDER STREAK!
 			m_streakLine->Render( rinfo );
-			
+
 		}
-		else 
+		else
 		{
 
 			WWASSERT( m_pointGroup );
@@ -328,7 +334,7 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 
 				/// @todo Use both QUADS and TRIS for particles
 				m_pointGroup->Set_Point_Mode( PointGroupClass::QUADS );
-				m_pointGroup->Set_Arrays( m_posBuffer, m_RGBABuffer, NULL, m_sizeBuffer, m_angleBuffer, NULL, count );
+				m_pointGroup->Set_Arrays( m_posBuffer, m_RGBABuffer, nullptr, m_sizeBuffer, m_angleBuffer, nullptr, count );
 				m_pointGroup->Set_Billboard(sys->shouldBillboard());
 
 				/// @todo Support animated texture particles
@@ -342,7 +348,7 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 				}
 				else
 					m_pointGroup->Render( rinfo );
-		
+
 			}
 		}
 
@@ -369,7 +375,7 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 	*/
 
 
-	}// next system
+	}
 
 		/// @todo lorenzen sez: this should be debug only:
 	TheParticleSystemManager->setOnScreenParticleCount(m_onScreenParticleCount);

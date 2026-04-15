@@ -29,9 +29,6 @@
 
 #pragma once
 
-#ifndef __POWERPLANTUPDATE_H_
-#define __POWERPLANTUPDATE_H_
-
 // USER INCLUDES //////////////////////////////////////////////////////////////////////////////////
 #include "GameLogic/Module/UpdateModule.h"
 
@@ -42,16 +39,16 @@ class PowerPlantUpdateModuleData : public UpdateModuleData
 
 public:
 
-	PowerPlantUpdateModuleData( void );
+	PowerPlantUpdateModuleData();
 
-	static void buildFieldParse(MultiIniFieldParse& p) 
+	static void buildFieldParse(MultiIniFieldParse& p)
 	{
     UpdateModuleData::buildFieldParse( p );
 
-		static const FieldParse dataFieldParse[] = 
+		static const FieldParse dataFieldParse[] =
 		{
 
-			{ "RodsExtendTime", INI::parseDurationUnsignedInt, NULL, offsetof( PowerPlantUpdateModuleData, m_rodsExtendTime ) },
+			{ "RodsExtendTime", INI::parseDurationUnsignedInt, nullptr, offsetof( PowerPlantUpdateModuleData, m_rodsExtendTime ) },
 			{ 0, 0, 0, 0 }
 		};
     p.add(dataFieldParse);
@@ -92,12 +89,10 @@ public:
 	virtual PowerPlantUpdateInterface* getPowerPlantUpdateInterface() { return this; }
 
 	void extendRods( Bool extend );									 ///< extend the rods from this object
-	virtual UpdateSleepTime update( void ); ///< Here's the actual work of Upgrading
+	virtual UpdateSleepTime update(); ///< Here's the actual work of Upgrading
 
 protected:
 
 	Bool m_extended;										 ///< TRUE when extend is all done
 
 };
-
-#endif  // end __POWERPLANTUPDATE_H_

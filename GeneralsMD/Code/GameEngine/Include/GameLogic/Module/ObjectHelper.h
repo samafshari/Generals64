@@ -24,13 +24,10 @@
 
 // FILE: ObjectHelper.h ///////////////////////////////////////////////////////////////////////////
 // Author: Steven Johnson, Colin Day - September 202
-// Desc:   Object helpder
+// Desc:   Object helper
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #pragma once
-
-#ifndef __OBJECT_HELPER_H_
-#define __OBJECT_HELPER_H_
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "GameLogic/Module/UpdateModule.h"
@@ -47,13 +44,13 @@ protected:
 	// snapshot methods
 	virtual void crc( Xfer *xfer );
 	virtual void xfer( Xfer *xfer );
-	virtual void loadPostProcess( void );
+	virtual void loadPostProcess();
 
 public:
 
-	ObjectHelper( Thing *thing, const ModuleData *modData ) : 
-		UpdateModule( thing, modData ) 
-	{ 
+	ObjectHelper( Thing *thing, const ModuleData *modData ) :
+		UpdateModule( thing, modData )
+	{
 		setWakeFrame(getObject(), UPDATE_SLEEP_FOREVER);
 	}
 
@@ -64,5 +61,3 @@ public:
 	void sleepUntil(UnsignedInt when);
 
 };
-
-#endif  // end __OBJECT_HELPER_H_

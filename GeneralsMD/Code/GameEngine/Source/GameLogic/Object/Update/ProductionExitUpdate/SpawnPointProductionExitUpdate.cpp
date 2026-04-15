@@ -28,7 +28,7 @@
 //					This instance puts guys at named bones.
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-#include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 #include "Common/Xfer.h"
 #include "GameClient/Drawable.h"
@@ -39,7 +39,7 @@
 #include "GameLogic/TerrainLogic.h"
 #include "GameLogic/Module/SpawnPointProductionExitUpdate.h"
 
-#include "WWMath/Matrix3D.h"		///< @todo Replace with our own matrix library
+#include "WWMath/matrix3d.h"		///< @todo Replace with our own matrix library
 
 //-------------------------------------------------------------------------------------------------
 SpawnPointProductionExitUpdate::SpawnPointProductionExitUpdate( Thing *thing, const ModuleData* moduleData ) : UpdateModule( thing, moduleData )
@@ -71,7 +71,8 @@ void SpawnPointProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoor
 	Object *creationObject = getObject();
 	if (creationObject)
 	{
-		for( Int positionIndex = 0; positionIndex < m_spawnPointCount; positionIndex++ )
+		Int positionIndex = 0;
+		for( ; positionIndex < m_spawnPointCount; positionIndex++ )
 		{
 			if( m_spawnPointOccupier[positionIndex] == INVALID_ID )
 				break;
@@ -102,7 +103,7 @@ void SpawnPointProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoor
 		newObj->setOrientation( createAngle );
 		newObj->setLayer(creationObject->getLayer());
 
-		/** @todo This really should be automatically wrapped up in an actication sequence
+		/** @todo This really should be automatically wrapped up in an activation sequence
 		for objects in general */
 		// tell the AI about it
 		TheAI->pathfinder()->addObjectToPathfindMap( newObj );
@@ -145,22 +146,23 @@ void SpawnPointProductionExitUpdate::initializeBonePositions()
 	Drawable *myDrawable = me->getDrawable();
 
 	// This fundamental failure will result in this never ever thinking it is free
-	if( myDrawable == NULL )
+	if( myDrawable == nullptr )
 		return;
 
 	Matrix3D boneTransforms[MAX_SPAWN_POINTS];
-	for( Int matrixIndex = 0; matrixIndex < MAX_SPAWN_POINTS; matrixIndex++ )
+	Int matrixIndex = 0;
+	for( ; matrixIndex < MAX_SPAWN_POINTS; matrixIndex++ )
 		boneTransforms[matrixIndex].Make_Identity();
 
 	// Get all the bones of the right name
 	const SpawnPointProductionExitUpdateModuleData* md = getSpawnPointProductionExitUpdateModuleData();
-	m_spawnPointCount = myDrawable->getPristineBonePositions( md->m_spawnPointBoneNameData.str(), 1, NULL, boneTransforms, MAX_SPAWN_POINTS );
+	m_spawnPointCount = myDrawable->getPristineBonePositions( md->m_spawnPointBoneNameData.str(), 1, nullptr, boneTransforms, MAX_SPAWN_POINTS );
 
 	for( matrixIndex = 0; matrixIndex < m_spawnPointCount; matrixIndex++ )
 	{
 		Matrix3D *currentTransform = &(boneTransforms[matrixIndex]);
 		// Convert their matrix one by one
-		me->convertBonePosToWorldPos( NULL, currentTransform, NULL, currentTransform );
+		me->convertBonePosToWorldPos( nullptr, currentTransform, nullptr, currentTransform );
 
 		// Then save the world coord and angle
 		m_worldCoordSpawnPoints[matrixIndex].x = currentTransform->Get_X_Translation();
@@ -181,7 +183,7 @@ void SpawnPointProductionExitUpdate::revalidateOccupiers()
 		if( m_spawnPointOccupier[positionIndex] == INVALID_ID )
 			continue;
 
-		if( TheGameLogic->findObjectByID( m_spawnPointOccupier[positionIndex] ) == NULL )
+		if( TheGameLogic->findObjectByID( m_spawnPointOccupier[positionIndex] ) == nullptr )
 			m_spawnPointOccupier[positionIndex] = INVALID_ID;
 	}
 }
@@ -195,7 +197,7 @@ void SpawnPointProductionExitUpdate::crc( Xfer *xfer )
 	// extend base class
 	UpdateModule::crc( xfer );
 
-}  // end crc
+}
 
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
@@ -225,15 +227,15 @@ void SpawnPointProductionExitUpdate::xfer( Xfer *xfer )
 	// spawn point occupants
 	xfer->xferUser( &m_spawnPointOccupier, sizeof( ObjectID ) * MAX_SPAWN_POINTS );
 
-}  // end xfer
+}
 
 // ------------------------------------------------------------------------------------------------
 /** Load post process */
 // ------------------------------------------------------------------------------------------------
-void SpawnPointProductionExitUpdate::loadPostProcess( void )
+void SpawnPointProductionExitUpdate::loadPostProcess()
 {
 
 	// extend base class
 	UpdateModule::loadPostProcess();
 
-}  // end loadPostProcess
+}

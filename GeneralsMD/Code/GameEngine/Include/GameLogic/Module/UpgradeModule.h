@@ -29,9 +29,6 @@
 
 #pragma once
 
-#ifndef __UPGRADE_MODULE_H_
-#define __UPGRADE_MODULE_H_
-
 #include "Common/Module.h"
 #include "Common/STLTypedefs.h"
 #include "Common/Upgrade.h"
@@ -54,12 +51,12 @@ class UpgradeModuleInterface
 public:
 
  	virtual Bool isAlreadyUpgraded() const = 0;
-	virtual Bool attemptUpgrade( UpgradeMaskType keyMask ) = 0;
-	virtual Bool wouldUpgrade( UpgradeMaskType keyMask ) const = 0;
-	virtual Bool resetUpgrade( UpgradeMaskType keyMask ) = 0;
+	virtual Bool attemptUpgrade( const UpgradeMaskType& keyMask ) = 0;
+	virtual Bool wouldUpgrade( const UpgradeMaskType& keyMask ) const = 0;
+	virtual Bool resetUpgrade( const UpgradeMaskType& keyMask ) = 0;
 	virtual Bool isSubObjectsUpgrade() = 0;
 	virtual void forceRefreshUpgrade() = 0;
-	virtual Bool testUpgradeConditions( UpgradeMaskType keyMask ) const = 0;
+	virtual Bool testUpgradeConditions( const UpgradeMaskType& keyMask ) const = 0;
 
 };
 
@@ -71,7 +68,7 @@ public:
 	mutable std::vector<AsciiString>	m_activationUpgradeNames;
 	mutable std::vector<AsciiString>	m_conflictingUpgradeNames;
 	mutable std::vector<AsciiString>	m_removalUpgradeNames;
-	
+
 	mutable const FXList*							m_fxListUpgrade;
 	mutable UpgradeMaskType						m_activationMask;				///< Activation only supports a single name currently
 	mutable UpgradeMaskType						m_conflictingMask;			///< Conflicts support multiple listings, and they are an OR
@@ -84,21 +81,21 @@ public:
 		m_conflictingUpgradeNames.clear();
 		m_removalUpgradeNames.clear();
 
-		m_fxListUpgrade = NULL;
+		m_fxListUpgrade = nullptr;
 		m_activationMask.clear();
 		m_conflictingMask.clear();
 		m_requiresAllTriggers = false;
 	}
 
-	static const FieldParse* getFieldParse() 
+	static const FieldParse* getFieldParse()
 	{
-		static const FieldParse dataFieldParse[] = 
+		static const FieldParse dataFieldParse[] =
 		{
-			{ "TriggeredBy",		INI::parseAsciiStringVector, NULL, offsetof( UpgradeMuxData, m_activationUpgradeNames ) },
-			{ "ConflictsWith",	INI::parseAsciiStringVector, NULL, offsetof( UpgradeMuxData, m_conflictingUpgradeNames ) },
-			{ "RemovesUpgrades",INI::parseAsciiStringVector, NULL, offsetof( UpgradeMuxData, m_removalUpgradeNames ) },
-			{ "FXListUpgrade",	INI::parseFXList, NULL, offsetof( UpgradeMuxData, m_fxListUpgrade ) },
-			{ "RequiresAllTriggers", INI::parseBool, NULL, offsetof( UpgradeMuxData, m_requiresAllTriggers ) },
+			{ "TriggeredBy",		INI::parseAsciiStringVector, nullptr, offsetof( UpgradeMuxData, m_activationUpgradeNames ) },
+			{ "ConflictsWith",	INI::parseAsciiStringVector, nullptr, offsetof( UpgradeMuxData, m_conflictingUpgradeNames ) },
+			{ "RemovesUpgrades",INI::parseAsciiStringVector, nullptr, offsetof( UpgradeMuxData, m_removalUpgradeNames ) },
+			{ "FXListUpgrade",	INI::parseFXList, nullptr, offsetof( UpgradeMuxData, m_fxListUpgrade ) },
+			{ "RequiresAllTriggers", INI::parseBool, nullptr, offsetof( UpgradeMuxData, m_requiresAllTriggers ) },
 			{ 0, 0, 0, 0 }
 		};
 		return dataFieldParse;
@@ -122,21 +119,21 @@ public:
 	virtual Bool isAlreadyUpgraded() const ;
 	// ***DANGER! DANGER! Don't use this, unless you are forcing an already made upgrade to refresh!!
 	virtual void forceRefreshUpgrade();
-	virtual Bool attemptUpgrade( UpgradeMaskType keyMask );
-	virtual Bool wouldUpgrade( UpgradeMaskType keyMask ) const;
-	virtual Bool resetUpgrade( UpgradeMaskType keyMask );
-	virtual Bool testUpgradeConditions( UpgradeMaskType keyMask ) const;
+	virtual Bool attemptUpgrade( const UpgradeMaskType& keyMask );
+	virtual Bool wouldUpgrade( const UpgradeMaskType& keyMask ) const;
+	virtual Bool resetUpgrade( const UpgradeMaskType& keyMask );
+	virtual Bool testUpgradeConditions( const UpgradeMaskType& keyMask ) const;
 
 protected:
 
 	void setUpgradeExecuted(Bool e) { m_upgradeExecuted = e; }
-	virtual void upgradeImplementation( ) = 0; ///< Here's the actual work of Upgrading
+	virtual void upgradeImplementation() = 0; ///< Here's the actual work of Upgrading
 	virtual void getUpgradeActivationMasks(UpgradeMaskType& activation, UpgradeMaskType& conflicting) const = 0; ///< Here's the actual work of Upgrading
 	virtual void performUpgradeFX() = 0;	///< perform the associated fx list
 	virtual Bool requiresAllActivationUpgrades() const = 0;
 	virtual Bool isSubObjectsUpgrade() = 0;
 	virtual void processUpgradeRemoval() = 0;
-	
+
 	void giveSelfUpgrade();
 
 	//
@@ -146,7 +143,7 @@ protected:
 	//
 	virtual void upgradeMuxCRC( Xfer *xfer );
 	virtual void upgradeMuxXfer( Xfer *xfer);
-	virtual void upgradeMuxLoadPostProcess( void );
+	virtual void upgradeMuxLoadPostProcess();
 
 private:
 	Bool m_upgradeExecuted;				///< Upgrade only executes once
@@ -159,7 +156,7 @@ struct UpgradeModuleData : public BehaviorModuleData
 public:
 	UpgradeMuxData				m_upgradeMuxData;
 
-	static void buildFieldParse(MultiIniFieldParse& p) 
+	static void buildFieldParse(MultiIniFieldParse& p)
 	{
     ModuleData::buildFieldParse(p);
 		p.add(UpgradeMuxData::getFieldParse(), offsetof( UpgradeModuleData, m_upgradeMuxData ));
@@ -191,7 +188,7 @@ protected:
 
 	virtual void processUpgradeRemoval()
 	{
-		// I can't take it any more.  Let the record show that I think the UpgradeMux multiple inheritence is CRAP.
+		// I can't take it any more.  Let the record show that I think the UpgradeMux multiple inheritance is CRAP.
 		getUpgradeModuleData()->m_upgradeMuxData.muxDataProcessUpgradeRemoval(getObject());
 	}
 
@@ -213,6 +210,3 @@ protected:
 };
 inline UpgradeModule::UpgradeModule( Thing *thing, const ModuleData* moduleData ) : BehaviorModule( thing, moduleData ) { }
 inline UpgradeModule::~UpgradeModule() { }
-
-
-#endif

@@ -28,9 +28,6 @@
 
 #pragma once
 
-#ifndef _DELIVER_PAYLOAD_AI_UPDATE_H_
-#define _DELIVER_PAYLOAD_AI_UPDATE_H_
-
 #include "Common/StateMachine.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameClient/RadiusDecal.h"
@@ -56,7 +53,7 @@ protected:
 //-------------------------------------------------------------------------------------------------
 class ApproachState :  public State
 {
-	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(ApproachState, "ApproachState")		
+	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(ApproachState, "ApproachState")
 	//Approaching the drop zone
 public:
 	ApproachState( StateMachine *machine ) :State( machine, "ApproachState" ) {}
@@ -73,13 +70,13 @@ EMPTY_DTOR(ApproachState)
 //-------------------------------------------------------------------------------------------------
 class DeliveringState :  public State
 {
-	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(DeliveringState, "DeliveringState")		
+	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(DeliveringState, "DeliveringState")
 	// Kickin' stuff out the door
 public:
-	DeliveringState( StateMachine *machine ) :State( machine, "DeliveringState" ) 
-	{ 
-		m_dropDelayLeft = 0; 
-		m_didOpen = false; 
+	DeliveringState( StateMachine *machine ) :State( machine, "DeliveringState" )
+	{
+		m_dropDelayLeft = 0;
+		m_didOpen = false;
 	}
 	virtual StateReturnType update();
 	virtual StateReturnType onEnter();
@@ -99,7 +96,7 @@ EMPTY_DTOR(DeliveringState)
 //-------------------------------------------------------------------------------------------------
 class ConsiderNewApproachState :  public State
 {
-	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(ConsiderNewApproachState, "ConsiderNewApproachState")		
+	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(ConsiderNewApproachState, "ConsiderNewApproachState")
 	//Should I try again?  Has own data to keep track.
 public:
 	ConsiderNewApproachState( StateMachine *machine ) : State( machine, "ConsiderNewApproachState" ), m_numberEntriesToState(0) { }
@@ -120,7 +117,7 @@ EMPTY_DTOR(ConsiderNewApproachState)
 //-------------------------------------------------------------------------------------------------
 class RecoverFromOffMapState :  public State
 {
-	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(RecoverFromOffMapState, "RecoverFromOffMapState")		
+	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(RecoverFromOffMapState, "RecoverFromOffMapState")
 public:
 	RecoverFromOffMapState( StateMachine *machine ) : State( machine, "RecoverFromOffMapState" ), m_reEntryFrame(0) { }
 	virtual StateReturnType update();
@@ -139,7 +136,7 @@ EMPTY_DTOR(RecoverFromOffMapState)
 //-------------------------------------------------------------------------------------------------
 class HeadOffMapState :  public State
 {
-	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(HeadOffMapState, "HeadOffMapState")		
+	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(HeadOffMapState, "HeadOffMapState")
 	//I'm outta here
 public:
   HeadOffMapState( StateMachine *machine ) :State( machine, "HeadOffMapState" ) { facingDirectionUponDelivery.zero(); }
@@ -150,7 +147,7 @@ protected:
 	virtual void crc( Xfer *xfer ){};
 	virtual void xfer( Xfer *xfer ){XferVersion cv = 1;	XferVersion v = cv; xfer->xferVersion( &v, cv );}
 	virtual void loadPostProcess(){};
-  
+
   Coord3D facingDirectionUponDelivery;
 };
 EMPTY_DTOR(HeadOffMapState)
@@ -158,7 +155,7 @@ EMPTY_DTOR(HeadOffMapState)
 //-------------------------------------------------------------------------------------------------
 class CleanUpState :  public State
 {
-	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(CleanUpState, "CleanUpState")		
+	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(CleanUpState, "CleanUpState")
 	//Made it off map, delete ourselves
 public:
 	CleanUpState( StateMachine *machine ) :State( machine, "CleanUpState" ) {}
@@ -207,33 +204,29 @@ public:
 		m_dropOffset.zero();
 		m_dropVariance.zero();
 		m_deliveryDecalRadius = 0;
-		// Added By Sadullah Nader
-		// Initialization missing and needed
-
 		m_putInContainerName.clear();
-		// End Add
 	}
 
-	static void buildFieldParse(MultiIniFieldParse& p) 
+	static void buildFieldParse(MultiIniFieldParse& p)
 	{
     AIUpdateModuleData::buildFieldParse(p);
 
-		static const FieldParse dataFieldParse[] = 
+		static const FieldParse dataFieldParse[] =
 		{
-			//These values represent script only reinforcements using deliverPayloadViaModuleData()! 
+			//These values represent script only reinforcements using deliverPayloadViaModuleData()!
 			//***********************************************************************************
 			//DO NOT ADD DATA HERE UNLESS YOU ARE SUPPORTING SCRIPTED TEAM REINFORCEMENT DELIVERY
 			//THESE DATA VALUES ARE SPECIFIED ONLY BY FACTIONUNIT.INI
 			//***********************************************************************************
-			{ "DoorDelay",								INI::parseDurationUnsignedInt,	NULL, offsetof( DeliverPayloadAIUpdateModuleData, m_doorDelay ) },
-			{ "PutInContainer",						INI::parseAsciiString,					NULL, offsetof( DeliverPayloadAIUpdateModuleData, m_putInContainerName ) },
-			{ "DeliveryDistance",					INI::parseReal,									NULL, offsetof( DeliverPayloadAIUpdateModuleData, m_maxDistanceToTarget ) },
-			{ "MaxAttempts",							INI::parseInt,									NULL, offsetof( DeliverPayloadAIUpdateModuleData, m_maxNumberAttempts ) },
-			{ "DropDelay",								INI::parseDurationUnsignedInt,	NULL, offsetof( DeliverPayloadAIUpdateModuleData, m_dropDelay ) },
-			{ "DropOffset",								INI::parseCoord3D,							NULL, offsetof( DeliverPayloadAIUpdateModuleData, m_dropOffset ) },
-			{ "DropVariance",							INI::parseCoord3D,							NULL, offsetof( DeliverPayloadAIUpdateModuleData, m_dropVariance ) },
-			{ "DeliveryDecal",						RadiusDecalTemplate::parseRadiusDecalTemplate,	NULL, offsetof( DeliverPayloadAIUpdateModuleData, m_deliveryDecalTemplate ) },
-			{ "DeliveryDecalRadius",			INI::parseReal,									NULL,	offsetof( DeliverPayloadAIUpdateModuleData, m_deliveryDecalRadius ) },
+			{ "DoorDelay",								INI::parseDurationUnsignedInt,	nullptr, offsetof( DeliverPayloadAIUpdateModuleData, m_doorDelay ) },
+			{ "PutInContainer",						INI::parseAsciiString,					nullptr, offsetof( DeliverPayloadAIUpdateModuleData, m_putInContainerName ) },
+			{ "DeliveryDistance",					INI::parseReal,									nullptr, offsetof( DeliverPayloadAIUpdateModuleData, m_maxDistanceToTarget ) },
+			{ "MaxAttempts",							INI::parseInt,									nullptr, offsetof( DeliverPayloadAIUpdateModuleData, m_maxNumberAttempts ) },
+			{ "DropDelay",								INI::parseDurationUnsignedInt,	nullptr, offsetof( DeliverPayloadAIUpdateModuleData, m_dropDelay ) },
+			{ "DropOffset",								INI::parseCoord3D,							nullptr, offsetof( DeliverPayloadAIUpdateModuleData, m_dropOffset ) },
+			{ "DropVariance",							INI::parseCoord3D,							nullptr, offsetof( DeliverPayloadAIUpdateModuleData, m_dropVariance ) },
+			{ "DeliveryDecal",						RadiusDecalTemplate::parseRadiusDecalTemplate,	nullptr, offsetof( DeliverPayloadAIUpdateModuleData, m_deliveryDecalTemplate ) },
+			{ "DeliveryDecalRadius",			INI::parseReal,									nullptr,	offsetof( DeliverPayloadAIUpdateModuleData, m_deliveryDecalRadius ) },
 			{ 0, 0, 0, 0 }
 		};
     p.add(dataFieldParse);
@@ -293,19 +286,14 @@ public:
 		m_inheritTransportVelocity = false;
 		m_isParachuteDirectly = FALSE;
 		m_exitPitchRate = 0.0f;
-		m_strafeFX = NULL;
+		m_strafeFX = nullptr;
 		m_strafeLength = 0.0f;
-		m_visiblePayloadWeaponTemplate = NULL;
+		m_visiblePayloadWeaponTemplate = nullptr;
 		m_selfDestructObject = FALSE;
 		m_deliveryDecalRadius = 0;
-		// Added By Sadullah Nader
-		// Initialization missing and needed  
-		
 		m_visibleDropBoneName.clear();
 		m_visiblePayloadTemplateName.clear();
 		m_visibleSubObjectName.clear();
-		
-		// End Add
 	}
 
 	static const FieldParse* getFieldParse();
@@ -328,7 +316,7 @@ public:
 	const Coord3D* getTargetPos() const { return &m_targetPos; }
 	const Coord3D* getMoveToPos() const { return &m_moveToPos; }
 	UnsignedInt getDoorDelay() const { return getDeliverPayloadAIUpdateModuleData()->m_doorDelay; }
-	Bool isDeliveringPayload() const { return m_deliverPayloadStateMachine != NULL; }
+	Bool isDeliveringPayload() const { return m_deliverPayloadStateMachine != nullptr; }
 	const ThingTemplate* getPutInContainerTemplateViaModuleData() const;
 
 	Real getAllowedDistanceToTarget() const { return m_data.m_distToTarget; }
@@ -383,6 +371,3 @@ protected:
 
 
 };
-
-#endif
-

@@ -24,12 +24,12 @@
 
 // FILE: W3DCustomEdging.cpp ////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-//                                                                          
-//                       Westwood Studios Pacific.                          
-//                                                                          
-//                       Confidential Information                           
-//                Copyright (C) 2001 - All Rights Reserved                  
-//                                                                          
+//
+//                       Westwood Studios Pacific.
+//
+//                       Confidential Information
+//                Copyright (C) 2001 - All Rights Reserved
+//
 //-----------------------------------------------------------------------------
 //
 // Project:   RTS3
@@ -43,27 +43,26 @@
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-//         Includes                                                      
+//         Includes
 //-----------------------------------------------------------------------------
+
 #include "W3DDevice/GameClient/W3DCustomEdging.h"
 
-#include <stdio.h>
-#include <string.h>
 #include <assetmgr.h>
 #include <texture.h>
-#include "common/GlobalData.h"
-#include "common/RandomValue.h"
+#include "Common/GlobalData.h"
+#include "Common/RandomValue.h"
 #include "W3DDevice/GameClient/TerrainTex.h"
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "W3DDevice/GameClient/W3DDynamicLight.h"
-#include "WW3D2/Camera.h"
-#include "WW3D2/DX8Wrapper.h"
-#include "WW3D2/DX8Renderer.h"
-#include "WW3D2/Mesh.h"
-#include "WW3D2/MeshMdl.h"
+#include "WW3D2/camera.h"
+#include "WW3D2/dx8wrapper.h"
+#include "WW3D2/dx8renderer.h"
+#include "WW3D2/mesh.h"
+#include "WW3D2/meshmdl.h"
 
 //-----------------------------------------------------------------------------
-//         Private Data                                                     
+//         Private Data
 //-----------------------------------------------------------------------------
 // A W3D shader that does alpha, texturing, tests zbuffer, doesn't update zbuffer.
 #define SC_ALPHA_DETAIL ( SHADE_CNST(ShaderClass::PASS_LEQUAL, ShaderClass::DEPTH_WRITE_DISABLE, ShaderClass::COLOR_WRITE_ENABLE, ShaderClass::SRCBLEND_SRC_ALPHA, \
@@ -95,7 +94,7 @@ static ShaderClass detailOpaqueShader(SC_DETAIL_BLEND);
 
 static ShaderClass mirrorAlphaShader(SC_ALPHA_DETAIL);
 
-// ShaderClass::PASS_ALWAYS, 
+// ShaderClass::PASS_ALWAYS,
 
 #define SC_ALPHA_2D ( SHADE_CNST(PASS_ALWAYS, DEPTH_WRITE_DISABLE, COLOR_WRITE_ENABLE, \
 	SRCBLEND_SRC_ALPHA, DSTBLEND_ONE_MINUS_SRC_ALPHA, FOG_DISABLE, GRADIENT_DISABLE, \
@@ -104,7 +103,7 @@ static ShaderClass mirrorAlphaShader(SC_ALPHA_DETAIL);
 ShaderClass ShaderClass::_PresetAlpha2DShader(SC_ALPHA_2D);
 */
 //-----------------------------------------------------------------------------
-//         Private Functions                                               
+//         Private Functions
 //-----------------------------------------------------------------------------
 
 //=============================================================================
@@ -141,7 +140,6 @@ void W3DCustomEdging::loadEdgingsInVertexAndIndexBuffers(WorldHeightMap *pMap, I
 	if (maxY >= pMap->getYExtent()) maxY = pMap->getYExtent()-1;
 	Int row;
 	Int column;
-	try {
 	for (row=minY; row<maxY-1; row++) {
 		for (column = minX; column < maxX-1; column++) {
 			Int cellNdx = column+row*pMap->getXExtent();
@@ -209,7 +207,7 @@ void W3DCustomEdging::loadEdgingsInVertexAndIndexBuffers(WorldHeightMap *pMap, I
 			UnsignedByte alpha[4];
 			float UA[4], VA[4];
 			Bool flipForBlend;
-			pMap->getAlphaUVData(column-pMap->getDrawOrgX(), row-pMap->getDrawOrgY(), UA, VA, alpha, &flipForBlend, false);
+			pMap->getAlphaUVData(column-pMap->getDrawOrgX(), row-pMap->getDrawOrgY(), UA, VA, alpha, &flipForBlend);
 
 
 			Int startVertex = m_curNumEdgingVertices;
@@ -220,9 +218,9 @@ void W3DCustomEdging::loadEdgingsInVertexAndIndexBuffers(WorldHeightMap *pMap, I
 
 					Int diffuse = TheTerrainRenderObject->getStaticDiffuse(column+i, row+j);
 					curVb->diffuse = 0x80000000 + (diffuse&0x00FFFFFF); // set alpha to 5b.
-					Real theZ; 
+					Real theZ;
 					theZ = ((float)pMap->getDataPtr()[cellNdx])*MAP_HEIGHT_SCALE;
-					Real X = (column+i)*MAP_XY_FACTOR; 
+					Real X = (column+i)*MAP_XY_FACTOR;
 					Real Y = (row+j)*MAP_XY_FACTOR;
 					curVb->u2 = uOffset + i*0.25f*range.width();
 					curVb->v2 = vOffset + (1-j)*0.25f*range.height();
@@ -248,8 +246,8 @@ void W3DCustomEdging::loadEdgingsInVertexAndIndexBuffers(WorldHeightMap *pMap, I
  				*curIb++ = startVertex + 1;
  				*curIb++ = startVertex + 1+yOffset;
 				*curIb++ = startVertex + yOffset;
-			}	
-			else 
+			}
+			else
 #endif
 			{
 				*curIb++ = startVertex;
@@ -262,15 +260,11 @@ void W3DCustomEdging::loadEdgingsInVertexAndIndexBuffers(WorldHeightMap *pMap, I
 			m_curNumEdgingIndices+=6;
 		}
 	}
-	IndexBufferExceptionFunc();
-	} catch(...) {
-		IndexBufferExceptionFunc();
-	}
 	m_anythingChanged = false;
 }
 
 //-----------------------------------------------------------------------------
-//         Public Functions                                                
+//         Public Functions
 //-----------------------------------------------------------------------------
 
 //=============================================================================
@@ -278,7 +272,7 @@ void W3DCustomEdging::loadEdgingsInVertexAndIndexBuffers(WorldHeightMap *pMap, I
 //=============================================================================
 /** Destructor. Releases w3d assets. */
 //=============================================================================
-W3DCustomEdging::~W3DCustomEdging(void)
+W3DCustomEdging::~W3DCustomEdging()
 {
 	freeEdgingBuffers();
 }
@@ -289,11 +283,11 @@ W3DCustomEdging::~W3DCustomEdging(void)
 /** Constructor. Sets m_initialized to true if it finds the w3d models it needs
 for the trees. */
 //=============================================================================
-W3DCustomEdging::W3DCustomEdging(void)
+W3DCustomEdging::W3DCustomEdging()
 {
 	m_initialized = false;
-	m_vertexEdging = NULL;
-	m_indexEdging = NULL;
+	m_vertexEdging = nullptr;
+	m_indexEdging = nullptr;
 	clearAllEdging();
 	allocateEdgingBuffers();
 	m_initialized = true;
@@ -305,7 +299,7 @@ W3DCustomEdging::W3DCustomEdging(void)
 //=============================================================================
 /** Frees the index and vertex buffers. */
 //=============================================================================
-void W3DCustomEdging::freeEdgingBuffers(void)
+void W3DCustomEdging::freeEdgingBuffers()
 {
 	REF_PTR_RELEASE(m_vertexEdging);
 	REF_PTR_RELEASE(m_indexEdging);
@@ -316,13 +310,13 @@ void W3DCustomEdging::freeEdgingBuffers(void)
 //=============================================================================
 /** Allocates the index and vertex buffers. */
 //=============================================================================
-void W3DCustomEdging::allocateEdgingBuffers(void)
+void W3DCustomEdging::allocateEdgingBuffers()
 {
 	m_vertexEdging=NEW_REF(DX8VertexBufferClass,(DX8_FVF_XYZDUV2,MAX_EDGE_VERTEX+4,DX8VertexBufferClass::USAGE_DYNAMIC));
 	m_indexEdging=NEW_REF(DX8IndexBufferClass,(2*MAX_EDGE_INDEX+4, DX8IndexBufferClass::USAGE_DYNAMIC));
 	m_curNumEdgingVertices=0;
 	m_curNumEdgingIndices=0;
-	//m_edgeTexture = MSGNEW("TextureClass") TextureClass("EdgingTemplate.tga","EdgingTemplate.tga", TextureClass::MIP_LEVELS_3);
+	//m_edgeTexture = MSGNEW("TextureClass") TextureClass("EdgingTemplate.tga","EdgingTemplate.tga", MIP_LEVELS_3);
 }
 
 //=============================================================================
@@ -330,9 +324,9 @@ void W3DCustomEdging::allocateEdgingBuffers(void)
 //=============================================================================
 /** Removes all trees. */
 //=============================================================================
-void W3DCustomEdging::clearAllEdging(void)
+void W3DCustomEdging::clearAllEdging()
 {
-	m_curNumEdgingVertices=0;				  
+	m_curNumEdgingVertices=0;
 	m_curNumEdgingIndices=0;
 	m_anythingChanged = true;
 }
@@ -345,8 +339,8 @@ void W3DCustomEdging::clearAllEdging(void)
 //=============================================================================
 /** Draws the trees.  Uses camera to cull. */
 //=============================================================================
-void W3DCustomEdging::drawEdging(WorldHeightMap *pMap, Int minX, Int maxX, Int minY, Int maxY,  
-		TextureClass * terrainTexture, TextureClass * cloudTexture, TextureClass * noiseTexture) 
+void W3DCustomEdging::drawEdging(WorldHeightMap *pMap, Int minX, Int maxX, Int minY, Int maxY,
+		TextureClass * terrainTexture, TextureClass * cloudTexture, TextureClass * noiseTexture)
 {
 	static Bool foo = false;
 	if (foo) {
@@ -363,10 +357,10 @@ void W3DCustomEdging::drawEdging(WorldHeightMap *pMap, Int minX, Int maxX, Int m
 	DX8Wrapper::Set_Index_Buffer(m_indexEdging,0);
 	DX8Wrapper::Set_Vertex_Buffer(m_vertexEdging);
 	DX8Wrapper::Set_Shader(detailAlphaTestShader);
-#ifdef _DEBUG
+#ifdef RTS_DEBUG
 	//DX8Wrapper::Set_Shader(detailShader); // shows clipping.
-#endif	
-	
+#endif
+
 	DX8Wrapper::Set_Texture(0,terrainTexture);
 	DX8Wrapper::Set_Texture(1,edgeTex);
 	DX8Wrapper::Apply_Render_State_Changes();
@@ -377,7 +371,7 @@ void W3DCustomEdging::drawEdging(WorldHeightMap *pMap, Int minX, Int maxX, Int m
 	DX8Wrapper::Draw_Triangles(	m_curEdgingIndexOffset, m_curNumEdgingIndices/3, 0,	m_curNumEdgingVertices);
 
 	DX8Wrapper::Set_Texture(0,edgeTex);
-	DX8Wrapper::Set_Texture(1, NULL);
+	DX8Wrapper::Set_Texture(1, nullptr);
 	// Draw the custom edge.
 	DX8Wrapper::Apply_Render_State_Changes();
 
@@ -391,7 +385,7 @@ void W3DCustomEdging::drawEdging(WorldHeightMap *pMap, Int minX, Int maxX, Int m
 	DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHATESTENABLE, false);	//test pixels if transparent(clipped) before rendering.
 	DX8Wrapper::Draw_Triangles(	m_curEdgingIndexOffset, m_curNumEdgingIndices/3, 0,	m_curNumEdgingVertices);
 #endif
-	DX8Wrapper::Set_Texture(1, NULL);
+	DX8Wrapper::Set_Texture(1, nullptr);
 	if (cloudTexture) {
 		DX8Wrapper::Set_Shader(detailOpaqueShader);
 		DX8Wrapper::Apply_Render_State_Changes();
@@ -420,7 +414,7 @@ void W3DCustomEdging::drawEdging(WorldHeightMap *pMap, Int minX, Int maxX, Int m
 		DX8Wrapper::Draw_Triangles(	m_curEdgingIndexOffset, m_curNumEdgingIndices/3, 0,	m_curNumEdgingVertices);
 	}
 	if (noiseTexture) {
-		DX8Wrapper::Set_Texture(1, NULL);
+		DX8Wrapper::Set_Texture(1, nullptr);
 		DX8Wrapper::Set_Texture(0,noiseTexture);
 		DX8Wrapper::Apply_Render_State_Changes();
 		DX8Wrapper::Set_Texture(1,edgeTex);

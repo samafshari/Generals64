@@ -1,0 +1,66 @@
+/*
+**	Command & Conquer Generals Zero Hour(tm)
+**	Copyright 2025 Electronic Arts Inc.
+**
+**	This program is free software: you can redistribute it and/or modify
+**	it under the terms of the GNU General Public License as published by
+**	the Free Software Foundation, either version 3 of the License, or
+**	(at your option) any later version.
+**
+**	This program is distributed in the hope that it will be useful,
+**	but WITHOUT ANY WARRANTY; without even the implied warranty of
+**	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+**	GNU General Public License for more details.
+**
+**	You should have received a copy of the GNU General Public License
+**	along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+////////////////////////////////////////////////////////////////////////////////
+//																																						//
+//  (c) 2001-2003 Electronic Arts Inc.																				//
+//																																						//
+////////////////////////////////////////////////////////////////////////////////
+
+//////// Win32BIGFileSystem.h ///////////////////////////
+// Bryan Cleveland, August 2002
+/////////////////////////////////////////////////////////////
+
+#pragma once
+
+#include "Common/ArchiveFileSystem.h"
+
+#include <string>
+#include <unordered_set>
+
+class Win32BIGFileSystem : public ArchiveFileSystem
+{
+public:
+	Win32BIGFileSystem();
+	virtual ~Win32BIGFileSystem();
+
+	virtual void init();
+	virtual void update();
+	virtual void reset();
+	virtual void postProcessLoad();
+
+	// ArchiveFile operations
+	virtual void closeAllArchiveFiles();											///< Close all Archivefiles currently open
+
+	// File operations
+	virtual ArchiveFile * openArchiveFile(const Char *filename);
+	virtual void closeArchiveFile(const Char *filename);
+	virtual void closeAllFiles();															///< Close all files associated with ArchiveFiles
+
+	virtual Bool loadBigFilesFromDirectory(AsciiString dir, AsciiString fileMask, Bool overwrite = FALSE);
+protected:
+
+	// Canonicalized absolute paths of BIG files that have already been
+	// loaded by a previous `loadBigFilesFromDirectory` call. Used to
+	// de-dupe the same physical BIG being discovered through two
+	// overlapping search paths (e.g. listing both `C:\ZH` and
+	// `C:\ZH\ZH_Generals` in paths.txt): the second discovery is
+	// skipped so we don't re-parse its directory and bloat the
+	// ArchiveFileSystem multimap with duplicate per-file entries.
+	std::unordered_set<std::string> m_loadedBigCanonicalKeys;
+};

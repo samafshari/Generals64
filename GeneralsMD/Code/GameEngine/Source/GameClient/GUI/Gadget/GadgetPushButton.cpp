@@ -24,12 +24,12 @@
 
 // FILE: GadgetPushButton.cpp /////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-//                                                                          
-//                       Westwood Studios Pacific.                          
-//                                                                          
-//                       Confidential Information                           
-//                Copyright (C) 2001 - All Rights Reserved                  
-//                                                                          
+//
+//                       Westwood Studios Pacific.
+//
+//                       Confidential Information
+//                Copyright (C) 2001 - All Rights Reserved
+//
 //-----------------------------------------------------------------------------
 //
 // Project:   RTS3
@@ -44,7 +44,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
-#include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "Common/AudioEventRTS.h"
@@ -54,11 +54,6 @@
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/InGameUI.h"
 
-#ifdef _INTERNAL
-// for occasional debugging...
-//#pragma optimize("", off)
-//#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
-#endif
 // DEFINES ////////////////////////////////////////////////////////////////////
 
 // PRIVATE TYPES //////////////////////////////////////////////////////////////
@@ -74,10 +69,10 @@
 static Bool buttonTriggersOnMouseDown(GameWindow *window)
 {
 	// Buttons with the on down status set trigger on mouse down. jba. [8/6/2003]
-	Bool onDown = BitTest( window->winGetStatus(), WIN_STATUS_ON_MOUSE_DOWN);
+	Bool onDown = BitIsSet( window->winGetStatus(), WIN_STATUS_ON_MOUSE_DOWN);
 
 	// Checkboxes always trigger on mouse down. jba [8/6/2003]
-	if (BitTest( window->winGetStatus(), WIN_STATUS_CHECK_LIKE )) {
+	if (BitIsSet( window->winGetStatus(), WIN_STATUS_CHECK_LIKE )) {
 		onDown = true;
 	}
 	return onDown;
@@ -86,69 +81,69 @@ static Bool buttonTriggersOnMouseDown(GameWindow *window)
 // GadgetPushButtonInput ======================================================
 /** Handle input for push button */
 //=============================================================================
-WindowMsgHandledType GadgetPushButtonInput( GameWindow *window, 
+WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 																						UnsignedInt msg,
-																						WindowMsgData mData1, 
+																						WindowMsgData mData1,
 																						WindowMsgData mData2 )
 {
 	WinInstanceData *instData = window->winGetInstanceData();
 
-	switch( msg ) 
+	switch( msg )
 	{
 
 		// ------------------------------------------------------------------------
 		case GWM_MOUSE_ENTERING:
 		{
 
-			if( BitTest( instData->getStyle(), GWS_MOUSE_TRACK ) ) 
+			if( BitIsSet( instData->getStyle(), GWS_MOUSE_TRACK ) )
 			{
 				BitSet( instData->m_state, WIN_STATE_HILITED );
 
-				TheWindowManager->winSendSystemMsg( instData->getOwner(), 
+				TheWindowManager->winSendSystemMsg( instData->getOwner(),
 																						GBM_MOUSE_ENTERING,
-																						(WindowMsgData)window, 
+																						(WindowMsgData)window,
 																						mData1 );
 
 				//TheWindowManager->winSetFocus( window );
 			}
-			if(window->winGetParent() && BitTest(window->winGetParent()->winGetStyle(),GWS_HORZ_SLIDER) )
+			if(window->winGetParent() && BitIsSet(window->winGetParent()->winGetStyle(),GWS_HORZ_SLIDER) )
 			{
 				WinInstanceData *instDataParent = window->winGetParent()->winGetInstanceData();
 				BitSet(instDataParent->m_state, WIN_STATE_HILITED);
 			}
 			break;
 
-		}  // end mouse entering
+		}
 
 		// ------------------------------------------------------------------------
 		case GWM_MOUSE_LEAVING:
 		{
 
-			if(BitTest( instData->getStyle(), GWS_MOUSE_TRACK ) ) 
+			if(BitIsSet( instData->getStyle(), GWS_MOUSE_TRACK ) )
 			{
 				BitClear( instData->m_state, WIN_STATE_HILITED );
-				TheWindowManager->winSendSystemMsg( instData->getOwner(), 
+				TheWindowManager->winSendSystemMsg( instData->getOwner(),
 																						GBM_MOUSE_LEAVING,
-																						(WindowMsgData)window, 
+																						(WindowMsgData)window,
 																						mData1 );
 			}
-		
+
 			//
 			// if this is not a check-like button, clear any selected state when the
 			// move leaves the window area
 			//
-			if( BitTest( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) == FALSE )
-				if( BitTest( instData->getState(), WIN_STATE_SELECTED ) )
+			if( BitIsSet( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) == FALSE )
+				if( BitIsSet( instData->getState(), WIN_STATE_SELECTED ) )
 					BitClear( instData->m_state, WIN_STATE_SELECTED );
-			//TheWindowManager->winSetFocus( NULL );
-			if(window->winGetParent() && BitTest(window->winGetParent()->winGetStyle(),GWS_HORZ_SLIDER) )
+			//TheWindowManager->winSetFocus( nullptr );
+			if(window->winGetParent() && BitIsSet(window->winGetParent()->winGetStyle(),GWS_HORZ_SLIDER) )
 			{
 				WinInstanceData *instDataParent = window->winGetParent()->winGetInstanceData();
 				BitClear(instDataParent->m_state, WIN_STATE_HILITED);
 			}
 			break;
 
-		}  // end mouse leaving
+		}
 
 		// ------------------------------------------------------------------------
 		case GWM_LEFT_DRAG:
@@ -158,7 +153,7 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 																					(WindowMsgData)window, mData1 );
 			break;
 
-		}  // end left drag
+		}
 
 		// ------------------------------------------------------------------------
 		case GWM_LEFT_DOWN:
@@ -173,30 +168,30 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 			if( TheAudio )
 			{
 				TheAudio->addAudioEvent( &buttonClick );
-			}  // end if
+			}
 
 			//
 			// for 'check-like' buttons we have "dual state", we flip the selected status
 			// in that case instead of just turning it on like normal ... also note
 			// that selected messages are sent immediately
 			//
-			if( BitTest( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) )
+			if( BitIsSet( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) )
 			{
-				
-				if( BitTest( instData->m_state, WIN_STATE_SELECTED ) )
+
+				if( BitIsSet( instData->m_state, WIN_STATE_SELECTED ) )
 					BitClear( instData->m_state, WIN_STATE_SELECTED );
 				else
 					BitSet( instData->m_state, WIN_STATE_SELECTED );
 
 
-			}  // end if
+			}
 			else
 			{
-				
+
 				// just select as normal
 				BitSet( instData->m_state, WIN_STATE_SELECTED );
 
-			}  // end else
+			}
 
 			if (buttonTriggersOnMouseDown(window)) {
 				TheWindowManager->winSendSystemMsg( instData->getOwner(), GBM_SELECTED,
@@ -204,7 +199,7 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 			}
 
 			break;
-		}  // end left down
+		}
 
 		//-------------------------------------------------------------------------
 		case GWM_LEFT_UP:
@@ -214,8 +209,8 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 			// note check like selected messages aren't sent here ... they are sent
 			// on the down press
 			//
-			if( BitTest( instData->getState(), WIN_STATE_SELECTED ) &&
-					BitTest( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) == FALSE )
+			if( BitIsSet( instData->getState(), WIN_STATE_SELECTED ) &&
+					BitIsSet( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) == FALSE )
 			{
 
 				if (!buttonTriggersOnMouseDown(window)) {
@@ -237,7 +232,7 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 
 			break;
 
-		}  // end left up or left click
+		}
 
 		// ------------------------------------------------------------------------
 		case GWM_RIGHT_DOWN:
@@ -248,25 +243,25 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 				buttonClick.setEventName(pData->altSound);
 			else
 				buttonClick.setEventName("GUIClick");
-				
 
-			if( BitTest( instData->getStatus(), WIN_STATUS_RIGHT_CLICK ) )
+
+			if( BitIsSet( instData->getStatus(), WIN_STATUS_RIGHT_CLICK ) )
 			{
 				// Need to be specially marked to care about right mouse events
 				if( TheAudio )
 				{
 					TheAudio->addAudioEvent( &buttonClick );
-				}  // end if
+				}
 
 				//
 				// for 'check-like' buttons we have "dual state", we flip the selected status
 				// in that case instead of just turning it on like normal ... also note
 				// that selected messages are sent immediately
 				//
-				if( BitTest( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) )
+				if( BitIsSet( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) )
 				{
-					
-					if( BitTest( instData->m_state, WIN_STATE_SELECTED ) )
+
+					if( BitIsSet( instData->m_state, WIN_STATE_SELECTED ) )
 						BitClear( instData->m_state, WIN_STATE_SELECTED );
 					else
 						BitSet( instData->m_state, WIN_STATE_SELECTED );
@@ -274,14 +269,14 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 					TheWindowManager->winSendSystemMsg( instData->getOwner(), GBM_SELECTED_RIGHT,
 																							(WindowMsgData)window, mData1 );
 
-				}  // end if
+				}
 				else
 				{
-					
+
 					// just select as normal
 					BitSet( instData->m_state, WIN_STATE_SELECTED );
 
-				}  // end else
+				}
 
 			}
 			else
@@ -290,21 +285,21 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 				return MSG_IGNORED;
 			}
 			break;
-		}  // end right down
+		}
 
 		//-------------------------------------------------------------------------
 		case GWM_RIGHT_UP:
 		{
-			
-			if( BitTest( instData->getStatus(), WIN_STATUS_RIGHT_CLICK ) )
+
+			if( BitIsSet( instData->getStatus(), WIN_STATUS_RIGHT_CLICK ) )
 			{
 
 				//
 				// note check like selected messages aren't sent here ... they are sent
 				// on the down press
 				//
-				if( BitTest( instData->getState(), WIN_STATE_SELECTED ) &&
-						BitTest( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) == FALSE )
+				if( BitIsSet( instData->getState(), WIN_STATE_SELECTED ) &&
+						BitIsSet( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) == FALSE )
 				{
 
 					TheWindowManager->winSendSystemMsg( instData->getOwner(), GBM_SELECTED_RIGHT,
@@ -330,7 +325,7 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 
 			break;
 
-		}  // end right up or right click
+		}
 
 		// ------------------------------------------------------------------------
 		case GWM_CHAR:
@@ -342,15 +337,15 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 				case KEY_SPACE:
 				{
 
-					if( BitTest( mData2, KEY_STATE_UP ) )
+					if( BitIsSet( mData2, KEY_STATE_UP ) )
 					{
 
 						//
 						// note check like selected messages aren't sent here ... they are sent
 						// on the down press
 						//
-						if( BitTest( instData->getState(), WIN_STATE_SELECTED ) &&
-								BitTest( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) == FALSE )
+						if( BitIsSet( instData->getState(), WIN_STATE_SELECTED ) &&
+								BitIsSet( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) == FALSE )
 						{
 
 							TheWindowManager->winSendSystemMsg( instData->getOwner(), GBM_SELECTED,
@@ -360,7 +355,7 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 
 						}
 
-					} 
+					}
 					else
 					{
 
@@ -369,10 +364,10 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 						// in that case instead of just turning it on like normal ... also note
 						// that selected messages are sent immediately
 						//
-						if( BitTest( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) )
+						if( BitIsSet( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) )
 						{
-							
-							if( BitTest( instData->m_state, WIN_STATE_SELECTED ) )
+
+							if( BitIsSet( instData->m_state, WIN_STATE_SELECTED ) )
 								BitClear( instData->m_state, WIN_STATE_SELECTED );
 							else
 								BitSet( instData->m_state, WIN_STATE_SELECTED );
@@ -380,21 +375,21 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 							TheWindowManager->winSendSystemMsg( instData->getOwner(), GBM_SELECTED,
 																									(WindowMsgData)window, mData1 );
 
-						}  // end if
+						}
 						else
 						{
-							
+
 							// just select as normal
 							BitSet( instData->m_state, WIN_STATE_SELECTED );
 
-						}  // end else
+						}
 
 
-					}  // end else
+					}
 
 					break;
 
-				}  // end handle enter and space button
+				}
 
 				// --------------------------------------------------------------------
 				case KEY_DOWN:
@@ -402,42 +397,42 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 				case KEY_TAB:
 				{
 
-					if( BitTest( mData2, KEY_STATE_DOWN ) )
+					if( BitIsSet( mData2, KEY_STATE_DOWN ) )
 						TheWindowManager->winNextTab(window);
 					break;
-				
-				}  // end key down, right or tab
+
+				}
 
 				// --------------------------------------------------------------------
 				case KEY_UP:
 				case KEY_LEFT:
 				{
 
-					if( BitTest( mData2, KEY_STATE_DOWN ) )
+					if( BitIsSet( mData2, KEY_STATE_DOWN ) )
 						TheWindowManager->winPrevTab(window);
 					break;
 
-				}  // end key up or left
+				}
 
 				// --------------------------------------------------------------------
 				default:
 					return MSG_IGNORED;
 
-			}  // end switch on char
+			}
 
 			break;
 
-		}  // end character message
+		}
 
 		// ------------------------------------------------------------------------
 		default:
 			return MSG_IGNORED;
 
-	}  // end switch( msg )
+	}
 
 	return MSG_HANDLED;
 
-}  // end GadgetPushButtonInput
+}
 
 // GadgetPushButtonSystem =====================================================
 /** Handle system messages for push button */
@@ -447,9 +442,9 @@ WindowMsgHandledType GadgetPushButtonSystem( GameWindow *window, UnsignedInt msg
 {
 	WinInstanceData *instData = window->winGetInstanceData();
 
-	switch( msg ) 
+	switch( msg )
 	{
-		
+
 		// ------------------------------------------------------------------------
 		case GGM_SET_LABEL:
 		{
@@ -465,12 +460,10 @@ WindowMsgHandledType GadgetPushButtonSystem( GameWindow *window, UnsignedInt msg
 		// ------------------------------------------------------------------------
 		case GWM_DESTROY:
 		{
-			PushButtonData *pData = (PushButtonData *)window->winGetUserData();
-			if(pData)
-				delete pData;
-			window->winSetUserData(NULL);
-		}
+			delete (PushButtonData *)window->winGetUserData();
+			window->winSetUserData(nullptr);
 			break;
+		}
 
 		// ------------------------------------------------------------------------
 		case GWM_INPUT_FOCUS:
@@ -480,9 +473,9 @@ WindowMsgHandledType GadgetPushButtonSystem( GameWindow *window, UnsignedInt msg
 			else
 				BitSet( instData->m_state, WIN_STATE_HILITED );
 
-			TheWindowManager->winSendSystemMsg( instData->getOwner(), 
+			TheWindowManager->winSendSystemMsg( instData->getOwner(),
 																					GGM_FOCUS_CHANGE,
-																					(WindowMsgData)mData1, 
+																					(WindowMsgData)mData1,
 																					window->winGetWindowId() );
 			if( mData1 == FALSE )
 				*(Bool*)mData2 = FALSE;
@@ -493,11 +486,11 @@ WindowMsgHandledType GadgetPushButtonSystem( GameWindow *window, UnsignedInt msg
 		default:
 			return MSG_IGNORED;
 
-	}  // end switch( msg )
+	}
 
 	return MSG_HANDLED;
 
-}  // end GadgetPushButtonSystem
+}
 
 // ------------------------------------------------------------------------------------------------
 /** Set the visual status of a button to make it looked checked/unchecked ... DO NOT send
@@ -507,22 +500,22 @@ void GadgetCheckLikeButtonSetVisualCheck( GameWindow *g, Bool checked )
 {
 
 	// sanity
-	if( g == NULL )
+	if( g == nullptr )
 		return;
 
 	// get instance data
-	WinInstanceData *instData = g->winGetInstanceData();	
-	if( instData == NULL )
+	WinInstanceData *instData = g->winGetInstanceData();
+	if( instData == nullptr )
 		return;
 
 	// sanity, must be a check like button
-	if( BitTest( g->winGetStatus(), WIN_STATUS_CHECK_LIKE ) == FALSE )
+	if( BitIsSet( g->winGetStatus(), WIN_STATUS_CHECK_LIKE ) == FALSE )
 	{
 
-		DEBUG_CRASH(( "GadgetCheckLikeButtonSetVisualCheck: Window is not 'CHECK-LIKE'\n" ));
+		DEBUG_CRASH(( "GadgetCheckLikeButtonSetVisualCheck: Window is not 'CHECK-LIKE'" ));
 		return;
 
-	}  // end if
+	}
 
 	// set or clear the 'pushed' state
 	if( instData )
@@ -533,9 +526,9 @@ void GadgetCheckLikeButtonSetVisualCheck( GameWindow *g, Bool checked )
 		else
 			BitClear( instData->m_state, WIN_STATE_SELECTED );
 
-	}  // end if
+	}
 
-}  // end GadgetCheckLikeButtonSetVisualCheck
+}
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
@@ -543,18 +536,18 @@ Bool GadgetCheckLikeButtonIsChecked( GameWindow *g )
 {
 
 	// sanity
-	if( g == NULL )
+	if( g == nullptr )
 		return FALSE;
 
 	// get instance data
 	WinInstanceData *instData = g->winGetInstanceData();
-	if( instData == NULL )
+	if( instData == nullptr )
 		return FALSE;
 
-	// we just hold this "check like dual state thingie" using the selected state
-	return BitTest( instData->m_state, WIN_STATE_SELECTED );
+	// we just hold this "check like dual state thingy" using the selected state
+	return BitIsSet( instData->m_state, WIN_STATE_SELECTED );
 
-}  // end GadgetCheckLikeButtonIsChecked
+}
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
@@ -562,12 +555,12 @@ void GadgetButtonEnableCheckLike( GameWindow *g, Bool makeCheckLike, Bool initia
 {
 
 	// sanity
-	if( g == NULL )
+	if( g == nullptr )
 		return;
 
 	// get inst data
 	WinInstanceData *instData = g->winGetInstanceData();
-	if( instData == NULL )
+	if( instData == nullptr )
 		return;
 
 	// make it check like
@@ -582,7 +575,7 @@ void GadgetButtonEnableCheckLike( GameWindow *g, Bool makeCheckLike, Bool initia
 	else
 		BitClear( instData->m_state, WIN_STATE_SELECTED );
 
-}  // end GadgetButtonEnableCheckLike
+}
 
 // GadgetButtonSetText ========================================================
 /** Set the text for a push button */
@@ -591,23 +584,23 @@ void GadgetButtonSetText( GameWindow *g, UnicodeString text )
 {
 
 	// sanity
-	if( g == NULL )
+	if( g == nullptr )
 		return;
 
 	TheWindowManager->winSendSystemMsg( g, GGM_SET_LABEL, (WindowMsgData)&text, 0 );
 
-}  // end GadgetButtonSetText
+}
 
-PushButtonData * getNewPushButtonData( void )
+PushButtonData * getNewPushButtonData()
 {
 	PushButtonData *p = NEW PushButtonData;
 	if(!p)
-		return NULL;
-	
-	p->userData = NULL;
+		return nullptr;
+
+	p->userData = nullptr;
 	p->drawBorder = FALSE;
 	p->drawClock = NO_CLOCK;
-	p->overlayImage = NULL;
+	p->overlayImage = nullptr;
 	return p;
 }
 
@@ -616,7 +609,7 @@ PushButtonData * getNewPushButtonData( void )
 //=============================================================================
 void GadgetButtonSetBorder( GameWindow *g, Color color, Bool drawBorder = TRUE )
 {
-	if( g == NULL )
+	if( g == nullptr )
 		return;
 
 	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
@@ -635,7 +628,7 @@ void GadgetButtonSetBorder( GameWindow *g, Color color, Bool drawBorder = TRUE )
 void GadgetButtonDrawClock( GameWindow *g, Int percent, Color color )
 {
 
-	if( g == NULL )
+	if( g == nullptr )
 		return;
 
 	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
@@ -656,7 +649,7 @@ void GadgetButtonDrawClock( GameWindow *g, Int percent, Color color )
 void GadgetButtonDrawInverseClock( GameWindow *g, Int percent, Color color )
 {
 
-	if( g == NULL )
+	if( g == nullptr )
 		return;
 
 	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
@@ -673,7 +666,7 @@ void GadgetButtonDrawInverseClock( GameWindow *g, Int percent, Color color )
 
 void GadgetButtonDrawOverlayImage( GameWindow *g, const Image *image )
 {
-	if( g == NULL )
+	if( g == nullptr )
 		return;
 
 	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
@@ -691,13 +684,13 @@ void GadgetButtonDrawOverlayImage( GameWindow *g, const Image *image )
 //=============================================================================
 void GadgetButtonSetData(GameWindow *g, void *data)
 {
-	if( g == NULL )
+	if( g == nullptr )
 		return;
 
 	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
 	if(!pData)
 	{
-		pData = getNewPushButtonData();	
+		pData = getNewPushButtonData();
 	}
 	pData->userData = data;
 	g->winSetUserData(pData);
@@ -708,13 +701,13 @@ void GadgetButtonSetData(GameWindow *g, void *data)
 //=============================================================================
 void *GadgetButtonGetData(GameWindow *g)
 {
-	if( g == NULL )
-		return NULL;
+	if( g == nullptr )
+		return nullptr;
 
 	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
 	if(!pData)
 	{
-		return NULL;
+		return nullptr;
 	}
 	return pData->userData;
 }

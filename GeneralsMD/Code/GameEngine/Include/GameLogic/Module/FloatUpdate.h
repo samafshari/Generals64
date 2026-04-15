@@ -24,13 +24,10 @@
 
 // FILE: FloatUpdate.h ////////////////////////////////////////////////////////////////////////////
 // Author: Colin Day, May 2002
-// Desc:   Floting on water update
+// Desc:   Floating on water update
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #pragma once
-
-#ifndef __FLOATUPDATE_H_
-#define __FLOATUPDATE_H_
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "GameLogic/Module/UpdateModule.h"
@@ -44,7 +41,7 @@ class FloatUpdateModuleData: public UpdateModuleData
 
 public:
 
-	FloatUpdateModuleData( void );
+	FloatUpdateModuleData();
 
 	static void buildFieldParse(MultiIniFieldParse& p);
 
@@ -70,9 +67,7 @@ public:
 
 protected:
 
-	
+
 	Bool m_enabled;			///< enabled
 
 };
-
-#endif  // end __FLOATUPDATE_H_

@@ -29,9 +29,6 @@
 
 #pragma once
 
-#ifndef __BASE_REGENERATE_UPDATE_H_
-#define __BASE_REGENERATE_UPDATE_H_
-
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "GameLogic/Module/UpdateModule.h"
 #include "GameLogic/Module/DamageModule.h"
@@ -45,7 +42,7 @@ class BaseRegenerateUpdateModuleData : public UpdateModuleData
 {
 
 public:
-	BaseRegenerateUpdateModuleData( void );
+	BaseRegenerateUpdateModuleData();
 	static void buildFieldParse( MultiIniFieldParse &p );
 
 };
@@ -70,7 +67,7 @@ public:
 	virtual DamageModuleInterface* getDamage() { return this; }
 
 	// UpdateModuleInterface
-	virtual UpdateSleepTime update( void );
+	virtual UpdateSleepTime update();
 
 	// DamageModuleInterface
 	virtual void onDamage( DamageInfo *damageInfo );
@@ -81,5 +78,3 @@ public:
 private:
 
 };
-
-#endif  // end __BASE_REGENERATE_UPDATE_H_

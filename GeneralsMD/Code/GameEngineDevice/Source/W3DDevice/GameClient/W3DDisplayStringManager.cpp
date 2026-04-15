@@ -28,8 +28,11 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include <stdlib.h>
+#include <cstdarg>
+#include <cstring>
 
 #include "Common/Debug.h"
+#include "Common/GlobalData.h"
 #include "GameClient/GameClient.h"
 #include "GameClient/GameText.h"
 #include "GameClient/DisplayString.h"
@@ -37,49 +40,59 @@
 #include "GameClient/GlobalLanguage.h"
 #include "W3DDevice/GameClient/W3DDisplayStringManager.h"
 
+static Bool isShellMapDisplayStringTraceEnabled()
+{
+	return FALSE;
+}
+
+static void appendShellMapDisplayStringTrace(const char *format, ...)
+{
+	return; // Debug logging removed
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-// PUBLIC FUNCTIONS 
+// PUBLIC FUNCTIONS
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 //-------------------------------------------------------------------------------------------------
-W3DDisplayStringManager::W3DDisplayStringManager( void )
+W3DDisplayStringManager::W3DDisplayStringManager()
 {
-	for (Int i = 0; i < MAX_GROUPS; ++i) 
+	for (Int i = 0; i < MAX_GROUPS; ++i)
 	{
-		m_groupNumeralStrings[i] = NULL;
+		m_groupNumeralStrings[i] = nullptr;
 	}
 
-	m_formationLetterDisplayString = NULL;
+	m_formationLetterDisplayString = nullptr;
 
 }
 
 //-------------------------------------------------------------------------------------------------
-W3DDisplayStringManager::~W3DDisplayStringManager( void )
+W3DDisplayStringManager::~W3DDisplayStringManager()
 {
-	for (Int i = 0; i < MAX_GROUPS; ++i) 
+	for (Int i = 0; i < MAX_GROUPS; ++i)
 	{
 		if (m_groupNumeralStrings[i])
 			freeDisplayString(m_groupNumeralStrings[i]);
-		m_groupNumeralStrings[i] = NULL;
+		m_groupNumeralStrings[i] = nullptr;
 	}
 
 	if (m_formationLetterDisplayString)
 		freeDisplayString( m_formationLetterDisplayString );
-	m_formationLetterDisplayString = NULL;
+	m_formationLetterDisplayString = nullptr;
 
 
 }
 
 //-------------------------------------------------------------------------------------------------
-void W3DDisplayStringManager::postProcessLoad( void )
+void W3DDisplayStringManager::postProcessLoad()
 {
 	// Get the font.
 	GameFont *font = TheFontLibrary->getFont(
 		TheDrawGroupInfo->m_fontName,
 		TheDrawGroupInfo->m_fontSize,
 		TheDrawGroupInfo->m_fontIsBold );
-	
-	for (Int i = 0; i < MAX_GROUPS; ++i) 
+
+	for (Int i = 0; i < MAX_GROUPS; ++i)
 	{
 		m_groupNumeralStrings[i] = newDisplayString();
 		m_groupNumeralStrings[i]->setFont(font);
@@ -108,38 +121,50 @@ void W3DDisplayStringManager::postProcessLoad( void )
 /** Allocate a new display string and tie it to the master list so we
 	* can keep track of it */
 //-------------------------------------------------------------------------------------------------
-DisplayString *W3DDisplayStringManager::newDisplayString( void )
+DisplayString *W3DDisplayStringManager::newDisplayString()
 {
+	appendShellMapDisplayStringTrace("W3DDisplayStringManager: newDisplayString begin");
 	DisplayString *newString = newInstance(W3DDisplayString);
+	appendShellMapDisplayStringTrace("W3DDisplayStringManager: newDisplayString allocated displayString=%p", newString);
 
 	// sanity
-	if( newString == NULL )
+	if( newString == nullptr )
 	{
 
-		DEBUG_LOG(( "newDisplayString: Could not allcoate new W3D display string\n" ));
+		DEBUG_LOG(( "newDisplayString: Could not allocate new W3D display string" ));
 		assert( 0 );
-		return NULL;
+		return nullptr;
 
-	}  // end if
+	}
 
 	// assign a default font
 	if (TheGlobalLanguageData && TheGlobalLanguageData->m_defaultDisplayStringFont.name.isNotEmpty())
 	{
+		appendShellMapDisplayStringTrace("W3DDisplayStringManager: default font begin name=%s size=%d bold=%d",
+			TheGlobalLanguageData->m_defaultDisplayStringFont.name.str(),
+			TheGlobalLanguageData->m_defaultDisplayStringFont.size,
+			TheGlobalLanguageData->m_defaultDisplayStringFont.bold);
 		newString->setFont(TheFontLibrary->getFont(
 			TheGlobalLanguageData->m_defaultDisplayStringFont.name,
 			TheGlobalLanguageData->m_defaultDisplayStringFont.size,
 			TheGlobalLanguageData->m_defaultDisplayStringFont.bold) );
+		appendShellMapDisplayStringTrace("W3DDisplayStringManager: default font end");
 	}
 	else
-		newString->setFont( TheFontLibrary->getFont( AsciiString("Times New Roman"), 12, FALSE ) );
+	{
+		appendShellMapDisplayStringTrace("W3DDisplayStringManager: fallback font begin");
+		newString->setFont( TheFontLibrary->getFont( "Times New Roman", 12, FALSE ) );
+		appendShellMapDisplayStringTrace("W3DDisplayStringManager: fallback font end");
+	}
 
 	// link string to list
 	link( newString );
+	appendShellMapDisplayStringTrace("W3DDisplayStringManager: newDisplayString end displayString=%p", newString);
 
 	// return our new string
 	return newString;
 
-}  // end newDisplayString
+}
 
 //-------------------------------------------------------------------------------------------------
 /** Remove a display string from the master list and delete the data */
@@ -148,21 +173,21 @@ void W3DDisplayStringManager::freeDisplayString( DisplayString *string )
 {
 
 	// sanity
-	if( string == NULL )
+	if( string == nullptr )
 		return;
-			
+
 	// unlink
 	unLink( string );
 
 	// if the string happens to fall where our current checkpoint was, set the checkpoint to null
 	if ( m_currentCheckpoint == string) {
-		m_currentCheckpoint = NULL;
+		m_currentCheckpoint = nullptr;
 	}
 
 	// free data
-	string->deleteInstance();
+	deleteInstance(string);
 
-}  // end freeDisplayString
+}
 
 //-------------------------------------------------------------------------------------------------
 /** Update method for our display string Manager ... if it's been too
@@ -171,13 +196,13 @@ void W3DDisplayStringManager::freeDisplayString( DisplayString *string )
 	* the DisplayString will have to rebuild the rendering data before
 	* the draw will work */
 //-------------------------------------------------------------------------------------------------
-void W3DDisplayStringManager::update( void )
+void W3DDisplayStringManager::update()
 {
 	// call base in case we add something later
 	DisplayStringManager::update();
 
 	W3DDisplayString *string = static_cast<W3DDisplayString *>(m_stringList);
-	
+
 	// if the m_currentCheckpoint is valid, use it for the starting point for the search
 	if (m_currentCheckpoint) {
 		string = static_cast<W3DDisplayString *>(m_currentCheckpoint);
@@ -189,7 +214,7 @@ void W3DDisplayStringManager::update( void )
 																					render resources freed */
 
 	int numStrings = 10;
-	// looping through all the strings eats up a lot of ambient time. Instead, 
+	// looping through all the strings eats up a lot of ambient time. Instead,
 	// loop through 10 (arbitrarily chosen) or till the end is hit.
 	while ( numStrings-- && string)
 	{
@@ -216,24 +241,24 @@ void W3DDisplayStringManager::update( void )
 			// in future cleanup passes of this update routine
 			//
 			string->m_lastResourceFrame = 0;
-			
-		}  // end if
+
+		}
 
 		// move to next string
 		string = static_cast<W3DDisplayString *>(string->next());
 
-	}  // end while
-	
+	}
+
 	// reset the starting point for our next search
 	m_currentCheckpoint = string;
-}  // end update
+}
 
 //-------------------------------------------------------------------------------------------------
 DisplayString *W3DDisplayStringManager::getGroupNumeralString( Int numeral )
 {
-	if (numeral < 0 || numeral > MAX_GROUPS - 1 ) 
+	if (numeral < 0 || numeral > MAX_GROUPS - 1 )
 	{
-		DEBUG_CRASH(("Numeral '%d' out of range.\n", numeral));
+		DEBUG_CRASH(("Numeral '%d' out of range.", numeral));
 		return m_groupNumeralStrings[0];
 	}
 

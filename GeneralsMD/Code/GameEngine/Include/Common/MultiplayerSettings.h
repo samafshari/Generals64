@@ -29,9 +29,6 @@
 
 #pragma once
 
-#ifndef _MULTIPLAYERSETTINGS_H_
-#define _MULTIPLAYERSETTINGS_H_
-
 #include "GameClient/Color.h"
 #include "Common/Money.h"
 
@@ -47,13 +44,13 @@ public:
 	MultiplayerColorDefinition();
 	//-----------------------------------------------------------------------------------------------
 	static const FieldParse m_colorFieldParseTable[];		///< the parse table for INI definition
-	const FieldParse *getFieldParse( void ) const { return m_colorFieldParseTable; }
+	const FieldParse *getFieldParse() const { return m_colorFieldParseTable; }
 
-	inline AsciiString getTooltipName(void) const { return m_tooltipName; };
-	inline RGBColor getRGBValue(void) const { return m_rgbValue; };
-	inline RGBColor getRGBNightValue(void) const { return m_rgbValueNight; };
-	inline Color getColor(void) const { return m_color; }
-	inline Color getNightColor(void) const { return m_colorNight; }
+	AsciiString getTooltipName() const { return m_tooltipName; };
+	RGBColor getRGBValue() const { return m_rgbValue; };
+	RGBColor getRGBNightValue() const { return m_rgbValueNight; };
+	Color getColor() const { return m_color; }
+	Color getNightColor() const { return m_colorNight; }
 	void setColor( RGBColor rgb );
 	void setNightColor( RGBColor rgb );
 
@@ -81,7 +78,7 @@ class MultiplayerSettings : public SubsystemInterface
 {
 public:
 
-	MultiplayerSettings( void );
+	MultiplayerSettings();
 
 	virtual void init() { }
 	virtual void update() { }
@@ -89,20 +86,20 @@ public:
 
 	//-----------------------------------------------------------------------------------------------
 	static const FieldParse m_multiplayerSettingsFieldParseTable[];		///< the parse table for INI definition
-	const FieldParse *getFieldParse( void ) const { return m_multiplayerSettingsFieldParseTable; }
+	const FieldParse *getFieldParse() const { return m_multiplayerSettingsFieldParseTable; }
 
 	// Color management --------------------
 	MultiplayerColorDefinition * findMultiplayerColorDefinitionByName(AsciiString name);
 	MultiplayerColorDefinition * newMultiplayerColorDefinition(AsciiString name);
 
-	inline Int getStartCountdownTimerSeconds( void ) { return m_startCountdownTimerSeconds; }
-	inline Int getMaxBeaconsPerPlayer( void ) { return m_maxBeaconsPerPlayer; }
-	inline Bool isShroudInMultiplayer( void ) { return m_isShroudInMultiplayer; }
-	inline Bool showRandomPlayerTemplate( void ) { return m_showRandomPlayerTemplate; }
-	inline Bool showRandomStartPos( void ) { return m_showRandomStartPos; }
-	inline Bool showRandomColor( void ) { return m_showRandomColor; }
+	Int getStartCountdownTimerSeconds() { return m_startCountdownTimerSeconds; }
+	Int getMaxBeaconsPerPlayer() { return m_maxBeaconsPerPlayer; }
+	Bool isShroudInMultiplayer() { return m_isShroudInMultiplayer; }
+	Bool showRandomPlayerTemplate() { return m_showRandomPlayerTemplate; }
+	Bool showRandomStartPos() { return m_showRandomStartPos; }
+	Bool showRandomColor() { return m_showRandomColor; }
 
-	inline Int getNumColors( void ) 
+	Int getNumColors()
 	{
 		if (m_numColors == 0) {
 			m_numColors = m_colorList.size();
@@ -111,17 +108,68 @@ public:
 	}
 	MultiplayerColorDefinition * getColor(Int which);
 
+	// ── Slot color storage model ──────────────────────────────────
+	//
+	// As of the launcher revamp, slot color values are RAW 24-bit
+	// RGB integers (0x00RRGGBB), NOT indices into m_colorList. The
+	// stock multiplayer.ini palette is still loaded — but now it
+	// only feeds the in-game lobby's combo-box presets and the
+	// random-color fallback. Once a slot has a color, it's stored
+	// as RGB regardless of which preset (or custom value) it came
+	// from.
+	//
+	// Special sentinel: -1 still means "random — pick at game
+	// start" and is resolved by populateRandomSideAndColor().
 
-  const Money & getDefaultStartingMoney() const 
-  { 
+	/// Pack a 0x00RRGGBB value into a slot color int (just masks
+	/// off any spurious high-byte alpha; the slot field is plain
+	/// RGB so no sentinel bit is set).
+	static Int packSlotColor(UnsignedInt rgb)
+	{
+		return (Int)(rgb & 0x00FFFFFFu);
+	}
+
+	/// Convert a slot color int to a renderer-ready ARGB Color
+	/// (alpha forced to 0xFF). Returns white as a defensive default
+	/// if asked to resolve the random sentinel — random colors
+	/// must be replaced with a real RGB before any rendering site
+	/// queries them.
+	static Color resolveSlotColor(Int slotColor)
+	{
+		if (slotColor < 0)
+			return (Color)0xFFFFFFFFu;
+		return (Color)(0xFF000000u | ((UnsignedInt)slotColor & 0x00FFFFFFu));
+	}
+
+	/// Slot night color. With raw-RGB storage we no longer carry a
+	/// dedicated night variant per slot (the old palette did, but
+	/// the variant was tied to a preset index). Just return the
+	/// same RGB so units don't go invisible during a TOD shift.
+	static Color resolveSlotNightColor(Int slotColor)
+	{
+		return resolveSlotColor(slotColor);
+	}
+
+	/// Resolve the slot color with the player's profile shader effect
+	/// applied as a time-driven color modulation. Mirrors the spirit
+	/// of HLSL ApplyShaderEffect / launcher ShaderEffectPreview but
+	/// collapsed to a single ARGB so it can be pushed at any 2D UI
+	/// element (LAN-lobby color swatch, in-game Diplomacy text, etc).
+	/// shaderId 0 / random-sentinel slot colors short-circuit to the
+	/// stock resolveSlotColor result.
+	static Color resolveSlotColorWithEffect(Int slotColor, Int shaderId, UnsignedInt timeMs);
+
+
+  const Money & getDefaultStartingMoney() const
+  {
     DEBUG_ASSERTCRASH( m_gotDefaultStartingMoney, ("You must specify a default starting money amount in multiplayer.ini") );
-    return m_defaultStartingMoney; 
+    return m_defaultStartingMoney;
   }
 
   const MultiplayerStartingMoneyList & getStartingMoneyList() const { return m_startingMoneyList; }
 
   void addStartingMoneyChoice( const Money & money, Bool isDefault );
-    
+
 private:
 	Int m_initialCreditsMin;
 	Int m_initialCreditsMax;
@@ -143,5 +191,3 @@ private:
 
 // singleton
 extern MultiplayerSettings *TheMultiplayerSettings;
-
-#endif

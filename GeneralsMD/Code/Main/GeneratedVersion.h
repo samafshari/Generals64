@@ -1,0 +1,5 @@
+#pragma once
+
+#define VERSION_LOCALBUILDNUM 0
+#define VERSION_BUILDUSER ""
+#define VERSION_BUILDLOC ""

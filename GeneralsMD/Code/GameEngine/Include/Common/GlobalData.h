@@ -29,9 +29,6 @@
 
 #pragma once
 
-#ifndef _GLOBALDATA_H_
-#define _GLOBALDATA_H_
-
 #include "Common/GameCommon.h"	// ensure we get DUMP_PERF_STATS, or not
 #include "Common/AsciiString.h"
 #include "Common/GameType.h"
@@ -39,27 +36,43 @@
 #include "Common/SubsystemInterface.h"
 #include "GameClient/Color.h"
 #include "Common/STLTypedefs.h"
-#include "Common/GameCommon.h"
 #include "Common/Money.h"
 
 // FORWARD DECLARATIONS ///////////////////////////////////////////////////////////////////////////
 struct FieldParse;
-typedef enum _TerrainLOD;
+enum _TerrainLOD : Int;
+class CommandLine;
 class GlobalData;
 class INI;
 class WeaponBonusSet;
-enum BodyDamageType;
-enum AIDebugOptions;
+enum BodyDamageType : Int;
+enum AIDebugOptions : Int;
 
 // PUBLIC /////////////////////////////////////////////////////////////////////////////////////////
 
-const Int MAX_GLOBAL_LIGHTS	= 3;
+constexpr const Int MAX_GLOBAL_LIGHTS = 3;
+constexpr const Int SIMULATE_REPLAYS_SEQUENTIAL = -1;
+
+//-------------------------------------------------------------------------------------------------
+class CommandLineData
+{
+	friend class CommandLine;
+	friend class GlobalData;
+
+	CommandLineData()
+		: m_hasParsedCommandLineForStartup(false)
+		, m_hasParsedCommandLineForEngineInit(false)
+	{}
+
+	Bool m_hasParsedCommandLineForStartup;
+	Bool m_hasParsedCommandLineForEngineInit;
+};
 
 //-------------------------------------------------------------------------------------------------
 /** Global data container class
   *	Defines all global game data used by the system
 	* @todo Change this entire system. Otherwise this will end up a huge class containing tons of variables,
-	* and will cause re-compilation dependancies throughout the codebase. 
+	* and will cause re-compilation dependencies throughout the code base.
   * OOPS -- TOO LATE! :) */
 //-------------------------------------------------------------------------------------------------
 class GlobalData : public SubsystemInterface
@@ -70,13 +83,14 @@ public:
 	GlobalData();
 	virtual ~GlobalData();
 
-	void init();
-	void reset();
-	void update() { }
+	virtual void init();
+	virtual void reset();
+	virtual void update() { }
 
 	Bool setTimeOfDay( TimeOfDay tod );		///< Use this function to set the Time of day;
 
 	static void parseGameDataDefinition( INI* ini );
+	void parseCustomDefinition();
 
 	//-----------------------------------------------------------------------------------------------
 	struct TerrainLighting
@@ -90,19 +104,30 @@ public:
 	//-----------------------------------------------------------------------------------------------
 	//-----------------------------------------------------------------------------------------------
 
+	CommandLineData m_commandLineData;
+
 	AsciiString m_mapName;  ///< hack for now, this whole this is going away
 	AsciiString m_moveHintName;
 	Bool m_useTrees;
 	Bool m_useTreeSway;
 	Bool m_useDrawModuleLOD;
 	Bool m_useHeatEffects;
+	Bool m_useTerrainTessellation;  ///< D3D11 hull/domain shader terrain subdivision
 	Bool m_useFpsLimit;
 	Bool m_dumpAssetUsage;
 	Int m_framesPerSecondLimit;
 	Int	m_chipSetType;	///<See W3DShaderManager::ChipsetType for options
+
+	// Run game without graphics, input or audio.
+	Bool m_headless;
+
+	// Use client-server networking mode instead of P2P lockstep.
+	Bool m_clientServerMode;
+
 	Bool m_windowed;
 	Int m_xResolution;
 	Int m_yResolution;
+	Bool m_explicitDisplayResolution; ///< true if -xres or -yres was passed on the command line; suppresses the default startup-maximize so the window opens at the requested size
 	Int m_maxShellScreens;  ///< this many shells layouts can be loaded at once
 	Bool m_useCloudMap;
 	Int  m_use3WayTerrainBlends;	///< 0 is none, 1 is normal, 2 is debug.
@@ -131,7 +156,7 @@ public:
 	Real m_waterPositionX;
 	Real m_waterPositionY;
 	Real m_waterPositionZ;
-	Real m_waterExtentX;	
+	Real m_waterExtentX;
 	Real m_waterExtentY;
 	Int	m_waterType;
 	Bool m_showSoftWaterEdge;
@@ -161,6 +186,7 @@ public:
 	Real m_skyBoxPositionZ;
 	Real m_drawSkyBox;
 	Real m_skyBoxScale;
+	Real m_viewportHeightScale; // The height scale of the tactical view ranging 0..1. Used to hide the world behind the Control Bar.
 	Real m_cameraPitch;
 	Real m_cameraYaw;
 	Real m_cameraHeight;
@@ -195,7 +221,7 @@ public:
 	Int m_maxTankTrackEdges;	///<maximum length of tank track
 	Int m_maxTankTrackOpaqueEdges;	///<maximum length of tank track before it starts fading.
 	Int m_maxTankTrackFadeDelay;	///<maximum amount of time a tank track segment remains visible.
-	
+
 	AsciiString m_levelGainAnimationName; ///< The animation to play when a level is gained.
 	Real m_levelGainAnimationDisplayTimeInSeconds;		///< time to play animation for
 	Real m_levelGainAnimationZRisePerSecond;					///< rise animation up while playing
@@ -259,13 +285,13 @@ public:
 	Bool m_winCursors;						///< Should we force use of windows cursors?
 	Bool m_constantDebugUpdate;		///< should we update the debug stats constantly, vs every 2 seconds?
 	Bool m_showTeamDot;						///< Shows the little colored team dot representing which team you are controlling.
-	
+
 #ifdef DUMP_PERF_STATS
 	Bool m_dumpPerformanceStatistics;
-  Bool  m_dumpStatsAtInterval;///< should I automatically dum stats every in N frames
+  Bool  m_dumpStatsAtInterval;///< should I automatically dump stats every N frames
   Int   m_statsInterval;       ///< if so, how many is N?
 #endif
-	
+
 	Bool m_forceBenchmark;	///<forces running of CPU detection benchmark, even on known cpu's.
 
 	Int m_fixedSeed;							///< fixed random seed for game logic (less than 0 to disable)
@@ -319,13 +345,16 @@ public:
 	Int m_maxLineBuildObjects;				///< line style builds can be no longer than this
 	Int m_maxTunnelCapacity;					///< Max people in Player's tunnel network
 	Real m_horizontalScrollSpeedFactor;	///< Factor applied to the game screen scrolling speed.
-	Real m_verticalScrollSpeedFactor;		///< Seperated because of our aspect ratio
+	Real m_verticalScrollSpeedFactor;		///< Separated because of our aspect ratio
 	Real m_scrollAmountCutoff;				///< Scroll speed to not adjust camera height
 	Real m_cameraAdjustSpeed;					///< Rate at which we adjust camera height
-	Bool m_enforceMaxCameraHeight;		///< Enfoce max camera height while scrolling?
+	Bool m_enforceMaxCameraHeight;		///< Enforce max camera height while scrolling?
 	Bool m_buildMapCache;
-	AsciiString m_initialFile;				///< If this is specified, load a specific map/replay from the command-line
+	AsciiString m_initialFile;				///< If this is specified, load a specific map from the command-line
 	AsciiString m_pendingFile;				///< If this is specified, use this map at the next game start
+
+	std::vector<AsciiString> m_simulateReplays; ///< If not empty, simulate this list of replays and exit.
+	Int m_simulateReplayJobs; ///< Maximum number of processes to use for simulation, or SIMULATE_REPLAYS_SEQUENTIAL for sequential simulation
 
 	Int m_maxParticleCount;						///< maximum number of particles that can exist
 	Int m_maxFieldParticleCount;			///< maximum number of field-type particles that can exist (roughly)
@@ -344,16 +373,13 @@ public:
 
 	Real m_keyboardScrollFactor;			///< Factor applied to game scrolling speed via keyboard scrolling
 	Real m_keyboardDefaultScrollFactor;			///< Factor applied to game scrolling speed via keyboard scrolling
-	
-  Real m_musicVolumeFactor;         ///< Factor applied to loudness of music volume
-  Real m_SFXVolumeFactor;           ///< Factor applied to loudness of SFX volume
-  Real m_voiceVolumeFactor;         ///< Factor applied to loudness of voice volume
-  Bool m_3DSoundPref;               ///< Whether user wants to use 3DSound or not
+	Bool m_drawScrollAnchor;					///< Set that the scroll anchor should be enabled
+	Bool m_moveScrollAnchor;					///< set that the scroll anchor should move
 
 	Bool m_animateWindows;						///< Should we animate window transitions?
 
 	Bool m_incrementalAGPBuf;
-	
+
 	UnsignedInt m_iniCRC;							///< CRC of important INI files
 	UnsignedInt m_exeCRC;							///< CRC of the executable
 
@@ -368,10 +394,10 @@ public:
 	Bool m_selectionFlashHouseColor ;  /// skip the house color and just use white.
 
 	Real m_cameraAudibleRadius;				///< If the camera is being used as the position of audio, then how far can we hear?
-	Real m_groupMoveClickToGatherFactor; /** if you take all the selected units and calculate the smallest possible rectangle 
-																			 that contains them all, and click within that, all the selected units will break 
+	Real m_groupMoveClickToGatherFactor; /** if you take all the selected units and calculate the smallest possible rectangle
+																			 that contains them all, and click within that, all the selected units will break
 																			 formation and gather at the point the user clicked (if the value is 1.0). If it's 0.0,
-																			 units will always keep their formation. If it's <1.0, then the user must click a 
+																			 units will always keep their formation. If it's <1.0, then the user must click a
 																			 smaller area within the rectangle to order the gather. */
 
 	Int m_antiAliasBoxValue;          ///< value of selected antialias from combo box in options menu
@@ -381,6 +407,18 @@ public:
 
 	Bool m_saveCameraInReplay;
 	Bool m_useCameraInReplay;
+
+	// Enabling this does have a performance cost because the ghost object manager must keep track of all relevant objects for all players.
+	Bool m_enablePlayerObserver;
+
+	Int m_networkLatencyFontSize;
+	Int m_renderFpsFontSize;
+	Int m_systemTimeFontSize;
+	Int m_gameTimeFontSize;
+	Int m_playerInfoListFontSize;
+
+	Bool m_showMoneyPerMinute;
+	Bool m_allowMoneyPerMinuteForPlayer;
 
 	Real m_shakeSubtleIntensity;			///< Intensity for shaking a camera with SHAKE_SUBTLE
 	Real m_shakeNormalIntensity;			///< Intensity for shaking a camera with SHAKE_NORMAL
@@ -404,30 +442,33 @@ public:
 
   //THis is put on ice until later - M Lorenzen
   //	Int m_cheaterHasBeenSpiedIfMyLowestBitIsTrue; ///< says it all.. this lives near other "colors" cause it is masquerading as one
-	
+
 	AsciiString m_specialPowerViewObjectName;	///< Created when certain special powers are fired so players can watch.
+
+	Real m_objectPlacementOpacity; ///< Sets the opacity of build preview objects.
+	Bool m_objectPlacementShadows; ///< Enables or disables shadows of build preview objects.
 
 	std::vector<AsciiString> m_standardPublicBones;
 
 	Real m_standardMinefieldDensity;
 	Real m_standardMinefieldDistance;
 
-	
+
 	Bool  m_showMetrics;								///< whether or not to show the metrics.
 	Money m_defaultStartingCash;				///< The amount of cash a player starts with by default.
-	
+
 	Bool m_debugShowGraphicalFramerate;		///< Whether or not to show the graphical framerate bar.
 
-	Int m_powerBarBase;										///< Logrithmic base for the power bar scale
-	Real m_powerBarIntervals;							///< how many logrithmic intervals the width will be divided into
+	Int m_powerBarBase;										///< Logarithmic base for the power bar scale
+	Real m_powerBarIntervals;							///< how many logarithmic intervals the width will be divided into
 	Int m_powerBarYellowRange;						///< Red if consumption exceeds production, yellow if consumption this close but under, green if further under
 	Real m_displayGamma;									///<display gamma that's adjusted with "brightness" control on options screen.
 
 	UnsignedInt m_unlookPersistDuration;	///< How long after unlook until the sighting info executes the undo
 
 	Bool m_shouldUpdateTGAToDDS;					///< Should we attempt to update old TGAs to DDS stuff on loadup?
-  
-	UnsignedInt m_doubleClickTimeMS;	///< What is the maximum amount of time that can seperate two clicks in order
+
+	UnsignedInt m_doubleClickTimeMS;	///< What is the maximum amount of time that can separate two clicks in order
 																		///< for us to generate a double click message?
 
 	RGBColor m_shroudColor;						///< What color should the shroud be?  Remember, this is a lighting multiply, not an add
@@ -443,24 +484,25 @@ public:
 	UnsignedInt m_networkKeepAliveDelay;			      	///< The number of seconds between when the connections to each player send a keep-alive packet.
 	UnsignedInt m_networkRunAheadSlack;				      	///< The amount of slack in the run ahead value. This is the percentage of the calculated run ahead that is added.
 	UnsignedInt m_networkDisconnectTime;			      	///< The number of milliseconds between when the game gets stuck on a frame for a network stall and when the disconnect dialog comes up.
-	UnsignedInt m_networkPlayerTimeoutTime;		      	///< The number of milliseconds between when a player's last keep alive command was recieved and when they are considered disconnected from the game.
+	UnsignedInt m_networkPlayerTimeoutTime;		      	///< The number of milliseconds between when a player's last keep alive command was received and when they are considered disconnected from the game.
 	UnsignedInt	m_networkDisconnectScreenNotifyTime;  ///< The number of milliseconds between when the disconnect screen comes up and when the other players are notified that we are on the disconnect screen.
-	
+
 	Real				m_keyboardCameraRotateSpeed;    ///< How fast the camera rotates when rotated via keyboard controls.
   Int					m_playStats;									///< Int whether we want to log play stats or not, if <= 0 then we don't log
 
-#if defined(_DEBUG) || defined(_INTERNAL) || defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
+#if defined(RTS_DEBUG) || defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
 	Bool m_specialPowerUsesDelay ;
 #endif
   Bool m_TiVOFastMode;            ///< When true, the client speeds up the framerate... set by HOTKEY!
-  
 
+#if defined(RTS_DEBUG) || ENABLE_CONFIGURABLE_SHROUD
+	Bool m_shroudOn;
+#endif
 
-#if defined(_DEBUG) || defined(_INTERNAL)
+#if defined(RTS_DEBUG)
 	Bool m_wireframe;
 	Bool m_stateMachineDebug;
 	Bool m_useCameraConstraints;
-	Bool m_shroudOn;
 	Bool m_fogOfWarOn;
 	Bool m_jabberOn;
 	Bool m_munkeeOn;
@@ -489,8 +531,6 @@ public:
 	Real m_debugProjectileTileWidth;			///< How wide should these tiles be?
 	Int m_debugProjectileTileDuration;		///< How long should these tiles stay around, in frames?
 	RGBColor m_debugProjectileTileColor;	///< What color should these tiles be?
-	Bool m_debugIgnoreAsserts;						///< Ignore all asserts.
-	Bool m_debugIgnoreStackTrace;					///< No stacktraces for asserts.
 	Bool m_showCollisionExtents;	///< Used to display collision extents
   Bool m_showAudioLocations;    ///< Used to display audio markers and ambient sound radii
 	Bool m_saveStats;
@@ -506,10 +546,16 @@ public:
 	Bool m_extraLogging;					///< More expensive debug logging to catch crashes.
 #endif
 
+#ifdef DEBUG_CRASHING
+	Bool m_debugIgnoreAsserts;						///< Ignore all asserts.
+#endif
+
+#ifdef DEBUG_STACKTRACE
+	Bool m_debugIgnoreStackTrace;					///< No stacktraces for asserts.
+#endif
+
 	Bool				m_isBreakableMovie;							///< if we enter a breakable movie, set this flag
 	Bool				m_breakTheMovie;								///< The user has hit escape!
-	AsciiString m_modDir;
-	AsciiString m_modBIG;
 
 	//-allAdvice feature
 	//Bool m_allAdvice;
@@ -520,26 +566,35 @@ public:
 
 private:
 
+	static UnsignedInt generateExeCRC();
+
 	static const FieldParse s_GlobalDataFieldParseTable[];
 
 	// this is private, since we read the info from Windows and cache it for
 	// future use. No one is allowed to change it, ever. (srj)
 	AsciiString m_userDataDir;
-	
+
 	static GlobalData *m_theOriginal;		///< the original global data instance (no overrides)
 	GlobalData *m_next;									///< next instance (for overrides)
-	GlobalData *newOverride( void );		/** create a new override, copy data from previous
+	GlobalData *newOverride();		/** create a new override, copy data from previous
 																			override, and return it */
 
-
+#if defined(_MSC_VER) && _MSC_VER < 1300
 	GlobalData(const GlobalData& that) { DEBUG_CRASH(("unimplemented")); }
 	GlobalData& operator=(const GlobalData& that) { DEBUG_CRASH(("unimplemented")); return *this; }
+#else
+	GlobalData(const GlobalData& that) = delete;
+	GlobalData& operator=(const GlobalData& that) = default;
+#endif
 
 };
 
 // singleton
 extern GlobalData* TheWritableGlobalData;
 
+// use TheGlobalData for all read-only accesses
+#if __cplusplus >= 201703L
+inline const GlobalData* const& TheGlobalData = TheWritableGlobalData;
+#else
 #define TheGlobalData ((const GlobalData*)TheWritableGlobalData)
-
 #endif

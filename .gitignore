@@ -1,0 +1,83 @@
+# Build output
+/build/
+/build_*/
+
+# Game executable (built from source)
+GameData/generalszh.exe
+
+# VS user/cache files
+.vs/
+*.user
+*.suo
+*.ncb
+*.sdf
+
+# CMake generated (kept for cmake-based builds, but not tracked)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+CMakeUserPresets.json
+
+# IDE
+.idea/
+.vscode/
+.cache/
+
+# OS
+thumbs.db
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Server build output
+Server/bin/
+Server/obj/
+
+# Game debug logs
+GameData/DebugLogFile.txt
+GameData/DebugLogFilePrev.txt
+
+# Debug/build artifacts
+*.pdb
+*.ilk
+*.idb
+*.tlog
+*.lastbuildstate
+*.unsuccessfulbuild
+*.log
+*.tmp
+*.bak
+*~
+
+*.png
+# Launcher icon assets (bundled as <Resource> in the WPF project — must
+# ship with the repo even though *.png is otherwise ignored globally).
+!Launcher/GeneralsLauncher/Assets/Icons/*.png
+obj
+
+# Generator script (not needed at runtime)
+generate_vcxproj.py
+
+# AI-enhanced videos (generated locally)
+GameData/Data/Movies_Enhanced/
+GameData/extern/tools/ffmpeg*
+GameData/extern/tools/realesrgan*
+GameData/extern/tools/models/
+GameData/extern/tools/*.bin
+GameData/extern/tools/*.param
+
+/GameData/extern/tools/onepiece_demo.mp4
+/GameData/extern/tools/input.jpg
+/GameData/extern/tools/input2.jpg
+/GameData/*.obj
+bin
+obj
+*.bmp
+Debug
+Release
+/GameData/game_stderr.txt
+/GameData/game_stdout.txt
+
+AppxPackages
+/extracted_textures/

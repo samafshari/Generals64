@@ -28,10 +28,8 @@
 
 #pragma once
 
-#ifndef __CRITICALSECTION_H__
-#define __CRITICALSECTION_H__
-
 #include "Common/PerfTimer.h"
+#include <mutex>
 
 #ifdef PERF_TIMERS
 extern PerfGather TheCritSecPerfGather;
@@ -39,40 +37,30 @@ extern PerfGather TheCritSecPerfGather;
 
 class CriticalSection
 {
-	CRITICAL_SECTION m_windowsCriticalSection;
+	std::recursive_mutex m_mutex;
 
 	public:
-		CriticalSection()
-		{
-			#ifdef PERF_TIMERS
-			AutoPerfGather a(TheCritSecPerfGather);
-			#endif
-			InitializeCriticalSection( &m_windowsCriticalSection );
-		}
+		CriticalSection() = default;
+		virtual ~CriticalSection() = default;
 
-		virtual ~CriticalSection()
-		{
-			#ifdef PERF_TIMERS
-			AutoPerfGather a(TheCritSecPerfGather);
-			#endif
-			DeleteCriticalSection( &m_windowsCriticalSection );
-		}
+		CriticalSection(const CriticalSection&) = delete;
+		CriticalSection& operator=(const CriticalSection&) = delete;
 
 	public:	// Use these when entering/exiting a critical section.
-		void enter( void ) 
-		{ 
-			#ifdef PERF_TIMERS
-			AutoPerfGather a(TheCritSecPerfGather);
-			#endif
-			EnterCriticalSection( &m_windowsCriticalSection );
-		}
-		
-		void exit( void )
+		void enter()
 		{
 			#ifdef PERF_TIMERS
 			AutoPerfGather a(TheCritSecPerfGather);
 			#endif
-			LeaveCriticalSection( &m_windowsCriticalSection );
+			m_mutex.lock();
+		}
+
+		void exit()
+		{
+			#ifdef PERF_TIMERS
+			AutoPerfGather a(TheCritSecPerfGather);
+			#endif
+			m_mutex.unlock();
 		}
 };
 
@@ -80,29 +68,25 @@ class ScopedCriticalSection
 {
 	private:
 		CriticalSection *m_cs;
-	
+
 	public:
 		ScopedCriticalSection( CriticalSection *cs ) : m_cs(cs)
-		{ 
-			if (m_cs) 
+		{
+			if (m_cs)
 				m_cs->enter();
 		}
 
-		virtual ~ScopedCriticalSection( )
-		{ 
-			if (m_cs) 
+		virtual ~ScopedCriticalSection()
+		{
+			if (m_cs)
 				m_cs->exit();
 		}
 };
 
-#include "mutex.h"
-
-// These should be NULL on creation then non-NULL in WinMain or equivalent.
+// These should be null on creation then non-null in WinMain or equivalent.
 // This allows us to be silently non-threadsafe for WB and other single-threaded apps.
-extern FastCriticalSectionClass TheAsciiStringCriticalSection;
+extern CriticalSection *TheAsciiStringCriticalSection;
 extern CriticalSection *TheUnicodeStringCriticalSection;
 extern CriticalSection *TheDmaCriticalSection;
 extern CriticalSection *TheMemoryPoolCriticalSection;
 extern CriticalSection *TheDebugLogCriticalSection;
-
-#endif /* __CRITICALSECTION_H__ */

@@ -6,3334 +6,2009 @@
 **	it under the terms of the GNU General Public License as published by
 **	the Free Software Foundation, either version 3 of the License, or
 **	(at your option) any later version.
-**
-**	This program is distributed in the hope that it will be useful,
-**	but WITHOUT ANY WARRANTY; without even the implied warranty of
-**	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-**	GNU General Public License for more details.
-**
-**	You should have received a copy of the GNU General Public License
-**	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-////////////////////////////////////////////////////////////////////////////////
-//																																						//
-//  (c) 2001-2003 Electronic Arts Inc.																				//
-//																																						//
-////////////////////////////////////////////////////////////////////////////////
-
 // FILE: W3DDisplay.cpp ///////////////////////////////////////////////////////
-//
-// W3D Implementation for the Game Display which is responsible for creating
-// and maintaning the entire visual display
-//
-// Author: Colin Day, April 2001
-//
+// Display implementation using D3D11 Renderer
 ///////////////////////////////////////////////////////////////////////////////
 
-static void drawFramerateBar(void);
-
-// SYSTEM INCLUDES ////////////////////////////////////////////////////////////
-#include <stdlib.h>
+#ifdef _WIN32
 #include <windows.h>
-#include <io.h>
-#include <time.h>
-
-// USER INCLUDES //////////////////////////////////////////////////////////////
-#include "Common/ThingFactory.h"
-#include "Common/GameEngine.h"
-#include "Common/GlobalData.h"
-#include "Common/PerfTimer.h"
-#include "Common/FileSystem.h"
-#include "Common/LocalFileSystem.h"
-#include "Common/Player.h"
-#include "Common/PlayerList.h"
-#include "Common/ThingTemplate.h"
-#include "Common/GameLOD.h"
-#include "Common/DrawModule.h"
-#include "GameLogic/AIPathfind.h"
-#include "GameLogic/Module/PhysicsUpdate.h"
-
-#include "GameClient/Drawable.h"
-#include "GameClient/GameText.h"
-#include "GameClient/GraphDraw.h"
-#include "GameClient/Line2D.h"
-#include "GameClient/Mouse.h"
-#include "GameClient/GlobalLanguage.h"
-#include "GameClient/Water.h"
-
-#include "GameNetwork/NetworkInterface.h"
-#include "Common/ModelState.h"
-#include "Lib/BaseType.h"
-#include "W3DDevice/Common/W3DConvert.h"
-#include "W3DDevice/GameClient/W3DAssetManager.h"
-#include "W3DDevice/GameClient/W3DGameClient.h"
-#include "W3DDevice/GameClient/W3DFileSystem.h"
-#include "W3DDevice/GameClient/W3DDynamicLight.h"
-#include "W3DDevice/GameClient/HeightMap.h"
-#include "W3DDevice/GameClient/WorldHeightMap.h"
-#include "W3DDevice/GameClient/W3DScene.h"
-#include "W3DDevice/GameClient/W3DTerrainTracks.h"
-#include "W3DDevice/GameClient/W3DWater.h"
-#include "W3DDevice/GameClient/W3DVideoBuffer.h"
-#include "W3DDevice/GameClient/W3DShaderManager.h"
-#include "W3DDevice/GameClient/W3DDebugDisplay.h"
-#include "W3DDevice/GameClient/W3DProjectedShadow.h"
-#include "W3DDevice/GameClient/W3DShroud.h"
-#include "WWMath/WWMath.h"
-#include "WWLib/Registry.h"
-#include "WW3D2/WW3D.h"
-#include "WW3D2/PredLod.h"
-#include "WW3D2/Part_Emt.h"
-#include "WW3D2/Part_Ldr.h"
-#include "WW3D2/DX8Caps.h"
-#include "WW3D2/WW3DFormat.h"
-#include "WW3D2/agg_def.h"
-#include "WW3D2/Render2DSentence.h"
-#include "WW3D2/SortingRenderer.h"
-#include "WW3D2/Textureloader.h"
-#include "WW3D2/DX8WebBrowser.h"
-#include "WW3D2/Mesh.h"
-#include "WW3D2/HLOD.h"
-#include "WW3D2/Meshmatdesc.h"
-#include "WW3D2/Meshmdl.h"
-#include "WW3D2/rddesc.h"
-#include "targa.h"
-#include "Lib/BaseType.h"
-
-#include "GameLogic/ScriptEngine.h"		// For TheScriptEngine - jkmcd
-#include "GameLogic/GameLogic.h"
-#ifdef DUMP_PERF_STATS
-#include "GameLogic/PartitionManager.h"
+#include <timeapi.h>
+#include <DirectXMath.h>
 #endif
-
-#include "WinMain.h"
-
-#ifdef _INTERNAL
-// for occasional debugging...
-//#pragma optimize("", off)
-//#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
+#ifdef USE_SDL
+#include <SDL3/SDL.h>
 #endif
-
-// DEFINE AND ENUMS ///////////////////////////////////////////////////////////
-#define W3D_DISPLAY_DEFAULT_BIT_DEPTH 32
-
-#define no_SAMPLE_DYNAMIC_LIGHT	1
-#ifdef SAMPLE_DYNAMIC_LIGHT
-static W3DDynamicLight * theDynamicLight = NULL;
-static Real theLightXOffset = 0.1f;
-static Real theLightYOffset = 0.07f;
-static Int theFlashCount = 0;
-#endif
-
-//*****************************************************************************************
-//*****************************************************************************************
-//**** Start Statistical Dump *************************************************************
-//*****************************************************************************************
-
-#ifdef DUMP_PERF_STATS
-
 #include <cstdarg>
+#include <cstdio>
+#include <algorithm>
 
-class StatDumpClass
-{
-public:
-	StatDumpClass( const char *fname );
-	~StatDumpClass();
-	void dumpStats( Bool brief = FALSE, Bool flagSpikes = FALSE );
-
-protected:
-	FILE *m_fp;
-};
-
-//=============================================================================
-//Open the file once at the beginning of the game -- everything appends to it.
-//=============================================================================
-StatDumpClass::StatDumpClass( const char *fname )
-{
-	char buffer[ _MAX_PATH ];
-	GetModuleFileName( NULL, buffer, sizeof( buffer ) );
-	char *pEnd = buffer + strlen( buffer );
-	while( pEnd != buffer )
-	{
-		if( *pEnd == '\\' )
-		{
-			*pEnd = 0;
-			break;
-		}
-		pEnd--;
-	}
-	AsciiString fullPath;
-	fullPath.format( "%s\\%s", buffer, fname );
-	m_fp = fopen( fullPath.str(), "wt" );
-}
-
-//=============================================================================
-//Close the file at the end of the application 
-//=============================================================================
-StatDumpClass::~StatDumpClass()
-{
-	if( m_fp )
-	{
-		fclose( m_fp );
-	}
-}
-
-static const char *getCurrentTimeString(void)
-{
-	time_t aclock;
-	time(&aclock);
-	struct tm *newtime = localtime(&aclock);
-	return asctime(newtime);
-}
-
-//=============================================================================
-//Dump the stats
-//=============================================================================
-
-
-static Bool s_notFirstDump = FALSE;
-
-void StatDumpClass::dumpStats( Bool brief, Bool flagSpikes )
-{
-	if( !m_fp )
-	{
-		return;
-	}
-
-  
-  Bool beBrief = brief & s_notFirstDump;
-  s_notFirstDump = TRUE;
-
-	fprintf( m_fp, "----------------------------------------------------------------\n" );
-	fprintf( m_fp, "Performance Statistical Dump -- Frame %d\n", TheGameLogic->getFrame() );
-  if ( ! beBrief )
-  {
-	  //static char buf[1024];
-	  fprintf( m_fp, "Time:\t%s", getCurrentTimeString() );
-	  fprintf( m_fp, "Map:\t%s\n", TheGlobalData->m_mapName.str());
-	  fprintf( m_fp, "Side:\t%s\n", ThePlayerList->getLocalPlayer()->getSide().str());
-	  fprintf( m_fp, "----------------------------------------------------------------\n" );
-  }
-
-	//FPS
-	Real fps = TheDisplay->getAverageFPS();
-	fprintf( m_fp, "Average FPS: %.1f (%.5f msec)\n", fps, 1000.0f / fps );
-  if ( flagSpikes && fps<20.0f )
-  	fprintf( m_fp, "                                                                      FPS OUT OF TOLERANCE\n" );
-
-
-	//Rendering stats
-	fprintf( m_fp, "Draws: %d \nSkins: %d \nSortedPolys: %d \nSkinPolys: %d\n",(Int)Debug_Statistics::Get_Draw_Calls(),
-		(Int)Debug_Statistics::Get_DX8_Skin_Renders(),
-		(Int)Debug_Statistics::Get_Sorting_Polygons(), (Int)Debug_Statistics::Get_DX8_Skin_Polygons());
-
-	Int onScreenParticleCount = TheParticleSystemManager->getOnScreenParticleCount();
-
-  if ( flagSpikes )
-  {
-    if ( Debug_Statistics::Get_Draw_Calls()>2000 )
-  	  fprintf( m_fp, "                                                                      DRAWS OUT OF TOLERANCE(2000)\n" );
-    if ( Debug_Statistics::Get_Sorting_Polygons() > (onScreenParticleCount*2) + 300 )
-  	  fprintf( m_fp, "                                                                      NON-PARTICLE-SORTS OUT OF TOLERANCE(300)\n" );
-    if ( Debug_Statistics::Get_DX8_Skin_Renders()>100 )
-  	  fprintf( m_fp, "                                                                      SKINS OUT OF TOLERANCE(100)\n" );
-  }
-
-
-	//Object stats
-	UnsignedInt objCount = TheGameLogic->getObjectCount();
-	UnsignedInt objScreenCount = TheGameClient->getRenderedObjectCount();
-	fprintf( m_fp, "Objects: %d in world (%d onscreen)\n", objCount, objScreenCount );
-  if ( flagSpikes && objCount > 800 )
-  	fprintf( m_fp, "                                                                      OBJS OUT OF TOLERANCE(800)\n" );
-
-	//AI stats
-	UnsignedInt numAI, numMoving, numAttacking, numWaitingForPath, overallFailedPathfinds;
-	TheGameLogic->getAIMetricsStatistics( &numAI, &numMoving, &numAttacking, &numWaitingForPath, &overallFailedPathfinds );
-	fprintf( m_fp, "\n" );
-	fprintf( m_fp, "AI Statistics:\n" );
-	fprintf( m_fp, "  Total AI Objects: %d\n", numAI );
-	fprintf( m_fp, "    -moving: %d\n", numMoving );
-	fprintf( m_fp, "    -attacking: %d\n", numAttacking );
-	fprintf( m_fp, "    -waiting for path: %d\n", numWaitingForPath );
-	fprintf( m_fp, "  Total failed pathfinds: %d\n", overallFailedPathfinds );
-  if ( flagSpikes && overallFailedPathfinds > 0 )
-  	fprintf( m_fp, "                                                                      FAILEDPATHFINDS OUT OF TOLERANCE(0)\n" );
-	fprintf( m_fp, "\n" );
-
-	// Script stats
-	Real timeLastFrame, slowScript1, slowScript2;
-	AsciiString slowScripts = TheScriptEngine->getStats(&timeLastFrame, &slowScript1, &slowScript2);
-	fprintf( m_fp, "\n" );
-	fprintf( m_fp, "Script Engine Statistics:\n" );
-	fprintf( m_fp, "  Total time last frame: %.5f msec\n", timeLastFrame*1000 );
-	fprintf( m_fp, "    -Slowest 2 scripts      %s\n", slowScripts.str() );
-	fprintf( m_fp, "    -Slowest 2 script times %.5f msec, %.5f msec \n", slowScript1*1000, slowScript2*1000 );
-  if ( flagSpikes && slowScript1*1000 > 0.2f || slowScript2*1000 > 0.2f )
-  	fprintf( m_fp, "                                                                      SLOW SCRIPT OUT OF TOLERANCE(0.2)\n" );
-	fprintf( m_fp, "\n" );
-
-
-
-	//PartitionMgr stats
-	double gcoTimeThisFrameTotal, gcoTimeThisFrameAvg;
-	ThePartitionManager->getPMStats(gcoTimeThisFrameTotal, gcoTimeThisFrameAvg);
-	fprintf(m_fp, "Partition Manager Statistics:\n");
-	fprintf(m_fp, "  Total time for object scans this frame is %.5f msec\n", gcoTimeThisFrameTotal);
-	fprintf(m_fp, "  Avg time per object scan this frame is %.5f msec\n", gcoTimeThisFrameAvg);
-	fprintf( m_fp, "\n" );
-
-	// setup texture stats
-	Debug_Statistics::Record_Texture_Mode(Debug_Statistics::RECORD_TEXTURE_SIMPLE/*RECORD_TEXTURE_NONE*/);
-
-	fprintf( m_fp, "Video Statistics:\n" );
-	//Particle system stats
-	fprintf( m_fp, "  Particle Systems: %d\n", TheParticleSystemManager->getParticleSystemCount() );
-	Int totalParticles = TheParticleSystemManager->getParticleCount();
-	fprintf( m_fp, "  Particles: %d in world (%d onscreen)\n", totalParticles, onScreenParticleCount );
-
-  if ( flagSpikes && totalParticles > TheGlobalData->m_maxParticleCount - 10 )
-  	fprintf( m_fp, "                                                                      PARTICLES OUT OF TOLERANCE(CAP-10)\n" );
-  if ( flagSpikes && onScreenParticleCount > TheGlobalData->m_maxParticleCount - 10 )
-  	fprintf( m_fp, "                                                                      ON_SCREEN_PARTICLES OUT OF TOLERANCE(CAP-10)\n" );
-
-
-	// polygons this frame	
-	Int polyPerFrame = Debug_Statistics::Get_DX8_Polygons();
-	Int polyPerSecond = (Int)(polyPerFrame * fps);
-	fprintf( m_fp, "  Polygons: %d per frame (%d per second)\n", polyPerFrame, polyPerSecond );
-
-	// vertices this frame
-	fprintf( m_fp, "  Vertices: %d\n", Debug_Statistics::Get_DX8_Vertices() );
-
-	//
-	// I'm adjusting the texture memory usage counter by subtracting 
-	// out the terrain alpha texture (since it's really == terrain texture).
-	//
-	fprintf( m_fp, "  Video RAM: %d\n", Debug_Statistics::Get_Record_Texture_Size() - 1376256 );
-
-	// terrain stats
-	fprintf( m_fp, "  3-Way Blends: %d/%d, \n Shoreline Blends: %d/%d\n", TheTerrainRenderObject->getNumExtraBlendTiles(TRUE),TheTerrainRenderObject->getNumExtraBlendTiles(FALSE), TheTerrainRenderObject->getNumShoreLineTiles(TRUE),TheTerrainRenderObject->getNumShoreLineTiles(FALSE));
-  if ( flagSpikes && TheTerrainRenderObject->getNumExtraBlendTiles(TRUE) > 2000 )
-  	fprintf( m_fp, "                                                                      3-WAYS OUT OF TOLERANCE(2000)\n" );
-  if ( flagSpikes && TheTerrainRenderObject->getNumShoreLineTiles(TRUE) > 2000 )
-  	fprintf( m_fp, "                                                                      SHORELINES OUT OF TOLERANCE(2000)\n" );
-
-	fprintf( m_fp, "\n" );
-
-#if defined(_DEBUG) || defined(_INTERNAL)
-  if ( ! beBrief )
-  {
-    TheAudio->audioDebugDisplay( NULL, NULL, m_fp );
-	  fprintf( m_fp, "\n" );
-  }
+#include "Common/GlobalData.h"
+#include "Common/GameLOD.h"
+#include "Common/FramePacer.h"
+#include "Common/LivePerf.h"
+#include "GameClient/GameText.h"
+#include "GameClient/Mouse.h"
+#include "GameClient/InGameUI.h"
+#include "GameClient/DisplayString.h"
+#include "GameClient/DisplayStringManager.h"
+#include "GameClient/Color.h"
+#include "GameClient/Drawable.h"
+#include "GameClient/GameClient.h"
+#include "Common/DrawModule.h"
+#include "W3DDevice/GameClient/Module/W3DModelDraw.h"
+#include "GameLogic/GameLogic.h"
+#include "GameLogic/Object.h"
+#include "Lib/BaseType.h"
+#include "W3DDevice/GameClient/W3DDisplay.h"
+#include "Renderer.h"
+#include "GPUParticles.h"
+#include "Inspector/Inspector.h"
+#ifdef USE_SDL
+#include "Platform/SDLPlatform.h"
 #endif
-	
-#ifdef MEMORYPOOL_DEBUG
-	//Report memory usage.
-	TheMemoryPoolFactory->debugMemoryReport( REPORT_FACTORYINFO | REPORT_POOLINFO, 0, 0, m_fp );
-#else
-	fprintf( m_fp, "Memory Report -- unavailable \n(build doesn't have MEMORYPOOL_DEBUG defined)\n" );
+#include "W3DDevice/GameClient/ModelRenderer.h"
+#include "W3DDevice/GameClient/TerrainRenderer.h"
+#include "WW3D2/hlod.h"
+#include "WW3D2/scene.h"
+// Forward declare - can't include scene.h (chains to dx8wrapper.h)
+class SimpleSceneClass;
+#include "GameClient/GameWindowManager.h"
+#include "GameClient/Shell.h"
+#include "W3DDevice/GameClient/ImageCache.h"
+#include "GameClient/Image.h"
+#include "GameClient/ParticleSys.h"
+#include "WW3D2/rinfo.h"
+#include "WW3D2/ww3d.h"
+#include "GameClient/View.h"
+#include "GameClient/VideoPlayer.h"
+#include "W3DDevice/GameClient/W3DView.h"
+#include "W3DDevice/GameClient/W3DInGameUI.h"
+#include "W3DDevice/GameClient/W3DTerrainTracks.h"
+// BaseHeightMap.h includes dx8wrapper.h - use helpers instead
+class WorldHeightMap;
+extern WorldHeightMap* GetTerrainHeightMap(); // defined in D3D11Shims.cpp
+class CameraClass;
+extern void RenderTerrainPropsDX11(CameraClass *camera); // defined in D3D11Shims.cpp
+extern void RenderShadowDecalsDX11(CameraClass *camera); // defined in D3D11Shims.cpp
+extern void RenderScorchMarksDX11(CameraClass *camera); // defined in D3D11Shims.cpp
+extern void RenderTerrainTracksDX11(CameraClass *camera); // defined in D3D11Shims.cpp
+extern void RenderBibsDX11(CameraClass *camera); // defined in D3D11Shims.cpp
+extern void RenderStatusCircleDX11(); // defined in D3D11Shims.cpp
+extern void RenderSnowDX11(); // defined in W3DGameClient.cpp
+extern void RenderWaypointsDX11(CameraClass *camera); // defined in D3D11Shims.cpp
+extern void RenderWaterTracksDX11(CameraClass *camera); // defined in D3D11Shims.cpp
+
+#ifdef _WIN32
+extern HWND ApplicationHWnd;
 #endif
-	fprintf( m_fp, "\n" );
 
-	fprintf( m_fp, "%s", TheSubsystemList->dumpTimesForAll().str());
+// Debug render toggles (F9 overlay)
+int g_debugFrameDrawCalls = 0;  // reset each frame, incremented by Draw3D
+bool g_debugDisableTerrain = false;
+bool g_debugDisableWater = false;
+bool g_debugDisableShroud = false;
+bool g_debugDisableModels = false;
+bool g_debugDisableLighting = false;
+bool g_debugDisableSkyBox = false;
+bool g_debugDisableRoads = false;
+bool g_debugDisableBridges = false;
+bool g_debugDisableProps = false;
+bool g_debugDisableBibs = false;
+bool g_debugDisableScorch = false;
+bool g_debugDisableTracks = false;
+bool g_debugDisableWaypoints = false;
+bool g_debugDisableTranslucent = false;
+bool g_debugDisableParticles = false;
+bool g_debugDisableSnow = false;
+bool g_debugDisableShadowDecals = false;
+bool g_debugDisableCloudShadows = false;
+bool g_debugDisableUI = false;
+bool g_debugDisableBegin2DEnd2D = false;  // skip the inner Begin2D/End2D in drawViews
+bool g_debugDisableMultiDrawSkip = false;
+bool g_debugDisableSyncWrite = false;    // Sync runs but doesn't write to s_snapshot
+bool g_debugDisableFrustumCull = false;
+bool g_debugDisableFlushConstants = false;
+bool g_debugDisableReflection = false;
+bool g_debugDisableDrawViews = false;
+bool g_debugDisableUpdateViews = false;
+bool g_debugDisableStatusCircle = false;
+bool g_debugDisableLightPulse = false;
+bool g_debugDisableMouse = false;
+bool g_debugDisableWW3DSync = false;
+bool g_debugDisableTrackUpdate = false;
+bool g_debugDisableFSRVideo = false;     // FSR upscaling for video playback (ON by default)
+bool g_debugDisableParticleGlow = true;       // Particle glow FX — OFF (causes water artifacts)
+bool g_debugDisableHeatDistortion = false;    // Heat distortion FX — ON by default
+// Shockwave distortion rings trigger on dynamic point lights above intensity
+// threshold — original ZH had no such effect so this is a remaster
+// enhancement. Default ON; flip to true from Inspector → Visual FX to
+// restore the un-augmented look. Threshold still wants tuning: a single
+// tank-shell impact buddy-light currently clears the bar.
+bool g_debugDisableShockwave = false;         // Shockwave distortion rings — ON by default
+bool g_debugDisableGodRays = false;           // Volumetric light shafts — ON by default
+// "Cinematic" post-processing was previously ON by default and produced
+// the classic teal-shadow / orange-highlight Hollywood blockbuster look.
+// Generals 2003 had no such grading, and the warm highlight tint pushed
+// sandy desert maps and infantry uniforms toward red. Default to OFF so
+// the rendered scene matches the original game; the user can re-enable
+// from the Inspector → Debug Draw menu if they want the cinematic look.
+bool g_debugDisableChromaAberration = false;  // Chromatic aberration — ON by default (remaster look)
+bool g_debugDisableColorGrade = false;        // Cinematic color grading — ON by default (remaster look)
+bool g_debugDisableSharpen = false;           // Contrast-adaptive sharpening — ON by default
+bool g_debugDisableLaserGlow = false;         // Laser/stream glow pass — ON by default
+bool g_debugDisableTracerStreak = false;      // Tracer fading trail — ON by default
+bool g_debugDisableColorAwareFX = false;      // Toxin haze / fire bloom — ON by default
+bool g_debugDisableVolumetric = true;         // Volumetric explosion clouds — OFF by default
+// Modern AOE paints hardcoded fog colors over toxin/anthrax/radiation/napalm/
+// fire-field particles. The colors don't match the INI-authored particles and
+// the fog blob occludes the actual particles. The original game just rendered
+// the particles directly. Default OFF — re-enable from inspector if desired.
+bool g_debugDisableModernAOE = true;         // Modern ground AOE fog — OFF by default
+bool g_debugDisableSurfaceSpec = false;       // Surface specular highlights — ON by default
+bool g_debugDisableDistanceFog = true;       // Distance fog — OFF by default
+// GPU shadow mapping: sun-aligned depth RT sampled per-pixel for soft PCF
+// shadows. Caster list restricted to real gameplay drawables (structures,
+// units, trees) — NEVER the skybox or scenery, which would otherwise fill
+// the shadow map and blanket-darken everything below. Terrain does NOT
+// cast (no self-shadow acne) but DOES receive.
+//
+// Default OFF pending investigation: enabling caused skirmish maps to
+// render all-black on first enable. Likely culprits: (a) sunDir is zero
+// before the time-of-day is applied, making BuildCameraFitLightVP
+// produce a NaN lookAt; (b) shadowParams stays enabled across frames
+// when the pass is skipped, so subsequent frames sample a stale/empty
+// shadow map. User can flip this from Inspector → Debug Draw to
+// investigate.
+bool g_debugDisableShadowMap = true;         // GPU shadow mapping — OFF by default (WIP)
+// Shadow debug visualization mode. Wired into shadowParams.w by EndShadowPass.
+//   0 = normal PCF shadow
+//   1 = visualize raw shadow map depth (red gradient on terrain = casters wrote depth)
+//   2 = force-darken inside light frustum (proves matrix chain covers receivers)
+int  g_debugShadowMapViz    = 0;
+bool g_debugDisableLensFlare = false;         // Procedural lens flare — ON by default
+bool g_debugDisableSmoothParticleFade = false; // Smooth lifetime-based particle alpha — ON by default
+bool g_debugDisableVolumetricTrails = false;  // GPU volumetric smoke trails — ON by default
+bool g_useClassicTrails = true;               // Classic ribbon trails — ON by default; matches the original D3D8 StreakRenderer look
+bool g_debugDisableBloom = false;             // Bloom — ON by default
 
-  if ( ! beBrief )
-  {
-	  fprintf( m_fp, "----------------------------------------------------------------\n" );
-	  fprintf( m_fp, "END -- Frame %d\n", TheGameLogic->getFrame() );
-	  fprintf( m_fp, "----------------------------------------------------------------\n" );
-  }
-	fprintf( m_fp, "\n\n" );
-	fflush(m_fp);
-}
-
-StatDumpClass TheStatDump("StatisticsDump.txt");
-
-#endif //DUMP_PERF_STATS
-
-//*****************************************************************************************
-//**** End Statistical Dump ***************************************************************
-//*****************************************************************************************
-//*****************************************************************************************
+// --- Visual ENHANCEMENT toggles ---
+// These all default to FALSE so the renderer matches the original DX8 look.
+// Each one is opt-in via the Inspector "Render Toggles → Visual FX" tab.
+// Naming convention: g_useEnhancedXxx = false means classic, true means enhanced.
+// All default OFF — classic look matches original DX8 game. User opts in
+// via Inspector → Render Toggles → Enhancements tab.
+// Post-audit polish (iter 10): enhanced water shader parameters dampened
+// after the first audit run showed visible tessellation artifacts. Bump
+// scale 0.45→0.15, fresnel mix 0.35→0.15, spec pow96*0.55→pow48*0.25,
+// foam threshold 1/2000→1/3500, foam uses smoothstep instead of pow.
+bool g_useEnhancedWater = false;
+bool g_useEnhancedShadows = true;    // Enhanced shadow decals (bbox sizing + sun rotation + silhouette textures)
+bool g_useEnhancedParticles = true;  // Enhanced particles (4-way blend mode preservation + unlit shader)
+bool g_useEnhancedSmudges = true;    // Enhanced smudges (heat-haze refraction on explosions)
+bool g_useDepthBasedFoam = false;            // Implied by g_useEnhancedWater
 
 
+// Autotest mode (defined in CommandLine.cpp)
+extern Int g_autotestFrames;
 
-///////////////////////////////////////////////////////////////////////////////
-// DEFINITIONS ////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////
+// Forward declarations for autotest exit
+class GameEngine;
+extern GameEngine *TheGameEngine;
+// Cannot include GameEngine.h (chains to DX8), so declare setQuitting directly
+namespace { void AutotestQuit() { PostQuitMessage(0); } }
 
-//=============================================================================
-RTS3DScene *W3DDisplay::m_3DScene = NULL;
-RTS2DScene *W3DDisplay::m_2DScene = NULL;
-RTS3DInterfaceScene *W3DDisplay::m_3DInterfaceScene = NULL;
-W3DAssetManager *W3DDisplay::m_assetManager = NULL;
+// Forward declarations
+class RTS3DScene;
+class W3DAssetManager;
+extern W3DAssetManager* EnsureWW3DAssetManagerInstance();
+extern void DestroyWW3DAssetManagerInstance();
 
-//=============================================================================
-	// note, can't use the ones from PerfTimer.h 'cuz they are currently
-	// only valid when "-vtune" is used... (srj)
-inline Int64 getPerformanceCounter()
+// Preload helper - defined in D3D11Shims.cpp to avoid pulling in assetmgr.h here
+extern void PreloadModelViaAssetManager(W3DAssetManager* mgr, const char* name);
+
+static void AppendDX11SceneTrace(const char* format, ...)
 {
-	Int64 tmp;
-	QueryPerformanceCounter((LARGE_INTEGER*)&tmp);
-	return tmp;
+	return; // Debug logging removed
 }
 
-inline Int64 getPerformanceCounterFrequency()
-{
-	Int64 tmp;
-	QueryPerformanceFrequency((LARGE_INTEGER*)&tmp);
-	return tmp;
-}
+// Static members for backward compatibility with draw modules
+RTS3DScene *W3DDisplay::m_3DScene = nullptr;
+W3DAssetManager *W3DDisplay::m_assetManager = nullptr;
 
-// W3DDisplay::W3DDisplay =====================================================
-/** */
-//=============================================================================
+// ============================================================================
+// Construction / destruction
+// ============================================================================
+
 W3DDisplay::W3DDisplay()
+	: m_initialized(0)
+	, m_isClippedEnabled(false)
+	, m_averageFPS(0)
+	, m_currentFPS(0)
+	, m_benchmarkDisplayString(nullptr)
+	, m_lastLightUpdateTime(0)
 {
-	Int i;
-
-	m_initialized = false;
-	m_assetManager = NULL;
-	m_3DScene = NULL;
-	m_2DScene = NULL;
-	m_3DInterfaceScene = NULL;
-	m_averageFPS = TheGlobalData->m_framesPerSecondLimit;
-#if defined(_DEBUG) || defined(_INTERNAL)
-	m_timerAtCumuFPSStart = 0;
-#endif
-	for (i=0; i<LightEnvironmentClass::MAX_LIGHTS; i++)
-		m_myLight[i] = NULL;
-	m_2DRender = NULL;
-	m_isClippedEnabled = FALSE;
 	m_clipRegion.lo.x = 0;
 	m_clipRegion.lo.y = 0;
 	m_clipRegion.hi.x = 0;
 	m_clipRegion.hi.y = 0;
-
-	for (i = 0; i < DisplayStringCount; i++)
-		m_displayStrings[i] = NULL;
-
-}  // end W3DDisplay
-
-// W3DDisplay::~W3DDisplay ====================================================
-/** */
-//=============================================================================
-W3DDisplay::~W3DDisplay()
-{
-
-	// get rid of the debug display
-	delete m_debugDisplay;
-
-	// delete the display strings
-	for (int i = 0; i < DisplayStringCount; i++)
-		TheDisplayStringManager->freeDisplayString(m_displayStrings[i]);
-
-	// delete 2D renderer
-	if( m_2DRender )
-	{
-
-		m_2DRender->Reset();
-		delete m_2DRender;
-		m_2DRender = NULL;
-
-	}  // end if
-
-	//
-	// delete all our views now since they are W3D views and we need to
-	// free them BEFORE we shutdown W3D
-	//
-	Display::deleteViews();
-
-	REF_PTR_RELEASE( m_3DScene );
-	REF_PTR_RELEASE( m_2DScene );
-	REF_PTR_RELEASE( m_3DInterfaceScene );
-	for (Int j=0; j<LightEnvironmentClass::MAX_LIGHTS; j++)
-		REF_PTR_RELEASE( m_myLight[j] );
-
-	PredictiveLODOptimizerClass::Free();
-
-	// shutdown
-	Debug_Statistics::Shutdown_Statistics();
-	W3DShaderManager::shutdown();
-	m_assetManager->Free_Assets();
-	delete m_assetManager;
-	WW3D::Shutdown();
-	WWMath::Shutdown();
-	DX8WebBrowser::Shutdown();
-	delete TheW3DFileSystem;
-	TheW3DFileSystem = NULL;
-
-}  // end ~W3DDisplay
-
-#define MIN_DISPLAY_RESOLUTION_X	800
-#define MIN_DISPLAY_RESOLUTOIN_Y	600
-
-
-Bool IS_FOUR_BY_THREE_ASPECT( Real x, Real y )
-{
-  if ( y == 0 )
-    return FALSE;
-  
-  Real aspectRatio = fabs( x / y ); 
-  return (( aspectRatio > 1.332f) && ( aspectRatio < 1.334f));
-  
 }
 
-
-/*Return number of screen modes supported by the current device*/
-Int W3DDisplay::getDisplayModeCount(void)
+W3DDisplay::~W3DDisplay()
 {
-	const RenderDeviceDescClass &devDesc=WW3D::Get_Render_Device_Desc(0);
-	const DynamicVectorClass <ResolutionDescClass> &resolutions=devDesc.Enumerate_Resolutions();
+	// Inspector must shut down before the Renderer — it holds D3D11
+	// device references that become invalid the moment Renderer::Shutdown
+	// destroys the device.
+	Inspector::Shutdown();
 
-	Int numResolutions=0;
-/*	Bool needStencil=false;
-	Bool needDestinationAlpha=false;
-	Int minBitDepth=16;
-	
-	//Walk through all resolutions and determine which ones are compatible with other settings
-	//chosen by user.  For example, 32-bit may be required for shadows, occlusion, soft water edge, etc.
-	if (TheGlobalData->m_useShadowVolumes || (TheGlobalData->m_enableBehindBuildingMarkers && TheGameLogic->getShowBehindBuildingMarkers()))
-		needStencil=true;
-
-	if (TheGlobalData->m_showSoftWaterEdge)
-	{	minBitDepth=32;
-	}
-*/
-	for (int res = 0; res < resolutions.Count ();  res ++)
+	if (m_assetManager)
 	{
-		// Is this the resolution we are looking for?
-		if (resolutions[res].BitDepth >= 24 && resolutions[res].Width >= MIN_DISPLAY_RESOLUTION_X 
-      && IS_FOUR_BY_THREE_ASPECT( (Real)resolutions[res].Width, (Real)resolutions[res].Height ) )	//only accept 4:3 aspect ratio modes.
-		{	
-			numResolutions++;
+		DestroyWW3DAssetManagerInstance();
+		m_assetManager = nullptr;
+	}
+
+	Render::ModelRenderer::Instance().Shutdown();
+	Render::TerrainRenderer::Instance().Shutdown();
+	Render::ImageCache::Instance().Clear();
+	Render::Renderer::Instance().Shutdown();
+}
+
+// ============================================================================
+// init - Create the D3D11 device and initialize the renderer
+// ============================================================================
+
+void W3DDisplay::init()
+{
+	Display::init();
+
+	if (m_initialized)
+		return;
+
+	if (m_assetManager == nullptr)
+		m_assetManager = EnsureWW3DAssetManagerInstance();
+
+	if (TheGlobalData->m_headless)
+	{
+		m_initialized = true;
+		return;
+	}
+
+#ifdef _WIN32
+	// For borderless fullscreen, use the actual monitor resolution
+	if (!TheGlobalData->m_windowed)
+	{
+		// Get physical pixel size via DXGI (not affected by DPI scaling)
+		HMONITOR hMon = MonitorFromWindow(ApplicationHWnd, MONITOR_DEFAULTTOPRIMARY);
+		MONITORINFO mi = {};
+		mi.cbSize = sizeof(mi);
+		GetMonitorInfo(hMon, &mi);
+		Int screenW = mi.rcMonitor.right - mi.rcMonitor.left;
+		Int screenH = mi.rcMonitor.bottom - mi.rcMonitor.top;
+		TheWritableGlobalData->m_xResolution = screenW;
+		TheWritableGlobalData->m_yResolution = screenH;
+	}
+#endif
+
+	setWidth(TheGlobalData->m_xResolution);
+	setHeight(TheGlobalData->m_yResolution);
+	setBitDepth(32);
+	setWindowed(TheGlobalData->m_windowed);
+
+	// Initialize the D3D11 renderer - this is REAL device creation
+	bool debug = false;
+#if defined(RTS_DEBUG)
+	debug = true;
+#endif
+
+#ifdef _WIN32
+	if (!Render::Renderer::Instance().Init(ApplicationHWnd, debug))
+#else
+	if (!Render::Renderer::Instance().Init(nullptr, debug))
+#endif
+	{
+		DEBUG_CRASH(("Failed to initialize D3D11 Renderer"));
+		throw ERROR_INVALID_D3D;
+	}
+
+	// Create a scene for 3D objects (draw modules add/remove render objects here)
+	if (!m_3DScene)
+	{
+		extern void CreateD3D11Scene();
+		CreateD3D11Scene();
+	}
+
+#if defined(BUILD_WITH_D3D11) && defined(USE_SDL)
+	// Bring up the in-process inspector overlay. Hidden by default — F10
+	// toggles. Failure to init is non-fatal: log and keep going so a
+	// broken inspector can never block normal gameplay.
+	{
+		SDL_Window* sdlWindow = Platform::SDLPlatform::Instance().GetWindow();
+		auto& dev = Render::Renderer::Instance().GetDevice();
+		if (sdlWindow && dev.GetDevice() && dev.GetContext())
+		{
+			if (!Inspector::Init(sdlWindow, dev.GetDevice(), dev.GetContext()))
+				DEBUG_LOG(("Inspector::Init failed — overlay disabled this session"));
+			else
+				DEBUG_LOG(("Inspector ready — press F10 to toggle"));
 		}
 	}
+#endif
 
-	return numResolutions;
+#ifdef _WIN32
+	// In windowed mode, if a specific resolution was requested, resize the window to match
+	if (TheGlobalData->m_windowed && ApplicationHWnd)
+	{
+		int reqW = TheGlobalData->m_xResolution;
+		int reqH = TheGlobalData->m_yResolution;
+		if (reqW > 0 && reqH > 0)
+		{
+			RECT rc = { 0, 0, reqW, reqH };
+			AdjustWindowRect(&rc, GetWindowLong(ApplicationHWnd, GWL_STYLE), FALSE);
+			SetWindowPos(ApplicationHWnd, nullptr, 0, 0,
+				rc.right - rc.left, rc.bottom - rc.top,
+				SWP_NOMOVE | SWP_NOZORDER);
+			Render::Renderer::Instance().Resize(reqW, reqH);
+		}
+	}
+#endif
+
+	// Use the ACTUAL D3D11 render target size
+	int actualW = Render::Renderer::Instance().GetWidth();
+	int actualH = Render::Renderer::Instance().GetHeight();
+	setWidth(actualW);
+	setHeight(actualH);
+	TheWritableGlobalData->m_xResolution = actualW;
+	TheWritableGlobalData->m_yResolution = actualH;
+
+	// Check if level was never set and default to setting most suitable for system
+	if (TheGameLODManager && TheGameLODManager->getStaticLODLevel() == STATIC_GAME_LOD_UNKNOWN)
+	{
+		TheGameLODManager->setStaticLODLevel(TheGameLODManager->getRecommendedStaticLODLevel());
+	}
+
+	m_initialized = true;
+	if (TheGlobalData->m_displayDebug)
+	{
+		m_debugDisplayCallback = StatDebugDisplay;
+	}
+
+#ifdef BUILD_WITH_VULKAN
+	DEBUG_LOG(("W3DDisplay::init - Vulkan Renderer initialized at %dx%d", getWidth(), getHeight()));
+#else
+	DEBUG_LOG(("W3DDisplay::init - D3D11 Renderer initialized at %dx%d", getWidth(), getHeight()));
+#endif
+}
+
+// ============================================================================
+// reset
+// ============================================================================
+
+void W3DDisplay::reset()
+{
+	Display::reset();
+	m_lightPulses.clear();
+	m_lastLightUpdateTime = 0;
+}
+
+// ============================================================================
+// setDisplayMode - Resize the renderer
+// ============================================================================
+
+Bool W3DDisplay::setDisplayMode(UnsignedInt xres, UnsignedInt yres, UnsignedInt bitdepth, Bool windowed)
+{
+	if (xres == 0 || yres == 0)
+		return FALSE;
+
+	Display::setDisplayMode(xres, yres, bitdepth, windowed);
+	Render::Renderer::Instance().Resize(xres, yres);
+	setBitDepth(bitdepth);
+	setWindowed(windowed);
+
+	return TRUE;
+}
+
+void W3DDisplay::setWidth(UnsignedInt width)
+{
+	Display::setWidth(width);
+}
+
+void W3DDisplay::setHeight(UnsignedInt height)
+{
+	Display::setHeight(height);
+}
+
+Int W3DDisplay::getDisplayModeCount()
+{
+	return 1; // We support native resolution only
 }
 
 void W3DDisplay::getDisplayModeDescription(Int modeIndex, Int *xres, Int *yres, Int *bitDepth)
 {
-	Int numResolutions=0;
-	const RenderDeviceDescClass &devDesc=WW3D::Get_Render_Device_Desc(0);
-	const DynamicVectorClass <ResolutionDescClass> &resolutions=devDesc.Enumerate_Resolutions();
-
-	for (int res = 0; res < resolutions.Count ();  res ++)
-	{
-		// Is this the resolution we are looking for?
-		if ( resolutions[res].BitDepth >= 24 && resolutions[res].Width >= MIN_DISPLAY_RESOLUTION_X 
-      && IS_FOUR_BY_THREE_ASPECT( (Real)resolutions[res].Width, (Real)resolutions[res].Height ) )	//only accept 4:3 aspect ratio modes.
-		{	
-			if (numResolutions == modeIndex)
-			{	//found the mode
-				*xres=resolutions[res].Width;
-				*yres=resolutions[res].Height;
-				*bitDepth=resolutions[res].BitDepth;
-				return;
-			}
-			numResolutions++;
-		}
-	}
+#ifdef USE_SDL
+	SDL_DisplayID displayID = SDL_GetPrimaryDisplay();
+	const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(displayID);
+	if (mode) { *xres = mode->w; *yres = mode->h; }
+	else { *xres = 1920; *yres = 1080; }
+#elif defined(_WIN32)
+	*xres = GetSystemMetrics(SM_CXSCREEN);
+	*yres = GetSystemMetrics(SM_CYSCREEN);
+#else
+	*xres = 1920; *yres = 1080;
+#endif
+	*bitDepth = 32;
 }
 
 void W3DDisplay::setGamma(Real gamma, Real bright, Real contrast, Bool calibrate)
 {
-	if (m_windowed)
-		return;	//we don't allow gamma to change in window because it would affect desktop.
-
-	DX8Wrapper::Set_Gamma(gamma,bright,contrast,calibrate, false);
-}
-
-/*Giant hack in order to keep the game from getting stuck when alt-tabbing*/
-void Reset_D3D_Device(bool active)
-{
-	if (TheDisplay && WW3D::Is_Initted() && !TheDisplay->getWindowed())
-	{
-		if (active)
-		{	
-			//switch back to desired mode when user alt-tabs back into game
-			WW3D::Set_Render_Device( WW3D::Get_Render_Device(),TheDisplay->getWidth(),TheDisplay->getHeight(),TheDisplay->getBitDepth(),TheDisplay->getWindowed(),true, true);
-			OSVERSIONINFO	osvi;
-			osvi.dwOSVersionInfoSize=sizeof(OSVERSIONINFO);
-			if (GetVersionEx(&osvi))
-			{	//check if we're running Win9x variant since they have buggy alt-tab that requires
-				//reloading all textures.
-				if (osvi.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS)
-				{	//only do this on Win9x boxes because it makes alt-tab very slow.
-						WW3D::_Invalidate_Textures();
-				}
-			}
-		}
-		else
-		{
-			//switch to windowed mode whenever the user alt-tabs out of game. Don't restore assets after reset since we'll do it when returning.
-			WW3D::Set_Render_Device( WW3D::Get_Render_Device(),TheDisplay->getWidth(),TheDisplay->getHeight(),TheDisplay->getBitDepth(),TheDisplay->getWindowed(),true, true, false);
-		}
-	}
-}
-
-/** Set resolution of display */
-//=============================================================================
-Bool W3DDisplay::setDisplayMode( UnsignedInt xres, UnsignedInt yres, UnsignedInt bitdepth, Bool windowed )
-{
-	if (WW3D_ERROR_OK == WW3D::Set_Device_Resolution(xres,yres,bitdepth,windowed,true))
-	{
-		Render2DClass::Set_Screen_Resolution(RectClass(0, 0, xres, yres));
-		Display::setDisplayMode(xres, yres, bitdepth, windowed);
-		return TRUE;
-	}
-
-	//set back to the original mode.
-	WW3D::Set_Device_Resolution(getWidth(),getHeight(),getBitDepth(),getWindowed(), true);
-	Render2DClass::Set_Screen_Resolution(RectClass(0, 0, getWidth(),getHeight()));
-	Display::setDisplayMode(getWidth(),getHeight(),getBitDepth(), getWindowed());
-	return FALSE;	//did not change to a new mode.
-}
-
-/** Set width of display */
-//=============================================================================
-void W3DDisplay::setWidth( UnsignedInt width )
-{
-
-	// extending functionality
-	Display::setWidth( width );
-
-	// our 2D renderer will use mapping coords to make (0,0) the upper left
-	// of the screen with (width,height) at the lower right
-	m_2DRender->Set_Coordinate_Range( RectClass( 0, 0, getWidth(), getHeight() ) );
-
-}  // end set width
-
-// W3DDisplay::setHeight ======================================================
-/** Set height of display */
-//=============================================================================
-void W3DDisplay::setHeight( UnsignedInt height )
-{
-
-	// extending functionality
-	Display::setHeight( height );
-
-	// our 2D renderer will use mapping coords to make (0,0) the upper left
-	// of the screen with (width,height) at the lower right
-	m_2DRender->Set_Coordinate_Range( RectClass( 0, 0, getWidth(), getHeight() ) );
-
-}  // end set height
-
-// W3DDisplay::initAssets =====================================================
-/** */
-//=============================================================================
-void W3DDisplay::initAssets( void )
-{
-
-}  // end initAssets
-
-// W3DDisplay::init3DScene ====================================================
-/** */
-//=============================================================================
-void W3DDisplay::init3DScene( void )
-{
-
-}  // end init3DScene
-
-// W3DDisplay::init2DScene ====================================================
-/** This is the 2D scene, you can use it to draw on a 2D plane over the
-	* 3D background */
-//=============================================================================
-void W3DDisplay::init2DScene( void )
-{
-
-}  // end init2DScene
-
-// W3DDisplay::init ===========================================================
-/** Initialize or re-initialize the W3D display system.  Here we need to
-  * create our window, and get our 3D hardware setup and online */
-//=============================================================================
-void W3DDisplay::init( void )
-{
-
-	//
-	// call our base class init, this method should be able to handle re-entry
-	// with its own logic
-	//
-	Display::init();
-
-	// handle re-entry for ourselves
-	if( m_initialized )
-	{
-
-		/// @todo W3DDisplay needs RE-init logic!
+#ifdef BUILD_WITH_D3D11
+	// Apply gamma/brightness/contrast via the DXGI swap chain's gamma ramp.
+	auto& device = Render::Renderer::Instance().GetDevice();
+	IDXGISwapChain1* swapChain = device.GetSwapChain();
+	if (!swapChain)
 		return;
 
-	}  // end if
-	// Override the W3D File system
-	TheW3DFileSystem = NEW W3DFileSystem;
+	ComPtr<IDXGIOutput> output;
+	if (FAILED(swapChain->GetContainingOutput(&output)) || !output)
+		return;
 
-	// init the Westwood math library
-	WWMath::Init();
+	// Build a gamma ramp.  Each channel entry maps a linear [0..1] input to
+	// an output intensity.  We apply:  out = contrast * pow(in, 1/gamma) + brightness
+	// The DXGI ramp uses float values in [0, 1].
+	DXGI_GAMMA_CONTROL ramp = {};
+	ramp.Scale  = { 1.0f, 1.0f, 1.0f };
+	ramp.Offset = { 0.0f, 0.0f, 0.0f };
 
-	// create our 3D interface scene
-	m_3DInterfaceScene = NEW_REF( RTS3DInterfaceScene, () );
-	m_3DInterfaceScene->Set_Ambient_Light( Vector3( 1, 1, 1 ) );
+	Real invGamma = (gamma > 0.01f) ? (1.0f / gamma) : 1.0f;
 
-	// create our 2D scene
-	m_2DScene = NEW_REF( RTS2DScene, () );
-	m_2DScene->Set_Ambient_Light( Vector3( 1, 1, 1 ) );
-
-	// create our 3D scene
-	m_3DScene =NEW_REF( RTS3DScene, () );
-#if defined(_DEBUG) || defined(_INTERNAL)
-	if( TheGlobalData->m_wireframe )
-		m_3DScene->Set_Polygon_Mode( SceneClass::LINE );
-#endif
-//============================================================================
-	// m_myLight = NEW_REF
-//============================================================================
-	Int lindex;
-	for (lindex=0; lindex<TheGlobalData->m_numGlobalLights; lindex++) 
-	{	m_myLight[lindex] = NEW_REF( LightClass, (LightClass::DIRECTIONAL) );
-	}
-
-	setTimeOfDay( TheGlobalData->m_timeOfDay );	//set each light to correct values for given time
-
-	for (lindex=0; lindex<TheGlobalData->m_numGlobalLights; lindex++) 
-	{	m_3DScene->setGlobalLight( m_myLight[lindex], lindex );
-	}
-
-#ifdef SAMPLE_DYNAMIC_LIGHT
-	theDynamicLight = NEW_REF(W3DDynamicLight, ());
-	Real red = 1;
-	Real green = 1;
-	Real blue = 0;
-	if(red==0 && blue==0 && green==0) {
-		red = green = blue = 1;
-	}
-	theDynamicLight->Set_Ambient( Vector3( red, green, blue ) );
-	theDynamicLight->Set_Diffuse( Vector3( red, green, blue) );
-	theDynamicLight->Set_Position(Vector3(0, 0, 4));
-	theDynamicLight->Set_Far_Attenuation_Range(1, 8);
-	// Note: Don't Add_Render_Object dynamic lights. 
-	m_3DScene->addDynamicLight( theDynamicLight );
-#endif
-
-	// create a new asset manager
-	m_assetManager = NEW W3DAssetManager;	
-	m_assetManager->Register_Prototype_Loader(&_ParticleEmitterLoader );
-	m_assetManager->Register_Prototype_Loader(&_AggregateLoader);
-	m_assetManager->Set_WW3D_Load_On_Demand( true );
-
-
-	if (TheGlobalData->m_incrementalAGPBuf)
+	for (int i = 0; i < 1025; ++i)
 	{
-		SortingRendererClass::SetMinVertexBufferSize(1);
+		Real t = (Real)i / 1024.0f;
+		Real value = contrast * powf(t, invGamma) + bright;
+		if (value < 0.0f) value = 0.0f;
+		if (value > 1.0f) value = 1.0f;
+		ramp.GammaCurve[i].Red   = value;
+		ramp.GammaCurve[i].Green = value;
+		ramp.GammaCurve[i].Blue  = value;
 	}
-	if (WW3D::Init( ApplicationHWnd ) != WW3D_ERROR_OK)
-		throw ERROR_INVALID_D3D;	//failed to initialize.  User probably doesn't have DX 8.1
 
-	WW3D::Set_Prelit_Mode( WW3D::PRELIT_MODE_LIGHTMAP_MULTI_PASS );
-	WW3D::Set_Collision_Box_Display_Mask(0x00);	///<set to 0xff to make collision boxes visible
-	WW3D::Enable_Static_Sort_Lists(true);
-	WW3D::Set_Thumbnail_Enabled(false);
-	WW3D::Set_Screen_UV_Bias( TRUE );  ///< this makes text look good :)
-	WW3D::Set_Texture_Bitdepth(32);
-			
-	setWindowed( TheGlobalData->m_windowed );
+	output->SetGammaControl(&ramp);
+#endif // BUILD_WITH_D3D11
 
-	// create a 2D renderer helper
-	m_2DRender = NEW Render2DClass;
-	DEBUG_ASSERTCRASH( m_2DRender, ("Cannot create Render2DClass") );
+#ifdef BUILD_WITH_VULKAN
+	// Vulkan doesn't have a direct gamma ramp API.
+	// Store the gamma value — a post-process shader can apply it if needed.
+	// For now, the brightness slider has no visible effect on Vulkan.
+	// TODO: Implement as a full-screen post-process pass or via swapchain sRGB format.
+	(void)gamma; (void)bright; (void)contrast; (void)calibrate;
+#endif
+}
 
-	// set our default width and height and bit depth
-	/// @todo we should set this according to options read from a file
-	setWidth( TheGlobalData->m_xResolution );
-	setHeight( TheGlobalData->m_yResolution );
-	setBitDepth( W3D_DISPLAY_DEFAULT_BIT_DEPTH );
+// ============================================================================
+// updateAverageFPS
+// ============================================================================
 
-	if( WW3D::Set_Render_Device( 0, 
-															 getWidth(), 
-															 getHeight(), 
-															 getBitDepth(), 
-															 getWindowed(), 
-															 true ) != WW3D_ERROR_OK ) 
+void W3DDisplay::updateAverageFPS()
+{
+	static UnsignedInt lastTime = 0;
+	static Int frameCount = 0;
+	UnsignedInt now = timeGetTime();
+
+	frameCount++;
+
+	if (now - lastTime > 500)
 	{
-		// Getting the device at the default bit depth (32) didn't work, so try
-		// getting a 16 bit display.  (Voodoo 1-3 only supported 16 bit.) jba.
-		setBitDepth( 16 );
-		if( WW3D::Set_Render_Device( 0, 
-																 getWidth(), 
-																 getHeight(), 
-																 getBitDepth(), 
-																 getWindowed(), 
-																 true ) != WW3D_ERROR_OK ) 
+		m_currentFPS = (Real)frameCount * 1000.0f / (Real)(now - lastTime);
+		m_averageFPS = m_averageFPS * 0.8f + m_currentFPS * 0.2f;
+		frameCount = 0;
+		lastTime = now;
+	}
+}
+
+// ============================================================================
+// step
+// ============================================================================
+
+void W3DDisplay::step()
+{
+	Display::step();
+}
+
+// ============================================================================
+// draw - THE MAIN RENDERING FUNCTION
+// This is called every frame. Real D3D11 rendering happens here.
+// ============================================================================
+
+void W3DDisplay::draw()
+{
+	LIVE_PERF_SCOPE("W3DDisplay::draw");
+	static int s_loggedFrames = 0;
+
+	// The game loop calls draw() multiple times per logic frame (e.g., 11 times
+	// during gameFrame=0 loading). Each call does BeginFrame (clear to black) +
+	// EndFrame (Present), causing rapid black frame flashing.
+	// Fix: track if we've already rendered for this logic frame and skip
+	// redundant clear+present cycles. Allow re-rendering when the logic frame
+	// advances (new game state to display).
+	//
+	// HOWEVER, once gameplay actually starts (curGameFrame > 0) and the
+	// FramePacer's logic-time-scale accumulator is decoupling render from
+	// the 30 Hz simulation, multi-draw per logic tick is REQUIRED, not a
+	// bug. Each render between two logic ticks lerps drawables further
+	// along the prev→current logic transforms via Drawable::draw's
+	// getInterpolationFraction path. Without this we'd be capped at one
+	// draw per logic tick (i.e. 30 FPS in campaign).
+	static unsigned int s_lastRenderedGameFrame = UINT_MAX;
+	static bool s_renderedThisFrame = false;
+	unsigned int curGameFrame = TheGameLogic ? TheGameLogic->getFrame() : 0;
+	if (curGameFrame != s_lastRenderedGameFrame)
+	{
+		s_lastRenderedGameFrame = curGameFrame;
+		s_renderedThisFrame = false;
+	}
+	else if (s_renderedThisFrame && !g_debugDisableMultiDrawSkip)
+	{
+		// Already rendered and presented for this game frame.
+		// BUT: if the game is paused (e.g. ESC menu), we must keep
+		// rendering so the menu is visible and transitions animate.
+		// Also allow re-rendering during load screens — the load screen
+		// plays a video in its own loop while the game frame stays at 0.
+		//
+		// CRITICAL: the shell menu (not in a match) and the shell map need
+		// to keep rendering every frame, because the logic frame never
+		// advances while sitting at the main menu. Without this exception
+		// the entire main menu freezes on the first rendered frame.
+		const bool inGame = TheGameLogic && TheGameLogic->isInGame();
+		const bool inShellGame = TheGameLogic && TheGameLogic->isInShellGame();
+		const bool gamePaused = TheGameLogic && TheGameLogic->isGamePaused();
+		const bool fullscreenMoviePlaying = isMoviePlaying();
+		const bool loadScreenActive = TheGlobalData && TheGlobalData->m_loadScreenRender;
+		const bool uiMoviePlaying = TheInGameUI &&
+			(TheInGameUI->videoBuffer() != nullptr || TheInGameUI->cameoVideoBuffer() != nullptr);
+		// Inspector pause freezes the logic frame counter, which would
+		// otherwise trip this early-out and stop calling Inspector::
+		// BeginFrame/Render — the toolbar would stop receiving NewFrame
+		// and become unresponsive. Force re-render whenever the
+		// inspector has paused the simulation.
+		const bool inspectorPaused = Inspector::IsPaused();
+
+		// Bypass the dedupe entirely once gameplay has begun and the
+		// FramePacer is running the simulation on its accumulator. The
+		// renderer must be free to draw many frames per 30 Hz logic tick
+		// for visual interpolation to look smooth. We restrict this to
+		// non-shell, non-frame-zero (so the original loading-flash dedupe
+		// still triggers in the shell map and the very first setup
+		// frames) and only when no fullscreen UI/video state would prefer
+		// the existing carve-outs below.
+		const bool interpolatingGameplay =
+			TheFramePacer && TheFramePacer->isLogicTimeScaleEnabled()
+			&& curGameFrame > 0 && inGame && !inShellGame
+			&& !gamePaused && !fullscreenMoviePlaying && !loadScreenActive
+			&& !uiMoviePlaying && !inspectorPaused;
+		if (interpolatingGameplay)
 		{
-
-			WW3D::Shutdown();
-			WWMath::Shutdown();
-			throw ERROR_INVALID_D3D;	//failed to initialize.  User probably doesn't have DX 8.1
-			DEBUG_ASSERTCRASH( 0, ("Unable to set render device\n") );
+			// Fall through to the actual rendering path below — each
+			// render advances the visual interpolation fraction.
+		}
+		else if (inGame && !gamePaused && !fullscreenMoviePlaying && !loadScreenActive && !uiMoviePlaying && !inspectorPaused)
+		{
 			return;
 		}
-
-	}  // end if
-
-	//Check if level was never set and default to setting most suitable for system.
-	if (TheGameLODManager->getStaticLODLevel() == STATIC_GAME_LOD_UNKNOWN)
-		TheGameLODManager->setStaticLODLevel(TheGameLODManager->findStaticLODLevel());
-	else
-	{	//Static LOD level was applied during GameLOD manager init except for texture reduction
-		//which needs to be applied here.
-		Int txtReduction=TheWritableGlobalData->m_textureReductionFactor;
-		if (txtReduction > 0)
-		{		WW3D::Set_Texture_Reduction(txtReduction,32);
-				//Tell LOD manager that texture reduction was applied.
-				TheGameLODManager->setCurrentTextureReduction(txtReduction);
-		}
 	}
 
-	if (TheGlobalData->m_displayGamma != 1.0f)
-		setGamma(TheGlobalData->m_displayGamma,0.0f,1.0f,FALSE);
-
-	initAssets();
-	init2DScene();
-	init3DScene();
-	W3DShaderManager::init();
-
-	// Create and initialize the debug display
-	m_nativeDebugDisplay = NEW W3DDebugDisplay();
-	m_debugDisplay = m_nativeDebugDisplay;
-	if ( m_nativeDebugDisplay )
-	{
-		m_nativeDebugDisplay->init();
-		GameFont *font;
-
-		if (TheGlobalLanguageData && TheGlobalLanguageData->m_nativeDebugDisplay.name.isNotEmpty())
-		{
-			font=TheFontLibrary->getFont(
-				TheGlobalLanguageData->m_nativeDebugDisplay.name,
-				TheGlobalLanguageData->m_nativeDebugDisplay.size,
-				TheGlobalLanguageData->m_nativeDebugDisplay.bold);
-		}
-		else
-			font=TheFontLibrary->getFont( AsciiString("FixedSys"), 8, FALSE );
-
-		m_nativeDebugDisplay->setFont( font );
-		m_nativeDebugDisplay->setFontHeight( 13 );
-		m_nativeDebugDisplay->setFontWidth( 9 );
-	}
-
-	DX8WebBrowser::Initialize();
-
-	// we're now online
-	m_initialized = true;
-	if( TheGlobalData->m_displayDebug )
-	{
-		m_debugDisplayCallback = StatDebugDisplay;
-	}
-}  // end init
-
-// W3DDisplay::reset ===========================================================
-/** Reset the W3D display system.  Here we need to
-  * remove the objects from the previous map. */
-//=============================================================================
-void W3DDisplay::reset( void )
-{
-
-	Display::reset();
-
-	// Remove all render objects.
-
-	SceneIterator *sceneIter = m_3DScene->Create_Iterator();
-	sceneIter->First();
-	while(!sceneIter->Is_Done()) {
-		RenderObjClass * robj = sceneIter->Current_Item();
-		robj->Add_Ref();
-		m_3DScene->Remove_Render_Object(robj);
-		robj->Release_Ref();
-		sceneIter->Next();
-	}
-	m_3DScene->Destroy_Iterator(sceneIter);
-
-	m_isClippedEnabled = FALSE;
-
-	// release any unused assets from W3D
-	/// @todo really need that "scene abstraction", having this stuff in the display is icky
-	m_assetManager->Release_Unused_Assets();
-
-	if (TheWritableGlobalData)
-		TheWritableGlobalData->m_drawSkyBox =0;
-}
-
-const UnsignedInt START_CUMU_FRAME = LOGICFRAMES_PER_SECOND / 2;	// skip first half-sec
-
-/** Update a moving average of the last 30 fps measurements.  Also try to filter out temporary spikes.
-	This code is designed to be used by the GameLOD sytems to determine the correct dynamic LOD setting.
-*/
-void W3DDisplay::updateAverageFPS(void)
-{
-	const Real MaximumFrameTimeCutoff = 0.5f;	//largest frame interval (seconds) we accept before ignoring it as a momentary "spike"
-	const Int FPS_HISTORY_SIZE = 30;	//keep track of the last 30 frames
-
-	static Int64 lastUpdateTime64 = 0;
-	static Int historyOffset = 0;
-	static Int numSamples = 0;
-	static double fpsHistory[FPS_HISTORY_SIZE];
-
-	Int64 freq64 = getPerformanceCounterFrequency();
-	Int64 time64 = getPerformanceCounter();
-
-#if defined(_DEBUG) || defined(_INTERNAL)
-	if (TheGameLogic->getFrame() == START_CUMU_FRAME)
-	{
-		m_timerAtCumuFPSStart = time64;
-	}
-#endif
-
-	Int64 timeDiff = time64 - lastUpdateTime64;
-
-	// convert elapsed time to seconds
-	double elapsedSeconds = (double)timeDiff/(double)(freq64);
-
-	if (elapsedSeconds <= MaximumFrameTimeCutoff)	//make sure it's not a spike
-	{
-		// append new sameple to fps history.
-		if (historyOffset >= FPS_HISTORY_SIZE)
-			historyOffset = 0;
-
-		double currentFPS = 1.0/elapsedSeconds; 
-		fpsHistory[historyOffset++] = currentFPS;
-		numSamples++;
-		if (numSamples > FPS_HISTORY_SIZE)
-			numSamples = FPS_HISTORY_SIZE;
-	}
-
-	if (numSamples)
-	{	
-		// determine average frame rate over our past history.
-		Real average=0;
-		for (Int i=0,j=historyOffset-1; i<numSamples; i++,j--)
-		{
-			if (j < 0)
-				j=FPS_HISTORY_SIZE-1;	// wrap around to front of buffer
-			average += fpsHistory[j];
-		}
-
-		m_averageFPS = average / (Real)numSamples;
-	}
-
-	lastUpdateTime64 = time64;
-}
-
-#if defined(_DEBUG) || defined(_INTERNAL)	//debug hack to view object under mouse stats
-ICoord2D TheMousePos;
-#endif
-
-// W3DDisplay::gatherDebugStats ===================================================
-/** Compute and display debug stats on screen */
-//=============================================================================
-void W3DDisplay::gatherDebugStats( void )
-{
-	static UnsignedInt s_framesRenderedSinceLastUpdate = 0;
-	static Int64 s_lastUpdateTime64 = 0;
-	static double s_timeSinceLastUpdateInSecs = 0.0;
-	static Int s_drawCallsSinceLastUpdate = 0;
-	static Int s_sortedPolysSinceLastUpdate = 0;
-
-	// allocate the display strings if needed
-	if( m_displayStrings[0] == NULL )
-	{
-		GameFont *font;
-		if (TheGlobalLanguageData && TheGlobalLanguageData->m_nativeDebugDisplay.name.isNotEmpty())
-		{
-			font=TheFontLibrary->getFont(
-				TheGlobalLanguageData->m_nativeDebugDisplay.name,
-				TheGlobalLanguageData->m_nativeDebugDisplay.size,
-				TheGlobalLanguageData->m_nativeDebugDisplay.bold);
-		}
-		else
-			font = TheFontLibrary->getFont( AsciiString("FixedSys"), 8, FALSE );
-
-		for (int i = 0; i < DisplayStringCount; i++)
-		{
-			if (m_displayStrings[i] == NULL)
-			{
-				m_displayStrings[i] = TheDisplayStringManager->newDisplayString();
-				DEBUG_ASSERTCRASH( m_displayStrings[i], ("Failed to create DisplayString") );
-				m_displayStrings[i]->setFont( font );
-			}
-		}
-
-	}  // end if
-
-	if (m_benchmarkDisplayString == NULL)
-	{
-		GameFont *thisFont = TheFontLibrary->getFont( AsciiString("FixedSys"), 8, FALSE );
-		m_benchmarkDisplayString = TheDisplayStringManager->newDisplayString();
-		DEBUG_ASSERTCRASH( m_benchmarkDisplayString, ("Failed to create DisplayString") );
-		m_benchmarkDisplayString->setFont( thisFont );
-	}
-
-	++s_framesRenderedSinceLastUpdate;
-  s_drawCallsSinceLastUpdate += Debug_Statistics::Get_Draw_Calls();
-	s_sortedPolysSinceLastUpdate += Debug_Statistics::Get_Sorting_Polygons();
-
-	Int64 freq64 = getPerformanceCounterFrequency();
-	Int64 time64 = getPerformanceCounter();
-
-	s_timeSinceLastUpdateInSecs = ((double)(time64 - s_lastUpdateTime64) / (double)(freq64));
-
-#ifdef EXTENDED_STATS
-		static FILE *pListFile = NULL;
-		static Int64 lastFrameTime=0;
-		static samples = 0;
-		if (pListFile == NULL) {
-			pListFile = fopen("FrameRateLog.txt", "w");
-		}
-		samples++;
-		if (pListFile && lastFrameTime && samples<100) {
-			float timeSinceLastFrame = (float)((double)(time64-lastFrameTime) / (double)(freq64));
-			fprintf(pListFile, "%d ", (int)(1/timeSinceLastFrame));
-		}
-		lastFrameTime = time64;
-#endif
-
-	// we update stats on a delay
-	const Real UPDATE_RATE_SECS = 2.0;
-	if( s_timeSinceLastUpdateInSecs >= UPDATE_RATE_SECS || TheGlobalData->m_constantDebugUpdate )
-	{	
-		UnicodeString unibuffer, unibuffer2;
-		UnicodeString fpsString;
-			
-		// setup texture stats
-		Debug_Statistics::Record_Texture_Mode(Debug_Statistics::RECORD_TEXTURE_SIMPLE/*RECORD_TEXTURE_NONE*/);
-
-		// frames per second	
-		double fps = (Real)s_framesRenderedSinceLastUpdate / s_timeSinceLastUpdateInSecs;
-		double drawsPerFrame = Debug_Statistics::Get_Draw_Calls(); //(Real)s_drawCallsSinceLastUpdate / (Real)s_framesRenderedSinceLastUpdate;
-		double sortPolysPerFrame = Debug_Statistics::Get_Sorting_Polygons();  //(Real)s_sortedPolysSinceLastUpdate / (Real)s_framesRenderedSinceLastUpdate;
-		double skinDrawsPerFrame = Debug_Statistics::Get_DX8_Skin_Renders();
-
-		if (fps<0.1) fps = 0.1;
-
-		double ms = 1000.0f/fps;
-
-
-#if defined(_DEBUG) || defined(_INTERNAL)
-		double cumuTime = ((double)(time64 - m_timerAtCumuFPSStart) / (double)(freq64));
-		if (cumuTime < 0.0) cumuTime = 0.0;
-		Int numFrames = (Int)TheGameLogic->getFrame() - (Int)START_CUMU_FRAME;
-		double cumuFPS = (numFrames > 0 && cumuTime > 0.0) ? (numFrames / cumuTime) : 0.0;
-		double skinPolysPerFrame = Debug_Statistics::Get_DX8_Skin_Polygons();
-
-		Int LOD = TheGlobalData->m_terrainLOD;
-		//unibuffer.format( L"FPS: %.2f, %.2fms mapLOD=%d [cumu FPS=%.2f] draws: %.2f sort: %.2f", fps, ms, LOD, cumuFPS, drawsPerFrame,sortPolysPerFrame);
-		if (TheGlobalData->m_useFpsLimit) 
-				unibuffer.format( L"%.2f/%d FPS, ", fps, TheGameEngine->getFramesPerSecondLimit());
-		else
-				unibuffer.format( L"%.2f FPS, ", fps);
-
-		unibuffer2.format( L"%.2fms [cumuFPS=%.2f] draws: %d skins: %d sortP: %d skinP: %d LOD %d", ms, cumuFPS, (Int)drawsPerFrame,(Int)skinDrawsPerFrame,(Int)sortPolysPerFrame, (Int)skinPolysPerFrame, LOD);
-		unibuffer.concat(unibuffer2);
-#else
-		//Int LOD = TheGlobalData->m_terrainLOD;
-		//unibuffer.format( L"FPS: %.2f, %.2fms mapLOD=%d draws: %.2f sort %.2f", fps, ms, LOD, drawsPerFrame,sortPolysPerFrame);
-		unibuffer.format( L"FPS: %.2f, %.2fms draws: %.2f skins: %.2f sort %.2f", fps, ms, drawsPerFrame,skinDrawsPerFrame,sortPolysPerFrame);
-		if (TheGlobalData->m_useFpsLimit) 
-		{
-			unibuffer2.format(L", FPSLock %d",TheGlobalData->m_framesPerSecondLimit);
-			unibuffer.concat(unibuffer2);
-		}
-#endif
-
-		fpsString.format( L"FPS: %.2f", fps);
-		m_benchmarkDisplayString->setText( fpsString );
-
-		Int polyPerFrame = Debug_Statistics::Get_DX8_Polygons();
-
-#ifdef EXTENDED_STATS
-		static float gameOverheadMS = 0.0f;
-		static float consoleMS = 0.0f;
-		static float threeDOverheadMS = 0.0f;
-		static float terrainMS = 0.0f;
-		static float objectMS = 0.0f;
-		static float overlapMS = 0.0f;
-		static int  extendedStats = 0;
-		const int SHOW_STATS_TIME=12; // show extended stats for 5 cycles == 10 seconds.
-		static enum {disabled, sync, gameOverhead, console, threeDOverhead, terrain, objects, overlap, normal} statMode = disabled;
-
-		if (statMode == sync) {
-			extendedStats = SHOW_STATS_TIME;
-			statMode = gameOverhead;
-		} else if (statMode == gameOverhead) {
-			gameOverheadMS = ms;
-			statMode = console;
-			DX8Wrapper::stats.m_disableTerrain = true;
-			DX8Wrapper::stats.m_disableOverhead = true;
-			DX8Wrapper::stats.m_disableWater = true;
-			DX8Wrapper::stats.m_disableObjects = true;
-			DX8Wrapper::stats.m_disableConsole = false;
-			DX8Wrapper::stats.m_debugLinesToShow = 1;
-		} else if (statMode == console) {
-			consoleMS = ms;
-			statMode = threeDOverhead;
-			DX8Wrapper::stats.m_disableTerrain = true;
-			DX8Wrapper::stats.m_disableOverhead = true;
-			DX8Wrapper::stats.m_disableWater = true;
-			DX8Wrapper::stats.m_disableObjects = true;
-			DX8Wrapper::stats.m_disableConsole = true;
-			DX8Wrapper::stats.m_debugLinesToShow = 1;
-		} else if (statMode == threeDOverhead) {				 
-			threeDOverheadMS = ms;
-			statMode = terrain;
-			DX8Wrapper::stats.m_disableTerrain = false;
-			DX8Wrapper::stats.m_disableOverhead = true;
-			DX8Wrapper::stats.m_disableWater = true;
-			DX8Wrapper::stats.m_disableObjects = true;
-			DX8Wrapper::stats.m_disableConsole = true;
-			DX8Wrapper::stats.m_debugLinesToShow = 1;
-		} else if (statMode == terrain) {
-			terrainMS = ms;
-			statMode = objects;
-			DX8Wrapper::stats.m_disableOverhead = true;
-			DX8Wrapper::stats.m_disableTerrain = true;
-			DX8Wrapper::stats.m_disableWater = true;
-			DX8Wrapper::stats.m_disableObjects = false;
-			DX8Wrapper::stats.m_disableConsole = true;
-			DX8Wrapper::stats.m_debugLinesToShow = 1;
-		} else if (statMode == objects) {
-			objectMS = ms;
-			statMode = overlap;
-			DX8Wrapper::stats.m_disableOverhead = false;
-			DX8Wrapper::stats.m_disableTerrain = false;
-			DX8Wrapper::stats.m_disableWater = false;
-			DX8Wrapper::stats.m_disableObjects = false;
-			DX8Wrapper::stats.m_disableConsole = true;
-			DX8Wrapper::stats.m_sleepTime = (int)(terrainMS);
-			DX8Wrapper::stats.m_debugLinesToShow = 1;
-		} else if (statMode == overlap) {
-			overlapMS = ms;
-			statMode = normal;
-			DX8Wrapper::stats.m_disableOverhead = false;
-			DX8Wrapper::stats.m_disableTerrain = false;
-			DX8Wrapper::stats.m_disableWater = false;
-			DX8Wrapper::stats.m_disableObjects = false;
-			DX8Wrapper::stats.m_disableConsole = true;
-			DX8Wrapper::stats.m_sleepTime = 0;
-			DX8Wrapper::stats.m_debugLinesToShow = 1;
-		} else if (statMode == normal) {
-			overlapMS = (ms + ((int)terrainMS) - overlapMS );
-			statMode = disabled;
-			extendedStats = SHOW_STATS_TIME;
-
-			// Done collecting stats. Re-enable stuff
-			DX8Wrapper::stats.m_disableConsole = false;
-			DX8Wrapper::stats.m_debugLinesToShow = -1;
-		} else if (!DX8Wrapper::stats.m_showingStats) {
-			// start collecting extended info. 
-			DX8Wrapper::stats.m_showingStats = true;
-			DX8Wrapper::stats.m_disableOverhead = false;
-			DX8Wrapper::stats.m_disableTerrain = true;
-			DX8Wrapper::stats.m_disableWater = true;
-			DX8Wrapper::stats.m_disableObjects = true;
-			DX8Wrapper::stats.m_disableConsole = true;
-			DX8Wrapper::stats.m_debugLinesToShow = 1;
-			statMode = sync;
-			gameOverheadMS = 0.0f;
-			threeDOverheadMS = 0.0f;
-			terrainMS = 0.0f;
-			objectMS = 0.0f;
-		}
-		if (statMode != disabled) {
-			unibuffer.format(L"FPS: %.2f, %.2fms - Collecting extended stats.", fps, ms);
-		} else if (extendedStats>0) {
-			extendedStats--;
-			unibuffer.format( L"FPS: %.2f, %.2fms - OH %.2fms, Console %.2fms, 3D OH %.2fms, Terrain %.2fms, Obs %.2fms, CPU %.2fms", 
-				fps, ms, gameOverheadMS, consoleMS, threeDOverheadMS, terrainMS, objectMS, overlapMS);
-			if (extendedStats==SHOW_STATS_TIME-2) {
-				char bufferA[ 256 ];
-				sprintf( bufferA, "FPS: %.2f, %.2fms - OH %.2fms, Console %.2fms, 3D OH %.2fms, Terrain %.2fms, Obs %.2fms, CPU %.2fms\n", 
-					fps, ms, gameOverheadMS, consoleMS, threeDOverheadMS, terrainMS, objectMS, overlapMS);
-				::OutputDebugString(bufferA);
-				if (pListFile) {
-					fprintf(pListFile, "\n%s", bufferA);
-				}				
-				sprintf( bufferA, "Polygons: per frame %d, per second %d\n", polyPerFrame,
-						(Int)(polyPerFrame*fps));
-				::OutputDebugString(bufferA);
-				if (pListFile) {
-					fprintf(pListFile, "%s", bufferA);
-					fflush(pListFile);
-				}				
-			}
-		} 
- 		if (pListFile) {
-			fprintf(pListFile, "\nFPS: %.2f, %.2fms\n", fps, ms);
-			fflush(pListFile);
-		}				
-		if (pListFile) {
-			samples = 0;
-			if (statMode != disabled) {
-				fprintf(pListFile, "Stat%d-", statMode);
-			} 
-		}				
-
-#endif
-		// check for debug D3D
-		Bool debugD3D=false;
-		RegistryClass registry ("Software\\Microsoft\\Direct3d");
-		if (registry.Is_Valid ()) {
-			if (registry.Get_Int ("LoadDebugRuntime", 0) == 1) {
-				debugD3D = true;
-			}
-		}
-		if (debugD3D) {
-			unibuffer.concat(L", DEBUG D3D");
-		}
-#ifdef _DEBUG
-		unibuffer.concat(L", DEBUG app");
-#endif
-
-		m_displayStrings[FPS]->setText( unibuffer );
-
-		// Actual GameLogic frame number
-		unibuffer.format(L"Frame: %d", TheGameLogic->getFrame());
-		m_displayStrings[Frame]->setText( unibuffer );
-
-		// polygons this frame	
-		unibuffer.format( L"Polygons: per frame %d, per second %d", polyPerFrame,
-				(Int)(polyPerFrame*fps));
-		m_displayStrings[Polygons]->setText( unibuffer );
-
-		// vertices this frame
-		unibuffer.format( L"Vertices: %d", Debug_Statistics::Get_DX8_Vertices() );
-		m_displayStrings[Vertices]->setText( unibuffer );		
-
-		//
-		// I'm adjusting the texture memory usage counter by subtracting 
-		// out the terrain alpha texture (since it's really == terrain texture).
-		//
-		unibuffer.format( L"Video RAM: %d", Debug_Statistics::Get_Record_Texture_Size() - 1376256 );
-		m_displayStrings[VideoRam]->setText( unibuffer );
-
-		s_lastUpdateTime64 = time64;
-		s_timeSinceLastUpdateInSecs = 0.0f;
-		s_framesRenderedSinceLastUpdate = 0;
-		s_drawCallsSinceLastUpdate = 0;
-		s_sortedPolysSinceLastUpdate = 0;
-
-		// terrain stats
-		unibuffer.format( L"3-Way Blends: %d/%d, Shoreline Blends: %d/%d", TheTerrainRenderObject->getNumExtraBlendTiles(TRUE),
-			TheTerrainRenderObject->getNumExtraBlendTiles(FALSE),
-			TheTerrainRenderObject->getNumShoreLineTiles(TRUE),
-			TheTerrainRenderObject->getNumShoreLineTiles(FALSE));
-		m_displayStrings[TerrainStats]->setText( unibuffer );
-
-		// misc debug info
-		Coord3D camPos;
-		TheTacticalView->getPosition(&camPos);
-		Real zoom = TheTacticalView->getZoom();
-		Real pitch = TheTacticalView->getPitch();
-		Real FXPitch = TheTacticalView->getFXPitch();
-		Real angle = TheTacticalView->getAngle();
-		Real FOV = TheTacticalView->getFieldOfView();
-		//Real desiredHeight = TheTacticalView->getHeightAboveGround();
-		Real terrainHeight = TheTacticalView->getTerrainHeightUnderCamera();
-		Real actualHeightAboveGround = TheTacticalView->getCurrentHeightAboveGround();
-
-		unibuffer.format( L"Camera zoom: %g, pitch: %g/%g, yaw: %g, pos: %g, %g, %g, FOV: %g\n       Height above ground: %g Terrain height: %g",
-												zoom,
-												pitch,
-												FXPitch,
-												angle,
-												camPos.x, camPos.y, camPos.z,
-												FOV,
-												/*
-												zoom,
-												pitch * 180.0f / PI,
-												FXPitch * 180.0f / PI,
-												angle * 180.0f / PI,
-												camPos.x, camPos.y, camPos.z,
-												FOV * 180.0f / PI,
-												*/
-												actualHeightAboveGround, terrainHeight );
-		m_displayStrings[DebugInfo]->setText( unibuffer );
-
-		// display the keyboard modifier and mouse states.
-		unibuffer.format( L"States: " );
-		if( TheKeyboard->isShift() )
-		{
-			unibuffer.concat( L"Shift(" );
-			if( TheKeyboard->getModifierFlags() & KEY_STATE_LSHIFT )
-			{
-				unibuffer.concat( L"L" );
-			}
-			if( TheKeyboard->getModifierFlags() & KEY_STATE_RSHIFT )
-			{
-				unibuffer.concat( L"R" );
-			}
-			unibuffer.concat( L") " );
-		}
-		if( TheKeyboard->isCtrl() )
-		{
-			unibuffer.concat( L"Ctrl(" );
-			if( TheKeyboard->getModifierFlags() & KEY_STATE_LCONTROL )
-			{
-				unibuffer.concat( L"L" );
-			}
-			if( TheKeyboard->getModifierFlags() & KEY_STATE_RCONTROL )
-			{
-				unibuffer.concat( L"R" );
-			}
-			unibuffer.concat( L") " );
-		}
-		if( TheKeyboard->isAlt() )
-		{
-			unibuffer.concat( L"Alt(" );
-			if( TheKeyboard->getModifierFlags() & KEY_STATE_LALT )
-			{
-				unibuffer.concat( L"L" );
-			}
-			if( TheKeyboard->getModifierFlags() & KEY_STATE_RALT )
-			{
-				unibuffer.concat( L"R" );
-			}
-			unibuffer.concat( L") " );
-		}
-
-		const MouseIO *mouseStatus = TheMouse->getMouseStatus();
-
-		if( mouseStatus->leftState )
-		{
-			unibuffer.concat( L"LMB " );
-		}
-		if( mouseStatus->middleState )
-		{
-			unibuffer.concat( L"MMB " );
-		}
-		if( mouseStatus->rightState )
-		{
-			unibuffer.concat( L"RMB " );
-		}
-
-		Object *object = NULL;
-#if defined(_DEBUG) || defined(_INTERNAL)	//debug hack to view object under mouse stats
-		Drawable *draw = 	TheTacticalView->pickDrawable(&TheMousePos, FALSE, (PickType)0xffffffff );
-#else
-		Drawable *draw = TheGameClient->findDrawableByID( TheInGameUI->getMousedOverDrawableID() );
-#endif
-		if( draw  )
-			object = draw->getObject();
-		if( object )
-		{
-			unibuffer2.format( L"Moused over object: %S (%d) ", object->getTemplate()->getName().str(), object->getID() );
-			unibuffer.concat( unibuffer2 );
-		}
-		else
-		{
-			unibuffer.concat( L"Moused over object: TERRAIN " );
-		}
-		
-		m_displayStrings[ KEY_MOUSE_STATES ]->setText( unibuffer );
-
-		//display the x and y mouse coordinates
-		const MouseIO *mouseIO = TheMouse->getMouseStatus();
-		Coord3D worldPos;
-		TheTacticalView->screenToTerrain(&mouseIO->pos, &worldPos);
-		unibuffer.format( L"Mouse position: screen: (%d, %d), world: (%g, %g, %g)", mouseIO->pos.x, mouseIO->pos.y,
-			worldPos.x, worldPos.y, worldPos.z);
-		m_displayStrings[MousePosition]->setText( unibuffer );
-		
-		//display the number of particles in the world and being displayed on screen
-		Int totalParticles = TheParticleSystemManager->getParticleCount();
-		Int onScreenParticleCount = TheParticleSystemManager->getOnScreenParticleCount();
-		unibuffer.format( L"Particles: %d in world, %d being displayed", totalParticles, onScreenParticleCount );
-		m_displayStrings[Particles]->setText( unibuffer );
-
-		//display the number of objects in the world
-		UnsignedInt objCount = TheGameLogic->getObjectCount();
-		UnsignedInt objScreenCount = TheGameClient->getRenderedObjectCount();
-
-		unibuffer.format(L"Objects: %d in world, %d being displayed", objCount, objScreenCount );
-		m_displayStrings[Objects]->setText( unibuffer );
-
-		// Network incoming bandwidth stats
-		if (TheNetwork != NULL) {
-			unibuffer.format(L"IN: %.2f bytes/sec, %.2f packets/sec",
-				TheNetwork->getIncomingBytesPerSecond(), TheNetwork->getIncomingPacketsPerSecond());
-			m_displayStrings[NetIncoming]->setText( unibuffer );
-
-			// Network outgoing bandwidth stats
-			unibuffer.format(L"OUT: %.2f bytes/sec, %.2f packets/sec",
-				TheNetwork->getOutgoingBytesPerSecond(), TheNetwork->getOutgoingPacketsPerSecond());
-			m_displayStrings[NetOutgoing]->setText( unibuffer );
-
-			// Network performance stats
-			unibuffer.format(L"Run Ahead: %d, Net FPS: %d, Packet arrival cushion: %d",
-				TheNetwork->getRunAhead(), TheNetwork->getFrameRate(), TheNetwork->getPacketArrivalCushion());
-			m_displayStrings[NetStats]->setText( unibuffer );
-
-			// Client frame rate averages for all players in the game.  This only works right for the packet router.
-			unibuffer.clear();
-			Int numPlayers = TheNetwork->getNumPlayers();
-			for (Int i = 0; i < numPlayers; ++i) {
-				UnicodeString tempstr;
-				tempstr.format(L"%s: %d ", TheNetwork->getPlayerName(i).str(), TheNetwork->getSlotAverageFPS(i));
-				unibuffer.concat(tempstr);
-			}
-			m_displayStrings[NetFPSAverages]->setText( unibuffer );
-		} else {
-//			unibuffer.format(L"IN: 0.0 bytes/sec, 0.0 packets/sec");
-//			m_displayStrings[NetIncoming]->setText( unibuffer );
-
-			// Network outgoing bandwidth stats
-//			unibuffer.format(L"OUT: 0.0 bytes/sec, 0.0 packets/sec");
-//			m_displayStrings[NetOutgoing]->setText( unibuffer );
-      unibuffer.format(L"");
-//			unibuffer.format(L"Network not present");
-			m_displayStrings[NetOutgoing]->setText(unibuffer);
-			m_displayStrings[NetIncoming]->setText(unibuffer);
-			m_displayStrings[NetStats]->setText(unibuffer);
-			m_displayStrings[NetFPSAverages]->setText( unibuffer );
-		}
-
-		// selected object info stats
-		unibuffer.format( L"Select Info: '%d' drawables selected", TheInGameUI->getSelectCount() );
-		
-
-
-		//Sorry, guys. I need a special kluge here to get constantdebug results for angry mob.
-		//Do no be cross with me.
-		//if there is not exactly one drawable selected it will report on the moused-over drawable
-		if (TheInGameUI->getSelectCount() == 1)
-			draw = TheInGameUI->getFirstSelectedDrawable();
-
-
-		if( draw )
-		{
-			Object *obj = draw->getObject();
-			AsciiString objectName;
-
-			objectName.set( "No-Name" );
-			if( obj && obj->getName().isEmpty() == FALSE )
-				objectName = obj->getName();
-
-			unibuffer.format( L"Select Info: '%S'(%S) at (%.3f,%.3f,%.3f)",
-												draw->getTemplate()->getName().str(),
-												objectName.str(),
-												draw->getPosition()->x,
-												draw->getPosition()->y,
-												draw->getPosition()->z
-											);
-
-			const PhysicsBehavior *physics = obj->getPhysics();
-			PhysicsTurningType turnType = physics ? physics->getTurning() : TURN_NONE;
-
-			const DrawableLocoInfo *locoInfo = draw->getLocoInfo();
-			if( locoInfo )
-			{
-				unibuffer2.format( L"\nPhysics Info -- Turn: %d, Pitch(accel): %.3f(%.3f), Roll(accel): %.3f(%.3f)",
-													 turnType,
-													 locoInfo->m_accelerationPitch, locoInfo->m_accelerationPitchRate,
-													 locoInfo->m_accelerationRoll, locoInfo->m_accelerationRollRate );
-				unibuffer.concat( unibuffer2 );
-			}
-
-
-
-		
-			
-
-			// (gth) compute some stats about the rendering cost of this drawable
-#if defined(_DEBUG) || defined(_INTERNAL)	
-			RenderCost rcost;
-			for (DrawModule** dm = draw->getDrawModules(); *dm; ++dm)
-			{
-				(*dm)->getRenderCost(rcost);
-			}
-			if (rcost.getDrawCallCount() > 0) 
-			{
-				unibuffer2.format( L"\ndraw calls: %d(+%d) sort meshes: %d skins: %d  bones: %d",rcost.getDrawCallCount(),rcost.getShadowDrawCount(),rcost.getSortedMeshCount(),rcost.getSkinMeshCount(),rcost.getBoneCount());
-				unibuffer.concat( unibuffer2 );
-			}
-#endif
-
-			unibuffer.concat( L"\nModelStates: " );
-			ModelConditionFlags mcFlags = draw->getModelConditionFlags();
-			const numEntriesPerLine = 4;
-			int lineCount = 0;
-
-			for( int i = 0; i < MODELCONDITION_COUNT; i++ )
-			{
-				if( mcFlags.test( i ) )
-				{
-					unibuffer2.format( L"%S ", ModelConditionFlags::getBitNames()[ i ] );
-					unibuffer.concat( unibuffer2 );
-					lineCount++;
-					if( lineCount == numEntriesPerLine )
-					{
-						lineCount = 0;
-						unibuffer.concat( L"\n" );
-					}
-				}
-			}
-
-			//Render ALL modelcondition statii
-
-		}  // end if
-		m_displayStrings[ SelectedInfo ]->setText( unibuffer );
-
-	}
-
-}
-
-// W3DDisplay::drawDebugStats =================================================
-/** Draw debug statistics */
-//=============================================================================
-void W3DDisplay::drawDebugStats( void )
-{
-	Int	x = 3;
-	Int	y = 3;
-	Color textColor = GameMakeColor( 255, 255, 255, 255 );
-	Color dropColor = GameMakeColor( 0, 0, 0, 255 );
-
-	int linesOfStrings = DisplayStringCount;
-#ifdef EXTENDED_STATS
-	if (DX8Wrapper::stats.m_debugLinesToShow > -1) 
-	{
-		linesOfStrings = DX8Wrapper::stats.m_debugLinesToShow;
-	}
-
-#endif
-
-
-	Int w, h;
-	for (int i = 0; i < linesOfStrings; i++)
-	{
-		m_displayStrings[i]->draw( x, y, textColor, dropColor );
-		m_displayStrings[i]->getSize(&w, &h);
-		y += h;
-	}
-
-}  // end drawDebugStats
-
-// W3DDisplay::drawFPSStats =================================================
-/** Draw the FPS on the screen */
-//=============================================================================
-void W3DDisplay::drawFPSStats( void )
-{
-	Int	x = 3;
-	Int	y = 20;
-	Color textColor = GameMakeColor( 255, 255, 255, 255 );
-	Color dropColor = GameMakeColor( 0, 0, 0, 255 );
-
-	int linesOfStrings = 1;
-
-	for (int i = 0; i < linesOfStrings; i++)
-	{
-		m_benchmarkDisplayString->draw( x, y, textColor, dropColor );
-	}
-}
-
-
-//=============================================================================
-void StatDebugDisplay( DebugDisplayInterface *, void *, FILE *fp )
-{
-	DEBUG_CRASH(("This should never be called directly, but is just a placeholder for drawDebugStats()"));
-}
-
-// W3DDisplay::drawCurrentDebugDisplay =================================================
-/** Draw current debug display */
-//=============================================================================
-void W3DDisplay::drawCurrentDebugDisplay( void )
-{
-	if (m_debugDisplayCallback == StatDebugDisplay)
-	{
-		drawDebugStats();
-	}
-	else
-	{
-		if ( m_debugDisplay && m_debugDisplayCallback )
-		{
-			m_debugDisplay->reset();
-			m_debugDisplayCallback( m_debugDisplay, m_debugDisplayUserData );
-		}
-	}
-}  // end drawCurrentDebugDisplay
-
-// W3DDisplay::calculateTerrainLOD =================================================
-/** Calculates an adequately speedy terrain Level Of Detail. */
-//=============================================================================
-void W3DDisplay::calculateTerrainLOD( void )
-{
-	const Int NUM_SAMPLES=20;
-	const Int NUM_TO_DISCARD=5;
-	
-	Int64 freq64 = getPerformanceCounterFrequency();
-
-	char buf[_MAX_PATH];
-	float frameTime = 0;
-	float maxTimeLimit = TheGlobalData->m_terrainLODTargetTimeMS/1000.0f;
-	TerrainLOD goodLOD = TERRAIN_LOD_MIN;
-	TerrainLOD curLOD = TERRAIN_LOD_AUTOMATIC;
-	Int count = 0;
-#ifdef _DEBUG
-	// just go to TERRAIN_LOD_NO_WATER, mirror off.
-	TheWritableGlobalData->m_terrainLOD = TERRAIN_LOD_NO_WATER;
-	m_3DScene->drawTerrainOnly(false);
-	TheTerrainRenderObject->adjustTerrainLOD(0);
-	return;
-#endif
-	do {
-		Int i;
-		float timeForFrame=0;
-		frameTime = 0;
-		switch(curLOD) {
-			default: curLOD = TERRAIN_LOD_DISABLE; break;
-			case TERRAIN_LOD_AUTOMATIC: curLOD = TERRAIN_LOD_MAX; break;
-			case TERRAIN_LOD_MAX: curLOD = TERRAIN_LOD_NO_WATER; break;
-			case TERRAIN_LOD_HALF_CLOUDS: curLOD = TERRAIN_LOD_DISABLE; break;
-			case TERRAIN_LOD_NO_WATER: curLOD = TERRAIN_LOD_HALF_CLOUDS; break;
-		}
-		if (curLOD == TERRAIN_LOD_DISABLE) {
-			break;
-		}
-		TheWritableGlobalData->m_terrainLOD = curLOD;
-		m_3DScene->drawTerrainOnly(true);
-		TheTerrainRenderObject->adjustTerrainLOD(0);
-		for (i=0; i<NUM_SAMPLES; i++) {
-			Int64 startTime64 = getPerformanceCounter();
-			// start render block
-			updateViews();
-			if (WW3D::Begin_Render( true, true, Vector3( 0.0f, 0.0f, 0.0f ) ) == WW3D_ERROR_OK)
-			{	// draw all views of the world
-				drawViews();
-				// render is all done!
-				WW3D::End_Render();
-			}
-			Int64 time64 = getPerformanceCounter();
-			timeForFrame = (float)((double)(time64-startTime64) / (double)(freq64));
-			sprintf(buf, "%.2fms ", timeForFrame*1000.0f);
-			::OutputDebugString(buf);
-			if (i>=NUM_TO_DISCARD) {
-				frameTime += timeForFrame;
-				if (i>NUM_TO_DISCARD+1 && 
-					(timeForFrame / ((i+1)-NUM_TO_DISCARD)) > 2*maxTimeLimit) {
-					i++;
-					break;
-				}
-			}
-		}
-		frameTime /= ((i)-NUM_TO_DISCARD);
-		count++;
-		sprintf(buf, "\n LOD %d, time %.2fms\n", curLOD, frameTime*1000.0f);
-		::OutputDebugString(buf);
-		if (frameTime<maxTimeLimit && goodLOD<curLOD) {
-			goodLOD = curLOD;
-		}
-		if (frameTime < maxTimeLimit) break;
-	} while (count<10);
-
-	TheWritableGlobalData->m_terrainLOD = goodLOD;
-	m_3DScene->drawTerrainOnly(false);
-	TheTerrainRenderObject->adjustTerrainLOD(0);
-#ifdef _DEBUG
-	DEBUG_ASSERTCRASH(count<10, ("calculateTerrainLOD") );
-#endif
-
-}
-
-
-Real W3DDisplay::getAverageFPS()
-{
-	return m_averageFPS;
-}
-
-Int W3DDisplay::getLastFrameDrawCalls()
-{
-	return Debug_Statistics::Get_Draw_Calls();
-}
-
-//DECLARE_PERF_TIMER(BigAssRenderLoop)
-
-// W3DDisplay::draw ===========================================================
-/** Draw the entire W3D Display */
-//=============================================================================
-//DECLARE_PERF_TIMER(W3DDisplay_draw)
-void W3DDisplay::draw( void )
-{
-	//USE_PERF_TIMER(W3DDisplay_draw)
-	static UnsignedInt syncTime = 0;
-
-	extern HWND ApplicationHWnd;
-	if (ApplicationHWnd && ::IsIconic(ApplicationHWnd)) {
+#ifdef _WIN32
+	if (ApplicationHWnd && ::IsIconic(ApplicationHWnd))
 		return;
+#endif
+
+	if (TheGlobalData->m_headless)
+		return;
+
+	// Inspector::BeginFrame must run before any engine rendering for the
+	// frame, but after the headless / iconified early-outs above (no
+	// point starting an ImGui frame for a frame we're going to skip).
+	Inspector::BeginFrame();
+
+	// The view update phase computes the tactical camera transform and refreshes
+	// per-view world state before any 3D rendering. The original W3D display
+	// path did this each frame; without it the DX11 terrain pass renders with an
+	// uninitialized camera at the origin.
+	if (!g_debugDisableUpdateViews) updateViews();
+
+	// Inspector free-fly editor camera override. Runs AFTER the
+	// engine's updateViews() has recomputed its own camera transform
+	// from the pivot/angle/zoom system, so the override clobbers the
+	// engine's value before any 3D rendering reads it. No-op when the
+	// inspector camera is disabled.
+	Inspector::Camera::ApplyToEngineCamera();
+
+	// Advance WW3D animation clock. This drives skeletal animation, UV-offset
+	// mappers, particle emitters, dazzles, and anything else that reads
+	// WW3D::Get_Sync_Time() or Get_Logic_Time_Milliseconds().
+	// Advance WW3D animation clock ONLY on logic tick boundaries.
+	// Multiple render frames may occur per logic tick — animation must not
+	// advance between them or meshes flicker due to sub-frame bone changes.
+	if (!g_debugDisableWW3DSync)
+	{
+		static unsigned int s_lastSyncLogicFrame = UINT_MAX;
+		unsigned int logicFrame = TheGameLogic ? TheGameLogic->getFrame() : 0;
+		if (logicFrame != s_lastSyncLogicFrame)
+		{
+			s_lastSyncLogicFrame = logicFrame;
+			WW3D::Sync(true);
+		}
 	}
 
+	if (!g_debugDisableTrackUpdate && TheTerrainTracksRenderObjClassSystem)
+		TheTerrainTracksRenderObjClassSystem->update();
 
 	updateAverageFPS();
-	if (TheGlobalData->m_enableDynamicLOD && TheGameLogic->getShowDynamicLOD())
+
+	auto& renderer = Render::Renderer::Instance();
+
+	// Set fog + specular before BeginFrame so they're in frame constants
+	renderer.SetAtmosphereEnabled(false);
+	renderer.SetSurfaceSpecularEnabled(!g_debugDisableSurfaceSpec);
+	// Wire enhanced-water toggle to atmosphereParams.w. Default OFF =
+	// classic look matching original DX8.
+	renderer.SetEnhancedWaterEnabled(g_useEnhancedWater);
+
+	// Begin a new frame - clears the screen with actual D3D11 calls
+	g_debugFrameDrawCalls = 0;
+	renderer.BeginFrame();
+
+	// --- UPDATE DYNAMIC LIGHTS ---
 	{
-		DynamicGameLODLevel lod=TheGameLODManager->findDynamicLODLevel(m_averageFPS);
-		TheGameLODManager->setDynamicLODLevel(lod);
+		UnsignedInt now = timeGetTime();
+		if (m_lastLightUpdateTime == 0)
+			m_lastLightUpdateTime = now;
+		float deltaMs = (float)(now - m_lastLightUpdateTime);
+		// Clamp delta to avoid huge jumps (e.g. after alt-tab)
+		if (deltaMs > 200.0f)
+			deltaMs = 200.0f;
+		m_lastLightUpdateTime = now;
+
+		if (!g_debugDisableLightPulse)
+		{
+			updateLightPulses(deltaMs);
+			applyLightPulsesToRenderer();
+		}
+	}
+
+	// --- 3D SCENE RENDERING ---
+	CameraClass* camera = nullptr;
+	if (TheTacticalView)
+	{
+		W3DView* w3dView = static_cast<W3DView*>(TheTacticalView);
+		camera = w3dView->get3DCamera();
+	}
+
+	// Diagnostic: log camera state for the first few frames after a mission starts
+	{
+		static unsigned int s_diagLastFrame = UINT_MAX;
+		static int s_diagCount = 0;
+		if (curGameFrame < s_diagLastFrame && curGameFrame < 5) {
+			s_diagCount = 0; // reset when game frame counter resets (new mission)
+		}
+		s_diagLastFrame = curGameFrame;
+		if (s_diagCount < 30 && curGameFrame <= 60 && TheGameLogic && TheGameLogic->isInGame() && !TheGameLogic->isInShellGame())
+		{
+			char diagBuf[256];
+			snprintf(diagBuf, sizeof(diagBuf),
+				"MissionRender frame=%u zoom=%.3f cam=%p hmap=%p terrainReady=%d letterbox=%d\n",
+				curGameFrame,
+				TheTacticalView ? TheTacticalView->getZoom() : -1.0f,
+				camera,
+				GetTerrainHeightMap(),
+				(GetTerrainHeightMap() && Render::TerrainRenderer::Instance().IsReady()) ? 1 : 0,
+				m_letterBoxEnabled ? 1 : 0);
+			OutputDebugStringA(diagBuf);
+			s_diagCount++;
+		}
+	}
+
+	// Render the terrain if we have a heightmap and a camera
+	WorldHeightMap* heightMap = GetTerrainHeightMap();
+	if (heightMap)
+	{
+		auto& terrainRenderer = Render::TerrainRenderer::Instance();
+
+		// Build the mesh on first use or if invalidated
+		if (!terrainRenderer.IsReady())
+		{
+			terrainRenderer.BuildMesh(heightMap);
+			terrainRenderer.BuildRoadMesh(heightMap);
+			terrainRenderer.BuildBridgeMeshes(heightMap);
+		}
+
+		if (camera)
+		{
+			if (s_loggedFrames < 6)
+			{
+				AppendDX11SceneTrace(
+					"W3DDisplay::draw frame=%d heightMap=%p tacticalView=%p camera=%p terrainReady=%d\n",
+					s_loggedFrames,
+					heightMap,
+					TheTacticalView,
+					camera,
+					terrainRenderer.IsReady() ? 1 : 0);
+			}
+			{
+			// Profile each render pass (writes timing to perf log for first 30 frames)
+			static int s_perfFrames = 0;
+			auto perfNow = []() { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; };
+			auto perfMs = [](long long start, long long end) {
+				LARGE_INTEGER freq; QueryPerformanceFrequency(&freq);
+				return (double)(end - start) * 1000.0 / (double)freq.QuadPart;
+			};
+
+			// Set time for shader animations (water bump, cloud scroll)
+			renderer.SetTime(static_cast<float>(WW3D::Get_Sync_Time()));
+
+			// --- GPU SHADOW MAP PASS ---
+			// Renders selected casters from the sun's POV into a depth-only
+			// RT, then the regular PSMain ComputeShadow() samples it to
+			// darken pixels in shadow. Default ON; toggle with
+			// g_debugDisableShadowMap.
+			//
+			// Prior attempts regressed on three fronts, all fixed here:
+			//   1. "Skybox occludes shadows" — we walked m_3DScene, which
+			//      contains the skybox mesh. It wrote dome-wide depth and
+			//      shadowed everything below. FIX: do NOT walk m_3DScene.
+			//      Only walk TheGameClient->getDrawableList().
+			//   2. "Terrain shadows wrong" — AABB swam with the camera and
+			//      the shadow map shimmered. FIX: BuildCameraFitLightVP
+			//      now snaps the light-space AABB to shadow-texel grid.
+			//   3. "Things that shouldn't cast cast" — drawable list had
+			//      projectiles, props, decoration, UI helpers. FIX: tight
+			//      KINDOF allowlist (structures, infantry, vehicles,
+			//      aircraft, immobile walls, trees, shrubbery only).
+			//
+			// Terrain is a RECEIVER but never a caster — no self-shadow
+			// acne, matches original DX8 shadow-projector behavior.
+			if (!g_debugDisableShadowMap)
+			{
+				LIVE_PERF_SCOPE("W3DDisplay::shadowMap");
+
+				// ModelRenderer needs m_camera set; RenderRenderObject
+				// no-ops without it. Use the regular camera — shadow pass
+				// overrides cbuffer viewProjection with the light VP, and
+				// caster-mode skips frustum culling so the camera frustum
+				// not matching the light frustum is fine.
+				Render::ModelRenderer::Instance().BeginFrame(camera);
+
+				renderer.SetShadowEnabled(true);
+
+				Render::Float3 frustumCorners[8] = {};
+				const Vector3* w3dCorners = camera ? camera->Get_Frustum_Corners() : nullptr;
+				if (w3dCorners)
+				{
+					for (int i = 0; i < 8; ++i)
+						frustumCorners[i] = { w3dCorners[i].X, w3dCorners[i].Y, w3dCorners[i].Z };
+				}
+				renderer.BeginShadowPass(w3dCorners ? frustumCorners : nullptr);
+
+				Render::ModelRenderer::Instance().SetShadowCasterMode(true);
+
+				// DEBUG: submit every visible drawable regardless of filter
+				// to rule out the allowlist. Also logs submission count so
+				// we can see in DbgView whether casters are reaching the
+				// submit path at all.
+				int submittedCount = 0;
+				if (TheGameClient)
+				{
+					Drawable* draw = TheGameClient->getDrawableList();
+					while (draw)
+					{
+						if (draw->isDrawableEffectivelyHidden())
+						{
+							draw = draw->getNextDrawable();
+							continue;
+						}
+						for (DrawModule** dm = draw->getDrawModules(); *dm; ++dm)
+						{
+							ObjectDrawInterface* odi = (*dm)->getObjectDrawInterface();
+							if (!odi)
+								continue;
+							W3DModelDraw* w3dDraw = static_cast<W3DModelDraw*>(odi);
+							RenderObjClass* renderObject = w3dDraw->getRenderObject();
+							if (renderObject && !renderObject->Is_Hidden())
+							{
+								Render::ModelRenderer::Instance().RenderRenderObject(renderObject);
+								++submittedCount;
+							}
+						}
+
+						draw = draw->getNextDrawable();
+					}
+				}
+
+				Render::ModelRenderer::Instance().SetShadowCasterMode(false);
+
+				static int s_shadowDiagFrames = 0;
+				if (s_shadowDiagFrames < 12)
+				{
+					char b[160];
+					snprintf(b, sizeof(b),
+						"[SHADOW] frame=%d submitted=%d shadowReady_implicit=yes\n",
+						s_shadowDiagFrames, submittedCount);
+					OutputDebugStringA(b);
+					++s_shadowDiagFrames;
+				}
+
+				renderer.EndShadowPass();
+				renderer.BindShadowMap();
+			}
+			else
+			{
+				renderer.SetShadowEnabled(false);
+			}
+
+			// depth is cleared in BeginFrame — no extra clear needed
+			{
+			LIVE_PERF_SCOPE("W3DDisplay::terrainPasses");
+			auto t0 = perfNow();
+			if (!g_debugDisableSkyBox)  terrainRenderer.RenderSkyBox(camera);
+			renderer.Restore3DState();
+			auto t1 = perfNow();
+			if (!g_debugDisableTerrain) terrainRenderer.Render(camera, heightMap);
+			renderer.Restore3DState();
+			auto t2 = perfNow();
+			if (!g_debugDisableRoads)   terrainRenderer.RenderRoads(camera);
+			renderer.Restore3DState();
+			if (!g_debugDisableCloudShadows) terrainRenderer.RenderCloudShadows(camera);
+			renderer.Restore3DState();
+			auto t3 = perfNow();
+			if (!g_debugDisableBridges) terrainRenderer.RenderBridges(camera);
+			renderer.Restore3DState();
+			auto t4 = perfNow();
+			if (!g_debugDisableProps)   RenderTerrainPropsDX11(camera);
+			renderer.Restore3DState();
+			auto t5 = perfNow();
+			if (!g_debugDisableBibs)    RenderBibsDX11(camera);
+			renderer.Restore3DState();
+			auto t6 = perfNow();
+			if (!g_debugDisableScorch)  RenderScorchMarksDX11(camera);
+			renderer.Restore3DState();
+			auto t7 = perfNow();
+			if (!g_debugDisableTracks)  RenderTerrainTracksDX11(camera);
+			renderer.Restore3DState();
+			auto t8 = perfNow();
+			if (!g_debugDisableWaypoints) RenderWaypointsDX11(camera);
+			renderer.Restore3DState();
+			auto t9 = perfNow();
+			if (!g_debugDisableShroud)  terrainRenderer.RenderShroud(camera);
+			renderer.Restore3DState();
+			auto t10 = perfNow();
+
+			(void)t0; (void)t1; (void)t2; (void)t3; (void)t4; (void)t5; (void)t6; (void)t7; (void)t8; (void)t9; (void)t10;
+			}
+		}
+		}
+		else if (s_loggedFrames < 6)
+		{
+			AppendDX11SceneTrace(
+				"W3DDisplay::draw frame=%d heightMap=%p tacticalView=%p camera=null terrainReady=%d\n",
+				s_loggedFrames,
+				heightMap,
+				TheTacticalView,
+				terrainRenderer.IsReady() ? 1 : 0);
+		}
+	}
+	else if (s_loggedFrames < 6)
+	{
+		AppendDX11SceneTrace(
+			"W3DDisplay::draw frame=%d heightMap=null tacticalView=%p\n",
+			s_loggedFrames,
+			TheTacticalView);
+	}
+
+	// Draw all views of the world (calls drawViews which triggers view rendering)
+	{
+		LIVE_PERF_SCOPE("W3DDisplay::drawViews");
+		if (!g_debugDisableDrawViews) drawViews();
+	}
+
+	// Flush deferred translucent meshes sorted back-to-front.
+	{
+		LIVE_PERF_SCOPE("W3DDisplay::flushTranslucent");
+		if (!g_debugDisableTranslucent)
+			Render::ModelRenderer::Instance().FlushTranslucent();
+		renderer.Restore3DState();
+	}
+
+	// Render shadow decals on terrain under units. This is the original
+	// Generals projected-shadow system — blob/outline decals that conform to
+	// terrain height under each unit/building. Gated only on the dev disable
+	// flag; the user-facing "2D Shadows" option used to gate this too but in
+	// practice its LOD-dependent default was turning shadows off entirely for
+	// most setups. We now render shadows unconditionally when the debug
+	// toggle is off (the options checkbox still writes m_useShadowDecals for
+	// save-file compatibility, it just no longer hides shadows at render).
+	if (!g_debugDisableShadowDecals && camera && TheGlobalData)
+	{
+		LIVE_PERF_SCOPE("W3DDisplay::shadowDecals");
+		RenderShadowDecalsDX11(camera);
+	}
+
+	// --- Occluded-unit silhouettes ---
+	// DISABLED: first pass overpowered visible units (drew the silhouette
+	// color across every unit's surface, not just where occluded). Needs
+	// to be rewritten with a proper stencil-buffer pass that only marks
+	// "behind something" pixels per unit, then draws the colored quad
+	// only for those marked pixels. Tracked in feature parity backlog.
+
+	// Render water BEFORE particle capture so heat distortion doesn't affect water
+	if (camera && !g_debugDisableWater)
+	{
+		LIVE_PERF_SCOPE("W3DDisplay::water");
+		Render::TerrainRenderer::Instance().RenderWater(camera);
+		RenderWaterTracksDX11(camera);
+	}
+
+	// Particle post-FX disabled — the original game rendered particles with
+	// simple additive/alpha blending, no glow bloom or heat distortion.
+	renderer.SetParticleGlowEnabled(false);
+	renderer.SetHeatDistortionEnabled(false);
+	renderer.SetColorAwareFxEnabled(false);
+
+	if (!g_debugDisableParticles && TheParticleSystemManager && camera)
+	{
+		LIVE_PERF_SCOPE("W3DDisplay::particles");
+		RenderInfoClass rinfo(*camera);
+		TheParticleSystemManager->doParticles(rinfo);
+		renderer.Restore3DState();
+	}
+
+	// GPU volumetric smoke particles — update and render
+	extern bool g_debugDisableVolumetricTrails;
+	if (!g_debugDisableVolumetricTrails)
+	{
+		LIVE_PERF_SCOPE("W3DDisplay::gpuVolumetric");
+		auto& gpuP = Render::GPUParticleSystem::Instance();
+		if (!gpuP.IsReady())
+			gpuP.Init(renderer.GetDevice());
+		if (gpuP.IsReady() && camera)
+		{
+			float dt = 1.0f / 30.0f; // fixed timestep matching game logic
+			gpuP.Update(renderer.GetDevice(), dt, { 0.5f, 0.2f, 0.0f }); // gentle wind
+
+			const auto& fd = renderer.GetFrameData();
+			Matrix3D camTM = camera->Get_Transform();
+			Render::Float3 camRight = { camTM[0][0], camTM[1][0], camTM[2][0] };
+			Render::Float3 camUp = { camTM[0][1], camTM[1][1], camTM[2][1] };
+			Render::Float3 camPos = { fd.cameraPos.x, fd.cameraPos.y, fd.cameraPos.z };
+
+			renderer.FlushFrameConstants(); // ensure viewProjection is in b0
+			gpuP.Render(renderer.GetDevice(), fd.viewProjection, camPos,
+				camRight, camUp, (float)renderer.GetWidth(), (float)renderer.GetHeight());
+			renderer.Restore3DState();
+		}
+	}
+
+	if (!g_debugDisableSnow) RenderSnowDX11();
+
+	// Track significant particle systems for fade-out clouds when game logic deletes them
+	// Only track explosions, smoke, toxin, fire — NOT bullets, muzzle flashes, debris
+	if (TheParticleSystemManager && !g_debugDisableVolumetric)
+	{
+		LIVE_PERF_SCOPE("W3DDisplay::particleTracking");
+		auto& sysList = TheParticleSystemManager->getAllParticleSystems();
+		for (auto it = sysList.begin(); it != sysList.end(); ++it)
+		{
+			ParticleSystem* sys = *it;
+			if (!sys || !sys->getTemplate()) continue;
+			const char* name = sys->getTemplate()->getName().str();
+			if (!name || !name[0]) continue;
+
+			// Only track significant visual effects — skip small weapon FX
+			bool isExplosion = (strstr(name, "Explo") || strstr(name, "explo") ||
+			                    strstr(name, "Detonation") || strstr(name, "detonation"));
+			bool isSmoke = (strstr(name, "Smoke") || strstr(name, "smoke") ||
+			                strstr(name, "SmokePlume") || strstr(name, "DarkSmoke"));
+			bool isToxin = (strstr(name, "Toxin") || strstr(name, "toxin") ||
+			                strstr(name, "Anthrax") || strstr(name, "anthrax") ||
+			                strstr(name, "Poison") || strstr(name, "poison"));
+			bool isFire = (strstr(name, "Fire") || strstr(name, "fire") ||
+			               strstr(name, "Flame") || strstr(name, "flame") ||
+			               strstr(name, "Napalm") || strstr(name, "napalm"));
+			bool isNuke = (strstr(name, "Nuke") || strstr(name, "nuke") ||
+			               strstr(name, "Nuclear") || strstr(name, "nuclear"));
+
+			if (!isExplosion && !isSmoke && !isToxin && !isFire && !isNuke) continue;
+
+			Coord3D pos;
+			sys->getPosition(&pos);
+			if (pos.x == 0.0f && pos.y == 0.0f && pos.z == 0.0f) continue;
+
+			// Get color from first particle
+			float r = 0.3f, g = 0.3f, b = 0.3f;
+			Particle* firstP = sys->getFirstParticle();
+			if (firstP)
+			{
+				const RGBColor* col = firstP->getColor();
+				r = col->red; g = col->green; b = col->blue;
+			}
+
+			float size = isSmoke ? 8.0f : (isExplosion || isNuke ? 10.0f : 6.0f);
+			renderer.TrackParticleSystem((uintptr_t)sys, pos.x, pos.y, pos.z, r, g, b, size);
+		}
+		renderer.FinishParticleTracking();
+	}
+
+	// Apply particle post-FX (glow/heat distortion) after all 3D, before UI
+	renderer.ApplyParticleFX();
+
+	// Volumetric explosion clouds + ground AOE fog
+	renderer.SetVolumetricExplosionsEnabled(!g_debugDisableVolumetric);
+
+	extern bool g_debugDisableModernAOE;
+	renderer.SetModernAOEEnabled(!g_debugDisableModernAOE);
+	renderer.ClearGroundFog();
+	if (!g_debugDisableModernAOE && TheParticleSystemManager)
+	{
+		int fogIdx = 0;
+		auto& sysList = TheParticleSystemManager->getAllParticleSystems();
+		for (auto it = sysList.begin(); it != sysList.end() && fogIdx < 8; ++it)
+		{
+			ParticleSystem* sys = *it;
+			if (!sys || !sys->getTemplate()) continue;
+			const char* name = sys->getTemplate()->getName().str();
+			if (!name || !name[0]) continue;
+
+			// Match AOE ground effect keywords
+			bool isToxin = (strstr(name, "Toxin") || strstr(name, "toxin") ||
+			                strstr(name, "Anthrax") || strstr(name, "anthrax") ||
+			                strstr(name, "Poison") || strstr(name, "poison"));
+			bool isRadiation = (strstr(name, "Radiat") || strstr(name, "radiat") ||
+			                    strstr(name, "Nuclear") || strstr(name, "nuclear") ||
+			                    strstr(name, "Nuke") || strstr(name, "nuke"));
+			bool isNapalm = (strstr(name, "Napalm") || strstr(name, "napalm") ||
+			                 strstr(name, "FireField") || strstr(name, "fireField"));
+
+			if (!isToxin && !isRadiation && !isNapalm) continue;
+
+			Coord3D pos;
+			sys->getPosition(&pos);
+			if (pos.x == 0.0f && pos.y == 0.0f) continue;
+
+			float r, g, b;
+			if (isNapalm)         { r = 0.8f; g = 0.3f; b = 0.05f; }
+			else if (isRadiation) { r = 0.5f; g = 0.7f; b = 0.1f;  }
+			else                  { r = 0.1f; g = 0.6f; b = 0.15f;  }
+
+			renderer.SetGroundFog(fogIdx++, pos.x, pos.y, pos.z, 25.0f, r, g, b, 0.6f);
+		}
+	}
+
+	// Begin pre-UI post-processing chain (single backbuffer copy for all effects)
+	{
+	LIVE_PERF_SCOPE("W3DDisplay::postProcess");
+	renderer.BeginPostChain();
+
+	renderer.ApplyVolumetricExplosions();
+
+	// Screen-space shockwave distortion rings from explosions
+	renderer.SetShockwaveEnabled(!g_debugDisableShockwave);
+	renderer.ApplyShockwave();
+
+	// Volumetric god rays from sun direction
+	renderer.SetGodRaysEnabled(!g_debugDisableGodRays);
+	renderer.ApplyGodRays();
+
+	renderer.EndPostChain();
+	}
+
+	// Draw in-world 2D overlays (health bars, "Building XX%" text, icons)
+	// AFTER all 3D effects including particles, so smoke doesn't occlude the text.
+	if (TheTacticalView)
+	{
+		LIVE_PERF_SCOPE("W3DDisplay::postOverlays");
+		static_cast<W3DView*>(TheTacticalView)->drawPostOverlays();
+	}
+
+	// Render the 3D-state portions of the in-game UI (click-to-move yellow
+	// arrow, building placement rotation indicator). These go through
+	// ModelRenderer which reads the 3D viewProjection from cbuffer b0.
+	// Begin2D below replaces b0 with screen-size data, so these MUST run
+	// first. W3DInGameUI::draw() (called inside Begin2D) only handles the
+	// 2D portions (drag rectangle, postDraw, postWindowDraw).
+	if (!g_debugDisableUI && TheInGameUI)
+		static_cast<W3DInGameUI*>(TheInGameUI)->draw3DOverlays();
+
+	// --- 2D UI RENDERING ---
+	renderer.Begin2D();
+
+	// Draw fullscreen video (cutscene/briefing) if playing
+	if (isMoviePlaying()) {
+		static int s_drawVidLog = 0;
+		if (s_drawVidLog < 5) {
+			char dbg[128];
+			snprintf(dbg, sizeof(dbg), "W3DDisplay: drawing video buf=%p valid=%d\n",
+				m_videoBuffer, m_videoBuffer ? m_videoBuffer->valid() : 0);
+			OutputDebugStringA(dbg);
+			s_drawVidLog++;
+		}
+		drawScaledVideoBuffer(m_videoBuffer, m_videoStream);
+	}
+
+	// Draw the window manager (renders all GUI windows)
+	if (!g_debugDisableUI && TheWindowManager)
+		TheWindowManager->winRepaint();
+
+	// Draw in-game UI
+	if (!g_debugDisableUI && TheInGameUI)
+		TheInGameUI->draw();
+
+	// Draw mouse cursor
+	if (!g_debugDisableMouse && TheMouse)
+		TheMouse->draw();
+
+	// Draw letterbox if enabled
+	if (m_letterBoxEnabled)
+	{
+		UnsignedInt barHeight = getHeight() / 8;
+		drawFillRect(0, 0, getWidth(), barHeight, 0xFF000000);
+		drawFillRect(0, getHeight() - barHeight, getWidth(), barHeight, 0xFF000000);
+	}
+
+	// Cinematic text (script-driven, set via doDisplayCinematicText). Drawn
+	// on top of the letterbox bars to match the original's layering so the
+	// text sits in the black-bar area during cinematics. Caches a single
+	// DisplayString instead of the original's allocate-per-frame-and-leak.
+	if (m_cinematicText != AsciiString::TheEmptyString && m_cinematicTextFrames != 0 && TheDisplayStringManager)
+	{
+		static DisplayString* s_cinematicDS = nullptr;
+		static AsciiString s_lastText;
+		static GameFont* s_lastFont = nullptr;
+		static Int s_lastDisplayWidth = -1;
+
+		if (!s_cinematicDS)
+			s_cinematicDS = TheDisplayStringManager->newDisplayString();
+
+		const Int displayWidth = getWidth();
+		const Bool textChanged = (s_lastText != m_cinematicText);
+		const Bool fontChanged = (s_lastFont != m_cinematicFont);
+		const Bool widthChanged = (s_lastDisplayWidth != displayWidth);
+
+		if (s_cinematicDS && (textChanged || fontChanged || widthChanged))
+		{
+			if (m_cinematicFont)
+				s_cinematicDS->setFont(m_cinematicFont);
+			s_cinematicDS->setWordWrap(displayWidth - 20);
+			s_cinematicDS->setWordWrapCentered(TRUE);
+			UnicodeString uText;
+			uText.translate(m_cinematicText);
+			s_cinematicDS->setText(uText);
+			s_lastText = m_cinematicText;
+			s_lastFont = m_cinematicFont;
+			s_lastDisplayWidth = displayWidth;
+		}
+
+		if (s_cinematicDS)
+		{
+			const Color color = GameMakeColor(255, 255, 255, 255);
+			const Color dropColor = GameMakeColor(0, 0, 0, 255);
+			const Int yPos = (Int)(getHeight() * 0.9f);
+			Int xPos;
+			const Int textWidth = s_cinematicDS->getWidth();
+			if (textWidth > displayWidth)
+				xPos = 20;
+			else
+				xPos = (displayWidth - textWidth) / 2;
+			s_cinematicDS->draw(xPos, yPos, color, dropColor);
+		}
+
+		// m_cinematicTextFrames is expressed in LOGIC frames (30 Hz), but
+		// draw() runs at render rate (often 60/144/240 Hz). Original engine
+		// throttled draw() to 30 Hz internally so the per-call decrement
+		// matched logic frames 1:1 — here we tie the decrement to
+		// TheGameLogic->getFrame() advances instead, so the text expires at
+		// the intended wall-clock duration regardless of render rate.
+		if (m_cinematicTextFrames > 0 && TheGameLogic)
+		{
+			static UnsignedInt s_lastLogicFrame = ~0u;
+			const UnsignedInt curLogicFrame = TheGameLogic->getFrame();
+			if (curLogicFrame != s_lastLogicFrame)
+			{
+				s_lastLogicFrame = curLogicFrame;
+				--m_cinematicTextFrames;
+			}
+		}
+	}
+
+	// Draw FPS counter if debug
+	if (m_debugDisplayCallback)
+	{
+		UnsignedInt color = 0xCC000000;
+		drawFillRect(5, 5, 80, 20, color);
+	}
+
+	// Render status circle (team dot + scripted screen fades)
+	// Must be last in 2D pass so screen fades overlay everything.
+	if (!g_debugDisableStatusCircle) RenderStatusCircleDX11();
+
+
+	renderer.End2D();
+
+	// Movie capture: save each frame as a numbered screenshot
+	if (m_movieCaptureEnabled)
+	{
+		char captureFilename[64];
+		snprintf(captureFilename, sizeof(captureFilename), "movie_%05d.bmp", m_movieCaptureFrame++);
+		renderer.CaptureScreenshot(captureFilename);
+	}
+
+	// scene_trace.log flicker diagnostic removed
+
+	// dark_frames.log detector removed
+
+	// Begin post-UI post-processing chain (single backbuffer copy for all effects)
+	renderer.BeginPostChain();
+
+	// Post-processing (bloom) before presenting
+	extern bool g_debugDisableBloom;
+	renderer.SetBloomEnabled(!g_debugDisableBloom);
+	renderer.ApplyPostProcessing();
+
+	// Lens flare from sun direction (after bloom so flare ghosts get bloomed)
+	renderer.SetLensFlareEnabled(!g_debugDisableLensFlare);
+	renderer.ApplyLensFlare();
+
+	// Cinematic post-processing (chromatic aberration + vignette + color grading)
+	renderer.SetChromaEnabled(!g_debugDisableChromaAberration);
+	renderer.SetVignetteEnabled(false);
+	renderer.SetColorGradeEnabled(!g_debugDisableColorGrade);
+	renderer.ApplyCinematic();
+
+	// Sharpen after bloom+cinematic to recover detail
+	renderer.SetSharpenEnabled(!g_debugDisableSharpen);
+	renderer.ApplySharpen();
+
+	renderer.EndPostChain();
+
+	// Film grain removed
+
+	// Flush 3D debug-draw primitives (selection wireframes, gizmos,
+	// world axis) ON TOP of the engine's rendered scene but BELOW
+	// ImGui panels. Doing this AFTER post-processing means bloom
+	// won't blur the wireframes; doing it BEFORE Inspector::Render
+	// means panels can occlude debug lines that pass behind them.
+	renderer.FlushDebugDraw();
+
+	// Inspector overlay draws last so it sits on top of everything,
+	// including post-process effects and 3D debug overlays.
+	Inspector::Render();
+
+	// Present the frame to the screen - actual D3D11 Present call
+	renderer.EndFrame();
+	s_renderedThisFrame = true; // Mark: don't re-render for this game frame
+
+	if (s_loggedFrames < 6)
+		++s_loggedFrames;
+
+	// --- AUTOTEST MODE ---
+	if (g_autotestFrames > 0)
+	{
+		static int s_autotestRenderedFrames = 0;
+		s_autotestRenderedFrames++;
+
+		if (s_autotestRenderedFrames >= g_autotestFrames)
+		{
+			// Take screenshot
+			renderer.CaptureScreenshot("autotest_screenshot.bmp");
+
+			// Exit the game
+			g_autotestFrames = 0; // prevent re-entry
+			AutotestQuit();
+		}
+	}
+}
+
+// ============================================================================
+// 2D drawing primitives - all use real D3D11 rendering via the Renderer
+// ============================================================================
+
+void W3DDisplay::drawLine(Int startX, Int startY, Int endX, Int endY,
+						  Real lineWidth, UnsignedInt lineColor)
+{
+	Render::Renderer::Instance().DrawLine(
+		(float)startX, (float)startY,
+		(float)endX, (float)endY,
+		lineWidth, lineColor);
+}
+
+void W3DDisplay::drawLine(Int startX, Int startY, Int endX, Int endY,
+						  Real lineWidth, UnsignedInt lineColor1, UnsignedInt lineColor2)
+{
+	// For now draw with the first color; gradient lines need custom shader work
+	drawLine(startX, startY, endX, endY, lineWidth, lineColor1);
+}
+
+void W3DDisplay::drawOpenRect(Int startX, Int startY, Int width, Int height,
+							  Real lineWidth, UnsignedInt lineColor)
+{
+	// Draw four lines forming a rectangle
+	drawLine(startX, startY, startX + width, startY, lineWidth, lineColor);
+	drawLine(startX + width, startY, startX + width, startY + height, lineWidth, lineColor);
+	drawLine(startX + width, startY + height, startX, startY + height, lineWidth, lineColor);
+	drawLine(startX, startY + height, startX, startY, lineWidth, lineColor);
+}
+
+void W3DDisplay::drawFillRect(Int startX, Int startY, Int width, Int height,
+							  UnsignedInt color)
+{
+	Render::Renderer::Instance().DrawRect(
+		(float)startX, (float)startY,
+		(float)width, (float)height,
+		color);
+}
+
+// 4-quadrant circular clock overlay matching the original.
+// Fills clockwise from top-center using rectangles and triangles.
+// Quadrants: 1=upper-right, 2=lower-right, 3=lower-left, 4=upper-left.
+void W3DDisplay::drawRectClock(Int startX, Int startY, Int width, Int height,
+							   Int percent, UnsignedInt color)
+{
+	if (percent < 1 || percent > 100) return;
+
+	auto& renderer = Render::Renderer::Instance();
+	float sx = (float)startX, sy = (float)startY;
+	float w = (float)width, h = (float)height;
+	float hw = w * 0.5f, hh = h * 0.5f;
+	float cx = sx + hw, cy = sy + hh; // center
+
+	if (percent == 100) { drawFillRect(startX, startY, width, height, color); return; }
+
+	if (percent > 75)
+	{
+		// Full quadrants 1+2 (right half) + 3 (lower-left)
+		drawFillRect(startX + width/2, startY, width - width/2, height, color);
+		drawFillRect(startX, startY + height/2, width/2, height - height/2, color);
+		// Partial quadrant 4 (upper-left)
+		float remain = (float)(percent - 75);
+		if (remain > 12) {
+			renderer.DrawTri(sx, sy, sx, cy, cx, cy, color);
+			float pct = (remain - 12.0f) / 13.0f;
+			renderer.DrawTri(sx, sy, cx, cy, sx + hw * pct, sy, color);
+		} else {
+			float pct = remain / 12.0f;
+			renderer.DrawTri(sx, cy - hh * pct, sx, cy, cx, cy, color);
+		}
+	}
+	else if (percent > 50)
+	{
+		// Full quadrants 1+2
+		drawFillRect(startX + width/2, startY, width - width/2, height, color);
+		// Partial quadrant 3 (lower-left)
+		float remain = (float)(percent - 50);
+		if (remain > 12) {
+			renderer.DrawTri(cx, cy, sx, sy + h, cx, sy + h, color);
+			float pct = (remain - 12.0f) / 13.0f;
+			renderer.DrawTri(sx, sy + h - hh * pct, sx, sy + h, cx, cy, color);
+		} else {
+			float pct = remain / 12.0f;
+			renderer.DrawTri(cx, sy + h, cx, cy, cx - hw * pct, sy + h, color);
+		}
+	}
+	else if (percent > 25)
+	{
+		// Full quadrant 1
+		drawFillRect(startX + width/2, startY, width - width/2, height/2, color);
+		// Partial quadrant 2 (lower-right)
+		float remain = (float)(percent - 25);
+		if (remain > 12) {
+			renderer.DrawTri(cx, cy, sx + w, sy + h, sx + w, cy, color);
+			float pct = (remain - 12.0f) / 13.0f;
+			renderer.DrawTri(cx, cy, sx + w - hw * pct, sy + h, sx + w, sy + h, color);
+		} else {
+			float pct = remain / 12.0f;
+			renderer.DrawTri(sx + w, cy, cx, cy, sx + w, cy + hh * pct, color);
+		}
 	}
 	else
-	{	//if dynamic LOD is turned off, force highest LOD
-		TheGameLODManager->setDynamicLODLevel(DYNAMIC_GAME_LOD_VERY_HIGH);
+	{
+		// Partial quadrant 1 (upper-right)
+		float p = (float)percent;
+		if (p > 12) {
+			renderer.DrawTri(cx, sy, cx, cy, sx + w, sy, color);
+			float pct = (p - 12.0f) / 13.0f;
+			renderer.DrawTri(sx + w, sy, cx, cy, sx + w, sy + hh * pct, color);
+		} else {
+			float pct = p / 12.0f;
+			renderer.DrawTri(cx, sy, cx, cy, cx + hw * pct, sy, color);
+		}
+	}
+}
+
+void W3DDisplay::drawRemainingRectClock(Int startX, Int startY, Int width, Int height,
+										Int percent, UnsignedInt color)
+{
+	// Draw the unfilled/remaining dark overlay counterclockwise from 12 o'clock.
+	// As percent increases 0→100, the dark area shrinks and the clear area grows
+	// CLOCKWISE from 12 o'clock (matching the original game's clock-wipe effect).
+	if (percent >= 100) return;
+	if (percent <= 0) { drawFillRect(startX, startY, width, height, color); return; }
+
+	Int remaining = 100 - percent;
+
+	auto& renderer = Render::Renderer::Instance();
+	float sx = (float)startX, sy = (float)startY;
+	float w = (float)width, h = (float)height;
+	float hw = w * 0.5f, hh = h * 0.5f;
+	float cx = sx + hw, cy = sy + hh;
+
+	if (remaining == 100) { drawFillRect(startX, startY, width, height, color); return; }
+
+	// Counterclockwise fill order: Q4 (upper-left) → Q3 (lower-left) → Q2 (lower-right) → Q1 (upper-right)
+	if (remaining > 75)
+	{
+		// Full Q4+Q3+Q2 + partial Q1 (upper-right)
+		drawFillRect(startX, startY, width/2, height, color);                           // left half (Q4+Q3)
+		drawFillRect(startX + width/2, startY + height/2, width - width/2, height - height/2, color); // Q2
+		float remain = (float)(remaining - 75);
+		if (remain > 12) {
+			renderer.DrawTri(sx+w, cy, cx, cy, sx+w, sy, color);
+			float pct = (remain - 12.0f) / 13.0f;
+			renderer.DrawTri(sx+w, sy, cx, cy, sx+w - hw * pct, sy, color);
+		} else {
+			float pct = remain / 12.0f;
+			renderer.DrawTri(sx+w, cy, cx, cy, sx+w, cy - hh * pct, color);
+		}
+	}
+	else if (remaining > 50)
+	{
+		// Full Q4+Q3 + partial Q2 (lower-right)
+		drawFillRect(startX, startY, width/2, height, color); // left half
+		float remain = (float)(remaining - 50);
+		if (remain > 12) {
+			renderer.DrawTri(cx, sy+h, cx, cy, sx+w, sy+h, color);
+			float pct = (remain - 12.0f) / 13.0f;
+			renderer.DrawTri(sx+w, sy+h, cx, cy, sx+w, sy+h - hh * pct, color);
+		} else {
+			float pct = remain / 12.0f;
+			renderer.DrawTri(cx, sy+h, cx, cy, cx + hw * pct, sy+h, color);
+		}
+	}
+	else if (remaining > 25)
+	{
+		// Full Q4 + partial Q3 (lower-left)
+		drawFillRect(startX, startY, width/2, height/2, color); // Q4
+		float remain = (float)(remaining - 25);
+		if (remain > 12) {
+			renderer.DrawTri(sx, cy, cx, cy, sx, sy+h, color);
+			float pct = (remain - 12.0f) / 13.0f;
+			renderer.DrawTri(sx, sy+h, cx, cy, sx + hw * pct, sy+h, color);
+		} else {
+			float pct = remain / 12.0f;
+			renderer.DrawTri(sx, cy, cx, cy, sx, cy + hh * pct, color);
+		}
+	}
+	else
+	{
+		// Partial Q4 (upper-left) — counterclockwise from 12 o'clock toward 9 o'clock
+		float p = (float)remaining;
+		if (p > 12) {
+			renderer.DrawTri(cx, sy, cx, cy, sx, sy, color);
+			float pct = (p - 12.0f) / 13.0f;
+			renderer.DrawTri(sx, sy, cx, cy, sx, sy + hh * pct, color);
+		} else {
+			float pct = p / 12.0f;
+			renderer.DrawTri(cx, sy, cx, cy, cx - hw * pct, sy, color);
+		}
+	}
+}
+
+void W3DDisplay::drawImage(const Image *image, Int startX, Int startY,
+						   Int endX, Int endY, Color color, DrawImageMode mode)
+{
+	if (!image)
+		return;
+
+	auto& renderer = Render::Renderer::Instance();
+	AsciiString filename = image->getFilename();
+
+	if (filename.isEmpty())
+		return;
+
+	const char *filenameStr = filename.str();
+
+	const Region2D *imageUV = image->getUV();
+	Region2D clippedUV = imageUV ? *imageUV : Region2D{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
+	Int clippedStartX = startX;
+	Int clippedStartY = startY;
+	Int clippedEndX = endX;
+	Int clippedEndY = endY;
+
+	if (m_isClippedEnabled)
+	{
+		if (clippedEndX <= m_clipRegion.lo.x || clippedEndY <= m_clipRegion.lo.y ||
+			clippedStartX >= m_clipRegion.hi.x || clippedStartY >= m_clipRegion.hi.y)
+		{
+			return;
+		}
+
+		const Int originalWidth = endX - startX;
+		const Int originalHeight = endY - startY;
+		if (originalWidth <= 0 || originalHeight <= 0)
+			return;
+
+		clippedStartX = clippedStartX > m_clipRegion.lo.x ? clippedStartX : m_clipRegion.lo.x;
+		clippedStartY = clippedStartY > m_clipRegion.lo.y ? clippedStartY : m_clipRegion.lo.y;
+		clippedEndX = clippedEndX < m_clipRegion.hi.x ? clippedEndX : m_clipRegion.hi.x;
+		clippedEndY = clippedEndY < m_clipRegion.hi.y ? clippedEndY : m_clipRegion.hi.y;
+
+		const float uWidth = clippedUV.hi.x - clippedUV.lo.x;
+		const float vHeight = clippedUV.hi.y - clippedUV.lo.y;
+		const float leftPercent = float(clippedStartX - startX) / float(originalWidth);
+		const float rightPercent = float(clippedEndX - startX) / float(originalWidth);
+		const float topPercent = float(clippedStartY - startY) / float(originalHeight);
+		const float bottomPercent = float(clippedEndY - startY) / float(originalHeight);
+
+		clippedUV.lo.x = clippedUV.lo.x + (uWidth * leftPercent);
+		clippedUV.hi.x = clippedUV.lo.x + (uWidth * (rightPercent - leftPercent));
+		clippedUV.lo.y = clippedUV.lo.y + (vHeight * topPercent);
+		clippedUV.hi.y = clippedUV.lo.y + (vHeight * (bottomPercent - topPercent));
 	}
 
-	if (TheGlobalData->m_terrainLOD == TERRAIN_LOD_AUTOMATIC && TheTerrainRenderObject) 
+	// Load the texture from the game's file system
+	Render::Texture* tex = Render::ImageCache::Instance().GetTexture(
+		renderer.GetDevice(), filenameStr);
+
+	if (tex)
 	{
-		calculateTerrainLOD();
+		if (mode == DRAW_IMAGE_GRAYSCALE)
+			renderer.Set2DGrayscale(true);
+
+		if (imageUV)
+		{
+			renderer.DrawImageUV(*tex,
+				(float)clippedStartX, (float)clippedStartY,
+				(float)(clippedEndX - clippedStartX), (float)(clippedEndY - clippedStartY),
+				clippedUV.lo.x, clippedUV.lo.y, clippedUV.hi.x, clippedUV.hi.y,
+				color);
+		}
+		else
+		{
+			renderer.DrawImage(*tex,
+				(float)clippedStartX, (float)clippedStartY,
+				(float)(clippedEndX - clippedStartX), (float)(clippedEndY - clippedStartY),
+				color);
+		}
+
+		if (mode == DRAW_IMAGE_GRAYSCALE)
+			renderer.Set2DGrayscale(false);
 	}
-#ifdef EXTENDED_STATS
-AGAIN:
-#endif
-
-#ifdef DUMP_PERF_STATS
-	if( TheGlobalData->m_dumpPerformanceStatistics )
+	else
 	{
-		TheStatDump.dumpStats( FALSE, TRUE );
-		TheWritableGlobalData->m_dumpPerformanceStatistics = FALSE;
+		// Texture not found - log and draw placeholder
+		// missing_textures.log writing removed
+		drawFillRect(clippedStartX, clippedStartY, clippedEndX - clippedStartX, clippedEndY - clippedStartY,
+			(color & 0xFF000000) | 0x00333333);
 	}
-  //The <= GAME_REPLAY essentially means, GAME_SINGLE_PLAYER || GAME_LAN || GAME_SKIRMISH || GAME_REPLAY
-  else if ( TheGlobalData->m_dumpStatsAtInterval && TheGameLogic->getGameMode() <= GAME_REPLAY )
-  {
-    Int interval = TheGlobalData->m_statsInterval;
-    if ( TheGameLogic->getFrame() > 0 && (TheGameLogic->getFrame() % interval) == 0 )
-    {
-  	  TheStatDump.dumpStats( TRUE, TRUE );
-    	TheInGameUI->message( UnicodeString( L"-stats is running, at interval: %d." ), TheGlobalData->m_statsInterval );
-    }
-  }
+}
 
+void W3DDisplay::drawScaledVideoBuffer(VideoBuffer *buffer, VideoStreamInterface *stream)
+{
+	if (!buffer || !buffer->valid())
+		return;
 
+	// Scale to fill the entire display
+	drawVideoBuffer(buffer, 0, 0, getWidth(), getHeight());
+}
 
+void W3DDisplay::drawVideoBuffer(VideoBuffer *buffer, Int startX, Int startY,
+								 Int endX, Int endY)
+{
+	if (!buffer || !buffer->valid())
+		return;
 
-#endif
+	// Lock the buffer to get raw pixel data
+	void* pixels = buffer->lock();
+	if (!pixels)
+		return;
 
-	// compute debug statistics for display later
-	if ( m_debugDisplayCallback == StatDebugDisplay 
-#if defined(_DEBUG) || defined(_INTERNAL)
-				|| TheGlobalData->m_benchmarkTimer > 0
-#endif
-			)
+	UnsignedInt w = buffer->width();
+	UnsignedInt h = buffer->height();
+
+	// Upload BGRA video data directly to a B8G8R8A8 texture — zero CPU conversion.
+	// FFmpeg decodes to AV_PIX_FMT_BGR0 (BGRA) which matches DXGI_FORMAT_B8G8R8A8_UNORM.
+	// The GPU texture sampler handles the channel mapping in hardware.
+	static Render::Texture s_videoTexture;
+	static uint32_t s_lastW = 0, s_lastH = 0;
+
+	if (w != s_lastW || h != s_lastH)
 	{
-		gatherDebugStats();
+		s_lastW = w;
+		s_lastH = h;
+		s_videoTexture.CreateDynamic(Render::Renderer::Instance().GetDevice(), w, h,
+			Render::PixelFormat::BGRA8_UNORM);
 	}
-#ifdef EXTENDED_STATS
-	else 
+
+	// Upload BGRA pixels directly — no conversion needed
+	s_videoTexture.UpdateFromRGBA(Render::Renderer::Instance().GetDevice(),
+		pixels, w, h);
+
+	buffer->unlock();
+
+	auto& renderer = Render::Renderer::Instance();
+	extern bool g_debugDisableFSRVideo;
+	if (!g_debugDisableFSRVideo && renderer.IsFSRReady())
 	{
-		DX8Wrapper::stats.m_showingStats = false;
+		renderer.DrawImageFSR(s_videoTexture,
+			(float)startX, (float)startY,
+			(float)(endX - startX), (float)(endY - startY));
 	}
-#endif
-
-#ifdef SAMPLE_DYNAMIC_LIGHT
-	Vector3 loc;
-	loc = theDynamicLight->Get_Position();
-	loc.X += theLightXOffset;
-	if(loc.X>128) theLightXOffset = -theLightXOffset;
-	if(loc.X<0) theLightXOffset = -theLightXOffset;
-	loc.Y += theLightYOffset;
-	if(loc.Y>128) theLightYOffset = -theLightYOffset;
-	if(loc.Y<0) theLightYOffset = -theLightYOffset;
-	theDynamicLight->Set_Position(loc);
-#endif
-
-
-	/// @todo Make more explicit drawing layers(ground, ground UI, objects, object UI, overlay UI)
-
-	///@todo: Ask Vegas why the LOD optimizer hangs particle system.
- 	//
-  	// Predictive LOD optimizer optimizes the mesh LOD levels to match 
-  	// the given polygon budget
-  	//
-	//PredictiveLODOptimizerClass::Optimize_LODs( 5000 );
-
-	Bool freezeTime = TheTacticalView->isTimeFrozen() && !TheTacticalView->isCameraMovementFinished();
-	freezeTime = freezeTime || TheScriptEngine->isTimeFrozenDebug() || TheScriptEngine->isTimeFrozenScript();
-	freezeTime = freezeTime || TheGameLogic->isGamePaused();
-
-	// hack to let client spin fast in network games but still do effects at the same pace. -MDC
-	static UnsignedInt lastFrame = ~0;
-	freezeTime = freezeTime || (lastFrame == TheGameClient->getFrame());
-	lastFrame = TheGameClient->getFrame();
-
-	/// @todo: I'm assuming the first view is our main 3D view.
-	W3DView *primaryW3DView=(W3DView *)getFirstView();
-	if (!freezeTime && TheScriptEngine->isTimeFast())
+	else
 	{
-		primaryW3DView->updateCameraMovements();  // Update camera motion effects.
-		syncTime += TheW3DFrameLengthInMsec;
+		renderer.DrawImage(s_videoTexture,
+			(float)startX, (float)startY,
+			(float)(endX - startX), (float)(endY - startY),
+			0xFFFFFFFF);
+	}
+}
+
+// D3D11 video buffer - holds a system-memory pixel buffer that Bink (or other
+// decoders) can write into, which drawVideoBuffer then uploads to a D3D11 texture.
+class D3D11VideoBuffer : public VideoBuffer
+{
+public:
+	D3D11VideoBuffer() : VideoBuffer(TYPE_X8R8G8B8), m_data(nullptr), m_allocated(false), m_locked(false) {}
+
+	~D3D11VideoBuffer() override
+	{
+		free();
+	}
+
+	Bool allocate(UnsignedInt width, UnsignedInt height) override
+	{
+		free();
+		m_width = width;
+		m_height = height;
+
+		// Use power-of-2 texture dimensions for compatibility
+		m_textureWidth = width;
+		m_textureHeight = height;
+
+		UnsignedInt bytesPerPixel = 4; // TYPE_X8R8G8B8
+		m_pitch = m_textureWidth * bytesPerPixel;
+		m_data = new uint8_t[m_pitch * m_textureHeight];
+		memset(m_data, 0, m_pitch * m_textureHeight);
+		m_allocated = true;
+		return TRUE;
+	}
+
+	void free() override
+	{
+		delete[] m_data;
+		m_data = nullptr;
+		m_allocated = false;
+		m_locked = false;
+	}
+
+	void* lock() override
+	{
+		if (!m_allocated || !m_data)
+			return nullptr;
+		m_locked = true;
+		return m_data;
+	}
+
+	void unlock() override
+	{
+		m_locked = false;
+	}
+
+	Bool valid() override
+	{
+		return m_allocated && m_data != nullptr;
+	}
+
+private:
+	uint8_t* m_data;
+	bool m_allocated;
+	bool m_locked;
+};
+
+VideoBuffer* W3DDisplay::createVideoBuffer()
+{
+	return NEW D3D11VideoBuffer;
+}
+
+void W3DDisplay::setClipRegion(IRegion2D *region)
+{
+	if (region)
+	{
+		m_clipRegion = *region;
+		m_isClippedEnabled = TRUE;
+	}
+}
+
+// ============================================================================
+// Shroud / Fog of War
+// ============================================================================
+
+void W3DDisplay::clearShroud()
+{
+	Render::TerrainRenderer::Instance().ClearShroud();
+}
+
+void W3DDisplay::setShroudLevel(Int x, Int y, CellShroudStatus setting)
+{
+	// Shroud uses multiplicative blend: the texture value is a brightness multiplier.
+	// 0 = pitch black (fully shrouded), 255 = full brightness (fully clear).
+	// Read configurable values from GlobalData INI, matching the original behavior.
+	uint8_t brightness;
+	if (setting == CELLSHROUD_SHROUDED)
+		brightness = TheGlobalData ? TheGlobalData->m_shroudAlpha : 0;
+	else if (setting == CELLSHROUD_FOGGED)
+		brightness = TheGlobalData ? TheGlobalData->m_fogAlpha : 127;
+	else
+		brightness = TheGlobalData ? TheGlobalData->m_clearAlpha : 255;
+
+	Render::TerrainRenderer::Instance().SetShroudLevel(x, y, brightness);
+}
+
+void W3DDisplay::setBorderShroudLevel(UnsignedByte level)
+{
+	Render::TerrainRenderer::Instance().SetBorderShroudLevel(level);
+}
+
+// ============================================================================
+// Lighting
+// ============================================================================
+
+void W3DDisplay::createLightPulse(const Coord3D *pos, const RGBColor *color,
+								  Real innerRadius, Real outerRadius,
+								  UnsignedInt increaseFrameTime, UnsignedInt decayFrameTime)
+{
+	if (!pos || !color)
+		return;
+
+	// Convert frame counts to milliseconds. The game logic runs at ~33ms per frame (30 fps logic).
+	static const float MS_PER_FRAME = 33.333f;
+	float increaseMs = increaseFrameTime * MS_PER_FRAME;
+	float decayMs = decayFrameTime * MS_PER_FRAME;
+
+	LightPulse pulse;
+	pulse.posX = pos->x;
+	pulse.posY = pos->y;
+	pulse.posZ = pos->z;
+	pulse.colorR = color->red;
+	pulse.colorG = color->green;
+	pulse.colorB = color->blue;
+	pulse.innerRadius = innerRadius;
+	pulse.outerRadius = outerRadius;
+	pulse.intensity = 0.0f;
+	pulse.increasing = true;
+
+	// Rate = how fast intensity changes per millisecond
+	// Intensity goes from 0 to 1 during increase, then 1 to 0 during decay
+	pulse.increaseRate = (increaseMs > 0.0f) ? (1.0f / increaseMs) : 100.0f; // instant if zero
+	pulse.decayRate = (decayMs > 0.0f) ? (1.0f / decayMs) : 100.0f;
+
+	// Cap the number of active light pulses to prevent runaway accumulation
+	if (m_lightPulses.size() < 32)
+		m_lightPulses.push_back(pulse);
+}
+
+void W3DDisplay::updateLightPulses(float deltaMs)
+{
+	for (size_t i = 0; i < m_lightPulses.size(); )
+	{
+		LightPulse& lp = m_lightPulses[i];
+
+		if (lp.increasing)
+		{
+			lp.intensity += lp.increaseRate * deltaMs;
+			if (lp.intensity >= 1.0f)
+			{
+				lp.intensity = 1.0f;
+				lp.increasing = false;
+			}
+		}
+		else
+		{
+			lp.intensity -= lp.decayRate * deltaMs;
+		}
+
+		// Remove expired pulses
+		if (!lp.increasing && lp.intensity <= 0.0f)
+		{
+			// Swap with last element and pop for O(1) removal
+			m_lightPulses[i] = m_lightPulses.back();
+			m_lightPulses.pop_back();
+		}
+		else
+		{
+			++i;
+		}
+	}
+}
+
+void W3DDisplay::applyLightPulsesToRenderer()
+{
+	auto& renderer = Render::Renderer::Instance();
+
+	if (m_lightPulses.empty())
+	{
+		renderer.ClearPointLights();
 		return;
 	}
 
-	Debug_Statistics::Begin_Statistics();	//reset all counters (polygons, vertices, etc) before drawing
-
-	//update state of all the terrain tracks (fade, remove, etc.)
-	/// @todo: Is there a better place to put per-frame updates like this?
-
-	if(TheGlobalData->m_loadScreenRender != TRUE)
+	// Sort by intensity (strongest first) so we send the most visible lights to the shader
+	// Only need to find the top kMaxPointLights, so do a partial sort
+	const uint32_t maxLights = Render::kMaxPointLights;
+	uint32_t count = (uint32_t)m_lightPulses.size();
+	if (count > maxLights)
 	{
-
-		if (TheTerrainTracksRenderObjClassSystem)
-			TheTerrainTracksRenderObjClassSystem->update();
-
-		//Shroud data is needed to render all other views, so handle this first.
-		if (TheTerrainRenderObject)
-		{	
-			//update the shroud surface here since it may be needed by reflections
-			if (TheTerrainRenderObject->getMap())	//make sure a valid map is loaded into terrain.
-			{
-				if (TheTerrainRenderObject->getShroud())
-				{
-					TheTerrainRenderObject->getShroud()->render(primaryW3DView->get3DCamera());
-				}
-			}
-		}
+		// Partial sort: move the strongest lights to the front
+		std::partial_sort(m_lightPulses.begin(), m_lightPulses.begin() + maxLights, m_lightPulses.end(),
+			[](const LightPulse& a, const LightPulse& b) { return a.intensity > b.intensity; });
+		count = maxLights;
 	}
 
-	if (!freezeTime) 
+	Render::Float4 positions[Render::kMaxPointLights];
+	Render::Float4 colors[Render::kMaxPointLights];
+
+	for (uint32_t i = 0; i < count; ++i)
 	{
-		/// @todo Decouple framerate from timestep
-		// for now, use constant time steps to avoid animations running independent of framerate
-		syncTime += TheW3DFrameLengthInMsec;
-		// allow W3D to update its internals
-		//	WW3D::Sync( GetTickCount() );
+		const LightPulse& lp = m_lightPulses[i];
+		positions[i] = { lp.posX, lp.posY, lp.posZ, lp.outerRadius };
+		colors[i] = { lp.colorR * lp.intensity, lp.colorG * lp.intensity, lp.colorB * lp.intensity, lp.innerRadius };
 	}
-	WW3D::Sync( syncTime );
 
-	// Fast & Frozen time limits the time to 33 fps.
-	Int minTime = 30;
-	static Int prevTime = timeGetTime(), now;	
+	renderer.SetPointLights(positions, colors, count);
+}
 
-	now=timeGetTime();
-	if (TheTacticalView->getTimeMultiplier()>1) 
+void W3DDisplay::setTimeOfDay(TimeOfDay tod)
+{
+	// Apply lighting from GlobalData's terrain lighting settings
+	if (!TheGlobalData)
+		return;
+
+	auto& renderer = Render::Renderer::Instance();
+
+	// Inspector Lights panel is editing values live — don't clobber.
+	if (renderer.LightsOverridden())
+		return;
+
+	// Set ambient light from GlobalData
+	const GlobalData::TerrainLighting& lighting = TheGlobalData->m_terrainLighting[tod][0];
+	renderer.SetAmbientLight({
+		lighting.ambient.red,
+		lighting.ambient.green,
+		lighting.ambient.blue,
+		1.0f
+	});
+
+	// Set up directional lights from GlobalData (up to 3)
+	Render::Float3 lightDirs[3];
+	Render::Float4 lightColors[3];
+	uint32_t lightCount = 0;
+
+	for (int i = 0; i < MAX_GLOBAL_LIGHTS && i < 3; ++i)
 	{
-		static Int timeMultiplierCounter = 1;
-		timeMultiplierCounter--;
-		if (timeMultiplierCounter>1) 
-			return;
-		timeMultiplierCounter = TheTacticalView->getTimeMultiplier();
-		// limit the framerate, because while fast time is on, the game logic is running as fast as it can.
-	}	
-	else 
-	{
-		now = timeGetTime();
-		prevTime = now - minTime;		 // do the first frame immediately.
-	} 
-
-
-	do {
-		
+		const GlobalData::TerrainLighting& light = TheGlobalData->m_terrainLighting[tod][i];
+		if (light.diffuse.red > 0.001f || light.diffuse.green > 0.001f || light.diffuse.blue > 0.001f)
 		{
-			if(TheGlobalData->m_loadScreenRender != TRUE)
+			// Normalize light direction
+			float len = sqrtf(light.lightPos.x * light.lightPos.x +
+							  light.lightPos.y * light.lightPos.y +
+							  light.lightPos.z * light.lightPos.z);
+			if (len > 0.001f)
 			{
-			
-				// limit the framerate
-				while(TheGlobalData->m_useFpsLimit && (now - prevTime) < minTime-1)
-				{
-					now = timeGetTime();
-				}
-				prevTime = now;
+				lightDirs[lightCount] = {
+					light.lightPos.x / len,
+					light.lightPos.y / len,
+					light.lightPos.z / len
+				};
+				lightColors[lightCount] = {
+					light.diffuse.red,
+					light.diffuse.green,
+					light.diffuse.blue,
+					1.0f
+				};
+				++lightCount;
 			}
 		}
-
-		// update all views of the world - recomputes data which will affect drawing
-		if (DX8Wrapper::_Get_D3D_Device8() && (DX8Wrapper::_Get_D3D_Device8()->TestCooperativeLevel()) == D3D_OK)
-		{	//Checking if we have the device before updating views because the heightmap crashes otherwise while
-			//trying to refresh the visible terrain geometry.
-//			if(TheGlobalData->m_loadScreenRender != TRUE)
-				updateViews();
-     		TheParticleSystemManager->update();//LORENZEN AND WILCZYNSKI MOVED THIS FROM ITS NATIVE POSITION, ABOVE
-                                           //FOR THE PURPOSE OF LETTING THE PARTICLE SYSTEM LOOK UP THE RENDER OBJECT"S
-                                           //TRANSFORM MATRIX, WHILE IT IS STILL VALID (HAVING DONE ITS CLIENT TRANSFORMS
-                                           //BUT NOT YET RESETTING TOT HE LOGICAL TRANSFORM)
-                                           //THE RESULT IS THAT PARTICLESYSTEMS LINKED TO BONES IN DRAWABLES.OBJECTS
-                                           //MOVE WITH THE CLIENT TRANSFORMS, NOW.
-                                           //REVOLUTIONARY!
-                                           //-LORENZEN
-
-
-			if (TheWaterRenderObj && TheGlobalData->m_waterType == 2)
-				TheWaterRenderObj->updateRenderTargetTextures(primaryW3DView->get3DCamera());	//do a render into each texture
-
-			//Can't render into textures while rendering to screen so these textures need to be updated
-			//before we enter main rendering loop.
-			if (TheW3DProjectedShadowManager)
-				TheW3DProjectedShadowManager->updateRenderTargetTextures();
-		}
-
-		Debug_Statistics::End_Statistics();	//record number of polygons rendered in RenderTargetTextures.
-
-		//Store number of polygons rendered in renderTargetTextures.
-		Int numRenderTargetPolygons=Debug_Statistics::Get_DX8_Polygons();
-		Int numRenderTargetVertices=Debug_Statistics::Get_DX8_Vertices();
-
-		// start render block
-		#if defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
-    if ( (TheGameLogic->getFrame() % 30 == 1) || ( ! ( !TheGameLogic->isGamePaused() && TheGlobalData->m_TiVOFastMode) ) )
-		#else
-	    if ( (TheGameLogic->getFrame() % 30 == 1) || ( ! (!TheGameLogic->isGamePaused() && TheGlobalData->m_TiVOFastMode && TheGameLogic->isInReplayGame())) )
-    #endif
-		{
-			//USE_PERF_TIMER(BigAssRenderLoop)
-			static Bool couldRender = true;
-			if ((TheGlobalData->m_breakTheMovie == FALSE) && (TheGlobalData->m_disableRender == false) && WW3D::Begin_Render( true, true, Vector3( 0.0f, 0.0f, 0.0f ), TheWaterTransparency->m_minWaterOpacity ) == WW3D_ERROR_OK)		
-			{
-				
-				if(TheGlobalData->m_loadScreenRender == TRUE)
-				{	
-					TheInGameUI->draw();
-					if( TheMouse )
-						TheMouse->draw();	//keep applying the current cursor style so it remains hidden if needed.
-					WW3D::End_Render();	
-					continue;
-				}
-				couldRender = true;
-				// add the number of verts/polygons drawn before the main scene
-				if (numRenderTargetPolygons || numRenderTargetVertices)
-					Debug_Statistics::Record_DX8_Polys_And_Vertices(numRenderTargetPolygons,numRenderTargetVertices,ShaderClass::_PresetOpaqueShader);
-
-				// draw all views of the world
-				drawViews();
-
-				// draw the user interface
-				TheInGameUI->DRAW();
-
-				// end of video example code
-
-				// draw the mouse
-				if( TheMouse )
-					TheMouse->DRAW();
-
-				if ( m_videoStream && m_videoBuffer )
-				{
-					drawVideoBuffer( m_videoBuffer, 0, 0, getWidth(), getHeight() );
-				}
-				if( m_copyrightDisplayString )
-				{
-					Int x, y, dX, dY;
-					m_copyrightDisplayString->getSize(&dX, &dY);
-					x = (getWidth() / 2) - (dX /2);
-					y = getHeight()  - dY - 20 ;
-					m_copyrightDisplayString->draw(x, y, GameMakeColor(0,0,0,255), GameMakeColor(0,0,0,0),0,0);
-				}
-				// render letter box before debug display so debug info isn't hidden
-				renderLetterBox(now);
-
-				// display cinematicText over the black
-				if( m_cinematicText != AsciiString::TheEmptyString && m_cinematicTextFrames != 0)
-				{
-					DisplayString *displayString = TheDisplayStringManager->newDisplayString();
-
-					// set word wrap if neccessary
-
-					Int wordWrapWidth = TheDisplay->getWidth() - 20;
-					displayString->setWordWrap( wordWrapWidth );
-					displayString->setWordWrapCentered( TRUE );
-
-					UnicodeString text;
-					text.translate( m_cinematicText );
-					displayString->setText( text );
-					Color color = GameMakeColor( 255, 255, 255, 255 );  // white
-					Color backColor = GameMakeColor( 0, 0, 0, 0 );      // black
-					displayString->setFont( m_cinematicFont );
-					Int height = TheDisplay->getHeight() * .9;
-
-					Int width;
-					if( displayString->getWidth() > TheDisplay->getWidth() )
-						width = 20;
-					else
-						width = ( TheDisplay->getWidth() - displayString->getWidth() ) / 2;
-					displayString->draw( width, height, color, backColor );
-
-					m_cinematicTextFrames--;
-				}
-
-				if ( m_debugDisplayCallback )
-				{
-					// draw the current debug display
-					drawCurrentDebugDisplay();
-				}
-
-#if defined(_DEBUG) || defined(_INTERNAL)
-				if (TheGlobalData->m_benchmarkTimer > 0)
-				{
-					drawFPSStats();
-				}
-#endif
-
-
-#if defined(_DEBUG) || defined(_INTERNAL)
-				if (TheGlobalData->m_debugShowGraphicalFramerate)
-				{
-					drawFramerateBar();
-				}
-#endif
-
-#ifdef PERF_TIMERS
-				TheGraphDraw->render();
-				TheGraphDraw->clear();
-#endif
-				// render is all done!
-				WW3D::End_Render();	
-			}
-			else
-			{
-				if (couldRender)
-				{
-					couldRender = false;
-					DEBUG_LOG(("Could not do WW3D::Begin_Render()!  Are we ALT-Tabbed out?\n"));
-				}
-			}
-		}
-					
-		if (TheScriptEngine->isTimeFrozenDebug() || TheScriptEngine->isTimeFrozenScript() || TheGameLogic->isGamePaused())	
-		{
-			freezeTime = false; // We're frozen for debug or for pause, and need to continue out of the loop.
-		}
-
-	} while (freezeTime && !TheTacticalView->isCameraMovementFinished());
-
-#ifdef EXTENDED_STATS
-	if (DX8Wrapper::stats.m_disableOverhead) {
-		goto AGAIN;
 	}
-#endif
-}  // end draw
 
-#define LETTER_BOX_FADE_TIME	1000.0f		///1000 ms.
-
-/** Render letter-box border at top/bottom of display
-*/
-void W3DDisplay::renderLetterBox(UnsignedInt currentTime)
-{
-		if (m_letterBoxEnabled)
-		{	if (m_letterBoxFadeLevel != 1.0f)
-			{
-				m_letterBoxFadeLevel = (currentTime - m_letterBoxFadeStartTime)/LETTER_BOX_FADE_TIME;
-				if (m_letterBoxFadeLevel > 1.0f)
-					m_letterBoxFadeLevel = 1.0f;
-			}
-
-			UnsignedInt lbcolor = (Int)(m_letterBoxFadeLevel * 255.0f) << 24;
-
-#ifdef SLIDE_LETTERBOX
-			Int height = (Int)(getHeight() * 0.12f * m_letterBoxFadeLevel);
-			TheTacticalView->setOrigin(0, height);
-#else
-			drawFillRect( 0, 0, m_width, (m_height-(9.0f/16.0f * m_width))*0.5f, lbcolor );
-			drawFillRect( 0, m_height-(m_height-(9.0f/16.0f * m_width))*0.5f, m_width, m_height, lbcolor );
-#endif
-		}
-		else
-		{	//letter box is disabled, but may still be fading out
-			if (m_letterBoxFadeLevel != 0.0f)
-			{
-				m_letterBoxFadeLevel = 1.0f - (currentTime - m_letterBoxFadeStartTime)/LETTER_BOX_FADE_TIME;
-				if (m_letterBoxFadeLevel < 0.0f)
-					m_letterBoxFadeLevel = 0.0f;
-
-				UnsignedInt lbcolor = (Int)(m_letterBoxFadeLevel * 255.0f) << 24;
-
-#ifdef SLIDE_LETTERBOX
-				Int height = (Int)(getHeight() * 0.12f * m_letterBoxFadeLevel);
-				TheTacticalView->setOrigin(0, height);
-#else
-				drawFillRect( 0, 0, m_width, (m_height-(9.0f/16.0f * m_width))*0.5f, lbcolor );
-				//drawFillRect( 0, m_height-(m_height-(9.0f/16.0f * m_width))*0.5f, m_width, m_height, lbcolor );
-#endif
-			}
-			else
-			{	//box has finished fading out
-#ifdef SLIDE_LETTERBOX
-				TheTacticalView->setOrigin(0, 0);
-#else
-				m_letterBoxEnabled = FALSE;
-#endif
-			}
-		}
+	if (lightCount > 0)
+		renderer.SetDirectionalLights(lightDirs, lightColors, lightCount);
 }
 
-Bool W3DDisplay::isLetterBoxFading(void)
-{
-	if (m_letterBoxEnabled && m_letterBoxFadeLevel != 1.0f)
-		return TRUE;
-	if (!m_letterBoxEnabled && m_letterBoxFadeLevel != 0.0f)
-		return TRUE;
-	return FALSE;
-}
+// ============================================================================
+// Letterbox
+// ============================================================================
 
-//WST 10/2/2002 added query function.  JSC Integrated 5/20/03
-Bool W3DDisplay::isLetterBoxed(void)
-{
-	return (m_letterBoxEnabled);
-}
-
-// W3DDisplay::createLightPulse ===============================================
-/** Create a "light pulse" which is a dynamic light that grows, decays 
-	* and vanishes over several frames */
-//=============================================================================
-void W3DDisplay::createLightPulse( const Coord3D *pos, const RGBColor *color, 
-																	 Real innerRadius, Real attenuationWidth, 
-																	 UnsignedInt increaseFrameTime, 
-																	 UnsignedInt decayFrameTime//, Bool donut
-																	 )
-{
-	if (innerRadius+attenuationWidth<2.0*PATHFIND_CELL_SIZE_F + 1.0f) {
-		return; // it basically won't make any visual difference.  jba.
-	}
-	W3DDynamicLight * theDynamicLight = m_3DScene->getADynamicLight();
-	// turn it on.
-	theDynamicLight->setEnabled(true);
-
-	theDynamicLight->Set_Ambient( Vector3( color->red, color->green, color->blue ) );
-	theDynamicLight->Set_Diffuse( Vector3( color->red, color->green, color->blue) );
-	theDynamicLight->Set_Position(Vector3(pos->x, pos->y, pos->z));
-	theDynamicLight->Set_Far_Attenuation_Range(innerRadius, innerRadius + attenuationWidth);
-	theDynamicLight->setFrameFade(increaseFrameTime, decayFrameTime);
-	theDynamicLight->setDecayRange();
-	theDynamicLight->setDecayColor();
-	//theDynamicLight->setDonut(donut);
-	// (gth) CNC3 enable far attenuation.  C&C3 defaults to disabled.  Must enable to match Generals. MW 8-06-03
-	theDynamicLight->Set_Flag(LightClass::FAR_ATTENUATION,true);
-}
-
-void W3DDisplay::toggleLetterBox(void)
+void W3DDisplay::toggleLetterBox()
 {
 	m_letterBoxEnabled = !m_letterBoxEnabled;
 	m_letterBoxFadeStartTime = timeGetTime();
-
-	//WST  9/18/2002 This is not a script api to prevent cheat. JSC Integrated 5/20/03
-	if( TheTacticalView )
-	{
-		TheTacticalView->setZoomLimited( !m_letterBoxEnabled );
-	}  
 }
 
 void W3DDisplay::enableLetterBox(Bool enable)
 {
-	if (enable)
-	{
-		if (!m_letterBoxEnabled)
-		{	//letterbox mode not previously enabled
-			m_letterBoxEnabled = TRUE;
-			m_letterBoxFadeStartTime = timeGetTime();
+	if (m_letterBoxEnabled == enable) return;
+	m_letterBoxEnabled = enable;
+	m_letterBoxFadeStartTime = timeGetTime();
+}
 
-			//WST  9/18/2002 - This is not a script api to prevent cheat.  JSC Integrated 5/20/03
-			if( TheTacticalView )
-			{
-				TheTacticalView->setZoomLimited( 0 );
-			}  
-		}
+Bool W3DDisplay::isLetterBoxFading()
+{
+	return (timeGetTime() - m_letterBoxFadeStartTime) < 1000;
+}
+
+Bool W3DDisplay::isLetterBoxed()
+{
+	return m_letterBoxEnabled;
+}
+
+// ============================================================================
+// Screenshots - real D3D11 implementation
+// ============================================================================
+
+void W3DDisplay::takeScreenShot()
+{
+	static int screenshotIndex = 0;
+	char filename[64];
+	snprintf(filename, sizeof(filename), "screenshot_%03d.bmp", screenshotIndex++);
+	if (Render::Renderer::Instance().CaptureScreenshot(filename))
+		DEBUG_LOG(("Screenshot saved: %s", filename));
+	else
+		DEBUG_LOG(("Screenshot FAILED"));
+}
+
+void W3DDisplay::toggleMovieCapture()
+{
+	m_movieCaptureEnabled = !m_movieCaptureEnabled;
+	if (m_movieCaptureEnabled)
+	{
+		m_movieCaptureFrame = 0;
+		DEBUG_LOG(("Movie capture STARTED"));
 	}
 	else
 	{
-		if (m_letterBoxEnabled)
-		{	//letterbox mode no previously disabled
-			m_letterBoxEnabled = FALSE;
-			m_letterBoxFadeStartTime = timeGetTime();
-
-			//WST  9/18/2002. JSC Integrated 5/20/03
-			if( TheTacticalView )
-			{
-				TheTacticalView->setZoomLimited( 1 );
-			}
-		}
+		DEBUG_LOG(("Movie capture STOPPED after %d frames", m_movieCaptureFrame));
 	}
 }
 
-// W3DDisplay::setTimeOfDay ===================================================
-/** */
-//=============================================================================
-void W3DDisplay::setTimeOfDay( TimeOfDay tod )
-{
-	const GlobalData::TerrainLighting *ol=&TheGlobalData->m_terrainObjectsLighting[tod][0];
-
-	if( m_3DScene )
-	{
-		m_3DScene->Set_Ambient_Light( Vector3(ol->ambient.red, ol->ambient.green, ol->ambient.blue) );
-	}
-
-	for (Int i=0; i<LightEnvironmentClass::MAX_LIGHTS; i++)
-	{
-		if( m_myLight[i] )
-		{
-			ol=&TheGlobalData->m_terrainObjectsLighting[tod][i];
-
-			m_myLight[i]->Set_Ambient( Vector3( 0.0f, 0.0f, 0.0f ) );
-			m_myLight[i]->Set_Diffuse( Vector3(ol->diffuse.red, ol->diffuse.green, ol->diffuse.blue ) );
-			m_myLight[i]->Set_Specular( Vector3(0,0,0) );
-			Matrix3D mtx;
-			mtx.Set(Vector3(1,0,0), Vector3(0,1,0), Vector3(ol->lightPos.x, ol->lightPos.y, ol->lightPos.z), Vector3(0,0,0));
-			m_myLight[i]->Set_Transform(mtx);
-		}
-	}
-	if(TheTerrainRenderObject) {
-		TheTerrainRenderObject->setTimeOfDay(tod);
-		TheTacticalView->forceRedraw();
-	}
-}
-
-// W3DDisplay::drawLine =======================================================
-/** draw a line on the display in pixel coordinates with the specified color */
-//=============================================================================
-void W3DDisplay::drawLine( Int startX, Int startY, 
-													 Int endX, Int endY, 
-													 Real lineWidth,
-													 UnsignedInt lineColor )
-{
-	
-	/// @todo we need to consider the efficiency of the 2D renderer
-	m_2DRender->Reset();
-	m_2DRender->Enable_Texturing( FALSE );
-	m_2DRender->Add_Line( Vector2( startX, startY ), Vector2( endX, endY ), 
-												lineWidth, lineColor );
-	m_2DRender->Render();
-
-}  // end drawLine
-
-// W3DDisplay::drawLine =======================================================
-/** draw a line on the display in pixel coordinates with the specified color */
-//=============================================================================
-void W3DDisplay::drawLine( Int startX, Int startY, 
-													 Int endX, Int endY, 
-													 Real lineWidth,
-													 UnsignedInt lineColor1,UnsignedInt lineColor2 )
-{
-	
-	/// @todo we need to consider the efficiency of the 2D renderer
-	m_2DRender->Reset();
-	m_2DRender->Enable_Texturing( FALSE );
-	m_2DRender->Add_Line( Vector2( startX, startY ), Vector2( endX, endY ), 
-												lineWidth, lineColor1, lineColor2 );
-	m_2DRender->Render();
-
-}  // end drawLine
-
-
-// W3DDisplay::drawOpenRect ===================================================
-//=============================================================================
-void W3DDisplay::drawOpenRect( Int startX, Int startY, Int width, Int height,
-															 Real lineWidth, UnsignedInt lineColor )
-{
-	
-	if (m_isClippedEnabled)
-	{
-		ICoord2D start, end, returnStart, returnEnd;
-		start.x = startX;
-		start.y = startY;
-
-		end.x = start.x;
-		end.y = start.y + height;
-		if(ClipLine2D(&start, &end, &returnStart, &returnEnd, &m_clipRegion ))
-			drawLine( returnStart.x, returnStart.y, returnEnd.x, returnEnd.y, lineWidth, lineColor);
-			
-		end.x = start.x + width;
-		end.y = start.y;
-		if(ClipLine2D(&start, &end, &returnStart, &returnEnd, &m_clipRegion ))
-			drawLine( returnStart.x, returnStart.y, returnEnd.x, returnEnd.y, lineWidth, lineColor);
-
-		start.x = startX + width;
-		start.y = startY;
-		end.x = start.x;
-		end.y = start.y + height;
-		if(ClipLine2D(&start, &end, &returnStart, &returnEnd, &m_clipRegion ))
-			drawLine( returnStart.x, returnStart.y, returnEnd.x, returnEnd.y, lineWidth, lineColor);
-
-		start.x = startX;
-		start.y = startY + height;
-		end.x = start.x + width;
-		end.y = start.y;
-		if(ClipLine2D(&start, &end, &returnStart, &returnEnd, &m_clipRegion ))
-			drawLine( returnStart.x, returnStart.y, returnEnd.x, returnEnd.y, lineWidth, lineColor);
-	}
-	else
-	{
-		/// @todo we need to consider the efficiency of the 2D renderer
-		m_2DRender->Reset();		
-		m_2DRender->Enable_Texturing( FALSE );
-		
-		m_2DRender->Add_Outline( RectClass( startX, startY, 
-																				startX + width, startY + height ), 
-														 lineWidth, lineColor );
-
-		// render it now!
-		m_2DRender->Render();
-	}
-
-}  // end drawOpenRect
-
-// W3DDisplay::drawFillRect ===================================================
-//=============================================================================
-void W3DDisplay::drawFillRect( Int startX, Int startY, Int width, Int height,
-															 UnsignedInt color )
-{
-
-	/// @todo we need to consider the efficiency of the 2D renderer
-	m_2DRender->Reset();		
-	m_2DRender->Enable_Texturing( FALSE );
-	m_2DRender->Add_Rect( RectClass( startX, startY, 
-																	 startX + width, startY + height ), 
-												0, 0, color );
-
-	// render it now!
-	m_2DRender->Render();
-
-}  // end drawFillRect
-
-void W3DDisplay::drawRectClock(Int startX, Int startY, Int width, Int height, Int percent, UnsignedInt color)
-{
-	// sanity
-	if(percent < 1 || percent > 100)
-		return;
-
-	m_2DRender->Reset();		
-	m_2DRender->Enable_Texturing( FALSE );
-
-// The rectanges are numberd as follows
-//(x,y)	|---------|
-//			| 4  | 1  |
-//			|----+----|
-//			| 3  | 2  |
-//			|---------| (x + width, y + width)
-//	
-	// we're done, lets just draw one rectangle for it all.
-	if(percent == 100)
-	{
-		m_2DRender->Add_Rect(RectClass( startX, startY, 
-																		startX + width, startY + height), 0,0, color);
-	}
-	else if( percent> 75)
-	{
-		//rectangle #1 & 2
-		m_2DRender->Add_Rect(RectClass( startX + width/2, startY, 
-																		startX + width, startY + height), 0,0, color);
-		// rectangle #3
-		m_2DRender->Add_Rect(RectClass( startX, startY + height/2, 
-																		startX + width/2, startY + height), 0,0, color);
-		// draw the part of rectangle 4
-		Real remain = percent - 75;
-		if(remain > 12)
-		{
-			//draw the full triangle
-			m_2DRender->Add_Tri(Vector2(startX, startY), 
-													Vector2(startX, startY + height/2),
-													Vector2(startX + width/2, startY + height/2),
-													Vector2(0,0),Vector2(0,0),Vector2(0,0),color);
-			
-			// draw the part of triangle
-			Real percentDraw = (Real)(remain - 12)/ 13;
-			m_2DRender->Add_Tri(Vector2(startX, startY), 
-													Vector2(startX + width/2, startY + height/2),
-													Vector2(startX + (width/2 * percentDraw), startY),
-													Vector2(0,0),Vector2(0,0),Vector2(0,0),color);
-		}
-		else
-		{
-			// draw the part of triangle
-			Real percentDraw = (Real)(remain)/ 12;
-			m_2DRender->Add_Tri(Vector2(startX, startY + height/2 - (height/2 * percentDraw)), 
-													Vector2(startX, startY + height/2),
-													Vector2(startX + width/2, startY + height/2),
-													Vector2(0,0),Vector2(0,0),Vector2(0,0),color);
-		}
-
-	}
-	else if( percent > 50)
-	{
-		//rectangle #1 & 2
-		m_2DRender->Add_Rect(RectClass( startX + width/2, startY, 
-																		startX + width, startY + height), 0,0, color);
-		// draw the part of rectangle 3
-		Real remain = percent - 50;
-		if(remain > 12)
-		{
-			//draw the full triangle
-			m_2DRender->Add_Tri(Vector2(startX + width/2, startY + height/2), 
-													Vector2(startX, startY + height),
-													Vector2(startX + width/2, startY + height),
-													Vector2(0,0),Vector2(0,0),Vector2(0,0),color);
-			
-			// draw the part of triangle
-			Real percentDraw = (Real)(remain - 12)/ 13;
-			m_2DRender->Add_Tri(Vector2(startX, startY + height - (height/2 * percentDraw)), 
-													Vector2(startX, startY + height),
-													Vector2(startX + width/2, startY + height/2),
-													Vector2(0,0),Vector2(0,0),Vector2(0,0),color);
-		}
-		else
-		{
-			// draw the part of triangle
-			Real percentDraw = (Real)(remain)/ 12;
-			m_2DRender->Add_Tri(Vector2(startX + width/2, startY + height),  
-													Vector2(startX + width/2, startY + height/2),
-													Vector2(startX + width/2 - ( width/2 * percentDraw), startY + height),
-													Vector2(0,0),Vector2(0,0),Vector2(0,0),color);
-		}
-	}
-	else if(percent > 25)
-	{
-		// rectangel #1
-		m_2DRender->Add_Rect(RectClass( startX + width/2, startY, 
-																		startX + width, startY + height/2), 0,0, color);
-		// draw the part of rectangle 2
-		Real remain = percent - 25;
-		if(remain > 12)
-		{
-			//draw the full triangle
-			m_2DRender->Add_Tri(Vector2(startX + width/2, startY + height/2), 
-													Vector2(startX + width, startY + height),
-													Vector2(startX + width, startY + height/2),
-													Vector2(0,0),Vector2(0,0),Vector2(0,0),color);
-			
-			// draw the part of triangle
-			Real percentDraw = (Real)(remain - 12)/ 13;
-			m_2DRender->Add_Tri(Vector2(startX + width/2, startY + height/2), 
-													Vector2(startX + width - (width/2 * percentDraw), startY + height),
-													Vector2(startX + width, startY + height),
-													Vector2(0,0),Vector2(0,0),Vector2(0,0),color);
-		}
-		else
-		{
-			// draw the part of triangle
-			Real percentDraw = (Real)(remain)/ 12;
-			m_2DRender->Add_Tri(Vector2(startX + width, startY + height/2),  
-													Vector2(startX + width/2, startY + height/2),
-													Vector2(startX + width, startY + height/2 + ( height/2 * percentDraw)),
-													Vector2(0,0),Vector2(0,0),Vector2(0,0),color);
-		}
-	}
-	else
-	{
-				// draw the part of rectangle 1
-		
-		if(percent > 12)
-		{
-			//draw the full triangle
-			m_2DRender->Add_Tri(Vector2(startX + width/2, startY), 
-													Vector2(startX + width/2, startY + height/2),
-													Vector2(startX + width, startY),
-													Vector2(0,0),Vector2(0,0),Vector2(0,0),color);
-			
-			// draw the part of triangle
-			Real percentDraw = (Real)(percent - 12)/ 13;
-			m_2DRender->Add_Tri(Vector2(startX + width, startY),
-													Vector2(startX + width/2, startY + height/2), 
-													Vector2(startX + width, startY + (height/2 * percentDraw)),
-													Vector2(0,0),Vector2(0,0),Vector2(0,0),color);
-		}
-		else
-		{
-			// draw the part of triangle
-			Real percentDraw = (Real)(percent)/ 12;
-			m_2DRender->Add_Tri(Vector2(startX + width/2, startY),  
-													Vector2(startX + width/2, startY + height/2),
-													Vector2(startX + width/2 + (width/2 * percentDraw), startY ),
-													Vector2(0,0),Vector2(0,0),Vector2(0,0),color);
-		}
-	}
-
-	// render it now!
-	m_2DRender->Render();
-
-}
-
-
-//--------------------------------------------------------------------------------------------------------------------
-// W3DDisplay::drawRemainingRectClock
-// Variation added by Kris -- October 2002
-// This version will overlay a clock progress from the specified percentage to 100%. Essentially, this function will
-// "reveal" an icon as it progresses towards completion.
-//--------------------------------------------------------------------------------------------------------------------
-void W3DDisplay::drawRemainingRectClock(Int startX, Int startY, Int width, Int height, Int percent, UnsignedInt color)
-{
-	// sanity
-	if( percent < 0 || percent > 99 )
-		return;
-
-	m_2DRender->Reset();		
-	m_2DRender->Enable_Texturing( FALSE );
-
-// The rectanges are numbered as follows
-//(x,y)	|---------|
-//			| 4  | 1  |
-//			|----+----|
-//			| 3  | 2  |
-//			|---------| (x + width, y + width)
-//	
-
-	Int midX = startX + width/2;
-	Int midY = startY + height/2;
-	Int endX = startX + width;
-	Int endY = startY + height;
-	Int halfWidth = width/2;
-	Int halfHeight = height/2;
-
-	if( percent == 0 )
-	{
-		// We just started, so draw the entire remaining rectangle.
-		// #1, #2, #3, and #4
-		m_2DRender->Add_Rect( RectClass( startX, startY, endX, endY ), 0, 0, color );
-	}
-	else if( percent < 25 )
-	{
-		//1-25%
-		//-----
-
-		//Rectangle #3 & 4
-		m_2DRender->Add_Rect( RectClass( startX, startY, midX, endY ), 0, 0, color );
-		
-		//Rectangle #2
-		m_2DRender->Add_Rect( RectClass( midX, midY, endX, endY ), 0, 0, color );
-
-		//Handle rectangle #1 than needs partial rendering.
-		if( percent < 13 )
-		{
-			//1-12%
-  		//-----
-
-			//Draw the 2nd half of rectangle #1
-			m_2DRender->Add_Tri( Vector2( midX, midY ), Vector2( endX, midY ), Vector2( endX, startY ), 
-													 Vector2( 0, 0 ), Vector2( 0, 0 ), Vector2( 0, 0 ), color );
-
-			//Draw the last part of the 1st portion of rectangle #1
-			Real percentDraw = (Real)( 13 - percent ) / 13;
-			m_2DRender->Add_Tri( Vector2( midX, midY ), Vector2( endX, startY ), Vector2( endX - halfWidth * percentDraw, startY ), 
-													 Vector2( 0, 0 ), Vector2( 0, 0 ), Vector2( 0, 0 ), color );
-		}
-		else
-		{
-			//13-24%
-			//------
-
-			//Draw the last part of the 2nd half of rectangle #1
-			Real percentDraw = (Real)( percent - 13 ) / 12;
-			m_2DRender->Add_Tri( Vector2( midX, midY ), Vector2( endX, midY ), Vector2( endX, startY + halfHeight * percentDraw ), 
-													 Vector2( 0, 0 ), Vector2( 0, 0 ), Vector2( 0, 0 ), color );
-		}
-	}
-	else if( percent < 50 )
-	{
-		//25-49%
-		//------
-
-		//rectangle #3 & 4
-		m_2DRender->Add_Rect( RectClass( startX, startY, midX, endY ), 0, 0, color );
-
-		//Handle rectangle #2 that needs partial rendering.
-		if( percent < 38 )
-		{
-			//25-37%
-  		//-----
-
-			//Draw the 2nd half of rectangle #2
-			m_2DRender->Add_Tri( Vector2( midX, midY ), Vector2( midX, endY ), Vector2( endX, endY ), 
-													 Vector2( 0, 0 ), Vector2( 0, 0 ), Vector2( 0, 0 ), color );
-
-			//Draw the last part of the 1st portion of rectangle #2
-			Real percentDraw = (Real)( percent - 25 ) / 13;
-			m_2DRender->Add_Tri( Vector2( midX, midY ), Vector2( endX, endY ), Vector2( endX, midY + halfHeight * percentDraw ), 
-													 Vector2( 0, 0 ), Vector2( 0, 0 ), Vector2( 0, 0 ), color );
-		}
-		else
-		{
-			//38-49%
-			//------
-
-			//Draw the last part of the 2nd half of rectangle #1
-			Real percentDraw = (Real)( percent - 38 ) / 12;
-			m_2DRender->Add_Tri( Vector2( midX, midY ), Vector2( midX, endY ), Vector2( endX - halfWidth * percentDraw, endY ), 
-													 Vector2( 0, 0 ), Vector2( 0, 0 ), Vector2( 0, 0 ), color );
-		}
-	}
-	else if( percent < 75 )
-	{
-		//50-74%
-		//------
-
-		//Rectangle #4
-		m_2DRender->Add_Rect( RectClass( startX, startY, midX, midY ), 0, 0, color );
-
-		//Handle rectangle #3 that needs partial rendering.
-		if( percent < 63 )
-		{
-			//50-62%
-  		//-----
-
-			//Draw the 2nd half of rectangle #3
-			m_2DRender->Add_Tri( Vector2( midX, midY ), Vector2( startX, midY ), Vector2( startX, endY ), 
-													 Vector2( 0, 0 ), Vector2( 0, 0 ), Vector2( 0, 0 ), color );
-
-			//Draw the last part of the 1st portion of rectangle #3
-			Real percentDraw = (Real)( percent - 50 ) / 13;
-			m_2DRender->Add_Tri( Vector2( midX, midY ), Vector2( startX, endY ), Vector2( midX - halfWidth * percentDraw, endY ), 
-													 Vector2( 0, 0 ), Vector2( 0, 0 ), Vector2( 0, 0 ), color );
-		}
-		else
-		{
-			//62-74%
-			//------
-
-			//Draw the last part of the 2nd half of rectangle #3
-			Real percentDraw = (Real)( percent - 62 ) / 12;
-			m_2DRender->Add_Tri( Vector2( midX, midY ), Vector2( startX, midY ), Vector2( startX, endY - halfHeight * percentDraw ), 
-													 Vector2( 0, 0 ), Vector2( 0, 0 ), Vector2( 0, 0 ), color );
-		}
-	}
-	else
-	{
-		//75-99%
-		//------
-		
-		//Handle rectangle #4 that needs partial rendering.
-		if( percent < 87 )
-		{
-			//75-87%
-  		//-----
-
-			//Draw the 2nd half of rectangle #4
-			m_2DRender->Add_Tri( Vector2( midX, midY ), Vector2( midX, startY ), Vector2( startX, startY ), 
-													 Vector2( 0, 0 ), Vector2( 0, 0 ), Vector2( 0, 0 ), color );
-
-			//Draw the last part of the 1st portion of rectangle #4
-			Real percentDraw = (Real)( percent - 75 ) / 13;
-			m_2DRender->Add_Tri( Vector2( midX, midY ), Vector2( startX, startY ), Vector2( startX, midY - halfHeight * percentDraw ), 
-													 Vector2( 0, 0 ), Vector2( 0, 0 ), Vector2( 0, 0 ), color );
-		}
-		else
-		{
-			//88-99%
-			//------
-
-			//Draw the last part of the 2nd half of rectangle #4
-			Real percentDraw = (Real)( percent - 88 ) / 12;
-			m_2DRender->Add_Tri( Vector2( midX, midY ), Vector2( midX, startY ), Vector2( startX + halfWidth * percentDraw, startY ), 
-													 Vector2( 0, 0 ), Vector2( 0, 0 ), Vector2( 0, 0 ), color );
-		}
-	}
-
-	// render it now!
-	m_2DRender->Render();
-}
-
-
-// W3DDisplay::drawImage ======================================================
-/** Draws an images at the screen coordinates and keeps it within the end
-	* screen coords specified */
-//=============================================================================
-void W3DDisplay::drawImage( const Image *image, Int startX, Int startY, 
-														Int endX, Int endY, Color color, DrawImageMode mode)
-{
-
-	// sanity
-	if( image == NULL )
-		return;
-
-	// !!
-	// Remember to update the GUIEditDisplay::drawImage when you make
-	// changes to this, it technically uses W3D code to render itself,
-	// but it not derived on the W3DDisplay
-	// !!
-
-	const Region2D *uv = image->getUV();
-
-	m_2DRender->Reset();
-	m_2DRender->Enable_Texturing( TRUE );
-
-	Bool doAlphaReset=FALSE;
-
-	///@todo: Why are we alpha blending all images?  Reduces our fillrate. -MW
-	switch (mode)
-	{
-		case DRAW_IMAGE_ALPHA:	//nothing to do since alpha is the default state
-			break;
-		case DRAW_IMAGE_GRAYSCALE:
-			m_2DRender->Enable_Grayscale(true);
-			break;
-		case DRAW_IMAGE_ADDITIVE:
-			m_2DRender->Enable_Additive(true);
-			doAlphaReset = TRUE;
-			break;
-		case DRAW_IMAGE_SOLID:
-			m_2DRender->Enable_Additive(false);
-			m_2DRender->Enable_Alpha(false);
-			doAlphaReset = TRUE;
-		default:
-			break;
-	}
-
-	// if we have raw texture data we will use it, otherwise we are referencing filenames
-	if( BitTest( image->getStatus(), IMAGE_STATUS_RAW_TEXTURE ) )
-		m_2DRender->Set_Texture( (TextureClass *)(image->getRawTextureData()) );
-	else
-		m_2DRender->Set_Texture( image->getFilename().str() );
-
-	RectClass screen_rect(startX,startY,endX,endY);
-	RectClass uv_rect(uv->lo.x,uv->lo.y,uv->hi.x,uv->hi.y);
-
-	if (m_isClippedEnabled)
-	{	//need to clip this quad to clip rectangle
-
-		//
-		//	Check for completely clipped
-		//
-		if (	endX <= m_clipRegion.lo.x ||
-				endY <= m_clipRegion.lo.y)
-		{
-			return;	//nothing to render
-		} else {
-			RectClass clipped_rect;
-			RectClass clipped_uv_rect;
-
-			if( BitTest( image->getStatus(), IMAGE_STATUS_ROTATED_90_CLOCKWISE ) )
-			{
-
-	
-				//
-				//	Clip the polygons to the specified area
-				//
-				
-				clipped_rect.Left		= __max (screen_rect.Left, m_clipRegion.lo.x);
-				clipped_rect.Right	= __min (screen_rect.Right, m_clipRegion.hi.x);
-				clipped_rect.Top		= __max (screen_rect.Top, m_clipRegion.lo.y);
-				clipped_rect.Bottom	= __min (screen_rect.Bottom, m_clipRegion.hi.y);
-
-				//
-				//	Clip the texture to the specified area
-				//
-				
-				float percent				= ((clipped_rect.Left - screen_rect.Left) / screen_rect.Width ());
-				clipped_uv_rect.Top		= uv_rect.Top + (uv_rect.Height () * percent);
-
-				percent						= ((clipped_rect.Right - screen_rect.Left) / screen_rect.Width ());
-				clipped_uv_rect.Bottom	= uv_rect.Top + (uv_rect.Height () * percent);
-
-				percent						= ((clipped_rect.Top - screen_rect.Top) / screen_rect.Height ());
-				clipped_uv_rect.Right	= uv_rect.Right - (uv_rect.Width () * percent);
-
-				percent						= ((clipped_rect.Bottom - screen_rect.Top) / screen_rect.Height ());
-				clipped_uv_rect.Left		= uv_rect.Right - (uv_rect.Width () * percent);
-			}
-			else
-
-			{
-			
-				//
-				//	Clip the polygons to the specified area
-				//
-				
-				clipped_rect.Left		= __max (screen_rect.Left, m_clipRegion.lo.x);
-				clipped_rect.Right	= __min (screen_rect.Right, m_clipRegion.hi.x);
-				clipped_rect.Top		= __max (screen_rect.Top, m_clipRegion.lo.y);
-				clipped_rect.Bottom	= __min (screen_rect.Bottom, m_clipRegion.hi.y);
-
-				//
-				//	Clip the texture to the specified area
-				//
-				
-				float percent				= ((clipped_rect.Left - screen_rect.Left) / screen_rect.Width ());
-				clipped_uv_rect.Left		= uv_rect.Left + (uv_rect.Width () * percent);
-
-				percent						= ((clipped_rect.Right - screen_rect.Left) / screen_rect.Width ());
-				clipped_uv_rect.Right	= uv_rect.Left + (uv_rect.Width () * percent);
-
-				percent						= ((clipped_rect.Top - screen_rect.Top) / screen_rect.Height ());
-				clipped_uv_rect.Top		= uv_rect.Top + (uv_rect.Height () * percent);
-
-				percent						= ((clipped_rect.Bottom - screen_rect.Top) / screen_rect.Height ());
-				clipped_uv_rect.Bottom	= uv_rect.Top + (uv_rect.Height () * percent);
-			}
-
-			//
-			//	Use the clipped rectangles to render
-			//
-			screen_rect = clipped_rect;
-			uv_rect		= clipped_uv_rect;
-		}
-	}
-
-	// if rotated 90 degrees clockwise we have to adjust the uv coords
-	if( BitTest( image->getStatus(), IMAGE_STATUS_ROTATED_90_CLOCKWISE ) )
-	{
-
-		m_2DRender->Add_Tri( Vector2( screen_rect.Left, screen_rect.Top ), 
-												 Vector2( screen_rect.Left, screen_rect.Bottom ),
-												 Vector2( screen_rect.Right, screen_rect.Top ),
-												 Vector2( uv_rect.Right, uv_rect.Top),
-												 Vector2( uv_rect.Left, uv_rect.Top),
-												 Vector2( uv_rect.Right, uv_rect.Bottom ),
-												 color );
-
-		m_2DRender->Add_Tri( Vector2( screen_rect.Right, screen_rect.Bottom ),
-												 Vector2( screen_rect.Right, screen_rect.Top ),
-												 Vector2( screen_rect.Left, screen_rect.Bottom ),
-												 Vector2( uv_rect.Left, uv_rect.Bottom ),
-												 Vector2( uv_rect.Right, uv_rect.Bottom ),
-												 Vector2( uv_rect.Left, uv_rect.Top ),
-												 color );
-
-	}  // end if
-	else
-	{
-
-		// just draw as normal
-		m_2DRender->Add_Quad( screen_rect, uv_rect, color );
-
-	}  // end else
-
-	m_2DRender->Render();
-
-	//reset to default states for next time this method is called.
-	m_2DRender->Enable_Grayscale(false);	//never leave it in this mode
-	if (doAlphaReset)
-		m_2DRender->Enable_Alpha(true);
-
-}  // end drawImage
-
-//============================================================================
-// W3DDisplay::createVideoBuffer
-//============================================================================
-
-VideoBuffer*	W3DDisplay::createVideoBuffer( void )
-{
-	VideoBuffer::Type format = VideoBuffer::TYPE_UNKNOWN;
-
-	/// @todo query video player for supported formats - we assume bink formats here
-
-	// first try to use the native format
-
-	WW3DFormat displayFormat = DX8Wrapper::getBackBufferFormat();
-
-	if ( DX8Wrapper::Get_Current_Caps()->Support_Texture_Format( displayFormat ))
-	{
-		format = W3DVideoBuffer::W3DFormatToType( displayFormat );
-	}
-
-	if ( format == VideoBuffer::TYPE_UNKNOWN )
-	{
-		if ( DX8Wrapper::Get_Current_Caps()->Support_Texture_Format( WW3D_FORMAT_X8R8G8B8 ))
-		{
-			format = VideoBuffer::TYPE_X8R8G8B8;
-		}
-		else if ( DX8Wrapper::Get_Current_Caps()->Support_Texture_Format( WW3D_FORMAT_R8G8B8 ))
-		{
-			format = VideoBuffer::TYPE_R8G8B8;
-		}
-		else if ( DX8Wrapper::Get_Current_Caps()->Support_Texture_Format( WW3D_FORMAT_R5G6B5 ))
-		{
-			format = VideoBuffer::TYPE_R5G6B5;
-		}
-		else if ( DX8Wrapper::Get_Current_Caps()->Support_Texture_Format( WW3D_FORMAT_X1R5G5B5 ))
-		{
-			format = VideoBuffer::TYPE_X1R5G5B5;
-		}
-		else
-		{
-			// card does not support any of the formats we need
-			return NULL;
-		}
-	}
-	// on low mem machines, render every video in 16bit except for the EA Logo movie
-	if(!TheGlobalData->m_playIntro )//&& TheGameLODManager && (!TheGameLODManager->didMemPass() || W3DShaderManager::getChipset() == DC_GEFORCE2))
-		format = VideoBuffer::TYPE_R5G6B5;
-
-	W3DVideoBuffer *buffer = NEW W3DVideoBuffer( format );
-
-	return buffer;
-}
-
-
-//============================================================================
-// W3DDisplay::drawVideoBuffer
-//============================================================================
-
-void W3DDisplay::drawVideoBuffer( VideoBuffer *buffer, Int startX, Int startY, Int endX, Int endY )
-{
-	W3DVideoBuffer *vbuffer = (W3DVideoBuffer*) buffer;
-
-	m_2DRender->Reset();
-	m_2DRender->Enable_Texturing( TRUE );
-	m_2DRender->Set_Texture( vbuffer->texture() );
-	m_2DRender->Add_Quad( RectClass( startX, startY, endX, endY ),
-												vbuffer->Rect( 0, 0, 1, 1) );
-	m_2DRender->Render();
-
-}
-
-// W3DDisplay::setClipRegion ============================================
-/** Set the clipping region for images.
-  @todo: Make this work for all primitives, not just drawImage. */
-//=============================================================================
-void W3DDisplay::setClipRegion( IRegion2D *region )
-{
-		// assign new region
-		m_clipRegion = *region;
-		m_isClippedEnabled = TRUE;
-
-}  // end setClipRegion
-
-//=============================================================================
-/* we don't really need to override this call, since we will soon be called to
-	update every shroud cell explicitly...
-*/
-void W3DDisplay::clearShroud()
-{
-	// nothing
-}
-
-//=============================================================================
-void W3DDisplay::setBorderShroudLevel(UnsignedByte level)
-{
-	if (TheTerrainRenderObject && TheTerrainRenderObject->getShroud())
-	{
-		TheTerrainRenderObject->getShroud()->setBorderShroudLevel((W3DShroudLevel)level);
-	}
-}
-
-//=============================================================================
-void W3DDisplay::setShroudLevel( Int x, Int y, CellShroudStatus setting )
-{
-	if (TheTerrainRenderObject && TheTerrainRenderObject->getShroud())
-	{
-		#ifdef INTENSE_DEBUG
-		TheTerrainRenderObject->getShroud()->setShroudFilter(false);
-		#endif
-		if( setting == CELLSHROUD_SHROUDED )
-			TheTerrainRenderObject->getShroud()->setShroudLevel(x, y, (W3DShroudLevel)TheGlobalData->m_shroudAlpha );
-		else if( setting == CELLSHROUD_FOGGED )
-			TheTerrainRenderObject->getShroud()->setShroudLevel(x, y, (W3DShroudLevel)TheGlobalData->m_fogAlpha );///< @todo placeholder to get feedback on logic work while graphic side being decided
-		else
-			TheTerrainRenderObject->getShroud()->setShroudLevel(x, y, (W3DShroudLevel)TheGlobalData->m_clearAlpha );
-		//Logic is saying shroud.  We can add alpha levels here in client if needed.  
-		// W3DShroud is a 0-255 alpha byte.  Logic shroud is a double reference count.
-
-		TheTerrainRenderObject->notifyShroudChanged();
-	
-	}
-}
-
-//=============================================================================
-///Utility function to dump data into a .BMP file
-static void CreateBMPFile(LPTSTR pszFile, char *image, Int width, Int height)
-{ 
-     HANDLE hf;                 // file handle 
-    BITMAPFILEHEADER hdr;       // bitmap file-header 
-    PBITMAPINFOHEADER pbih;     // bitmap info-header 
-    LPBYTE lpBits;              // memory pointer 
-    DWORD dwTotal;              // total count of bytes 
-    DWORD cb;                   // incremental count of bytes 
-    BYTE *hp;                   // byte pointer 
-    DWORD dwTmp; 
-
-    PBITMAPINFO pbmi; 
-
-    pbmi = (PBITMAPINFO) LocalAlloc(LPTR,sizeof(BITMAPINFOHEADER));
-    pbmi->bmiHeader.biSize = sizeof(BITMAPINFOHEADER); 
-    pbmi->bmiHeader.biWidth = width; 
-    pbmi->bmiHeader.biHeight = height; 
-    pbmi->bmiHeader.biPlanes = 1; 
-    pbmi->bmiHeader.biBitCount = 24;
-    pbmi->bmiHeader.biCompression = BI_RGB;
-    pbmi->bmiHeader.biSizeImage = (pbmi->bmiHeader.biWidth + 7) /8 * pbmi->bmiHeader.biHeight * 24;
-    pbmi->bmiHeader.biClrImportant = 0; 
-
-
-    pbih = (PBITMAPINFOHEADER) pbmi; 
-    lpBits = (LPBYTE) image;
-
-    // Create the .BMP file. 
-    hf = CreateFile(pszFile, 
-                   GENERIC_READ | GENERIC_WRITE, 
-                   (DWORD) 0, 
-                    NULL, 
-                   CREATE_ALWAYS, 
-                   FILE_ATTRIBUTE_NORMAL, 
-                   (HANDLE) NULL); 
-    if (hf == INVALID_HANDLE_VALUE) 
-		return;
-    hdr.bfType = 0x4d42;        // 0x42 = "B" 0x4d = "M" 
-    // Compute the size of the entire file. 
-    hdr.bfSize = (DWORD) (sizeof(BITMAPFILEHEADER) + 
-                 pbih->biSize + pbih->biClrUsed 
-                 * sizeof(RGBQUAD) + pbih->biSizeImage); 
-    hdr.bfReserved1 = 0; 
-    hdr.bfReserved2 = 0; 
-
-    // Compute the offset to the array of color indices. 
-    hdr.bfOffBits = (DWORD) sizeof(BITMAPFILEHEADER) + 
-                    pbih->biSize + pbih->biClrUsed 
-                    * sizeof (RGBQUAD); 
-
-    // Copy the BITMAPFILEHEADER into the .BMP file. 
-    if (!WriteFile(hf, (LPVOID) &hdr, sizeof(BITMAPFILEHEADER), 
-        (LPDWORD) &dwTmp,  NULL)) 
-		return;
-
-    // Copy the BITMAPINFOHEADER and RGBQUAD array into the file. 
-    if (!WriteFile(hf, (LPVOID) pbih, sizeof(BITMAPINFOHEADER) + pbih->biClrUsed * sizeof (RGBQUAD),(LPDWORD) &dwTmp, NULL)) 
-		return;
-
-    // Copy the array of color indices into the .BMP file. 
-    dwTotal = cb = pbih->biSizeImage; 
-    hp = lpBits; 
-    if (!WriteFile(hf, (LPSTR) hp, (int) cb, (LPDWORD) &dwTmp,NULL)) 
-		return;
-
-    // Close the .BMP file. 
-     if (!CloseHandle(hf))
-		 return;
-
-    // Free memory. 
-	LocalFree( (HLOCAL) pbmi);
-}
-
-///Save Screen Capture to a file
-void W3DDisplay::takeScreenShot(void)
-{
-	char leafname[256];
-	char pathname[1024];
-
-	static int frame_number = 1;
-
-	Bool done = false;
-	while (!done) {
-#ifdef CAPTURE_TO_TARGA
-		sprintf( leafname, "%s%.3d.tga", "sshot", frame_number++);
-#else
-		sprintf( leafname, "%s%.3d.bmp", "sshot", frame_number++);
-#endif
-		strcpy(pathname, TheGlobalData->getPath_UserData().str());
-		strcat(pathname, leafname);
-		if (_access( pathname, 0 ) == -1)
-			done = true;
-	}
-
-	// Lock front buffer and copy
-
-	IDirect3DSurface8 *fb;
-	fb=DX8Wrapper::_Get_DX8_Front_Buffer();
-	D3DSURFACE_DESC desc;
-	fb->GetDesc(&desc);
-
-	RECT bounds;
-	POINT point;
-
-	GetClientRect(ApplicationHWnd,&bounds);
-	point.x=bounds.left; point.y=bounds.top;
-	ClientToScreen(ApplicationHWnd, &point);
-	bounds.left=point.x; bounds.top=point.y; 
-	point.x=bounds.right; point.y=bounds.bottom;
-	ClientToScreen(ApplicationHWnd, &point);
-	bounds.right=point.x; bounds.bottom=point.y;
- 
-	D3DLOCKED_RECT lrect;
-
-	DX8_ErrorCode(fb->LockRect(&lrect,&bounds,D3DLOCK_READONLY));
-
-	unsigned int x,y,index,index2,width,height;
-
-	width=bounds.right-bounds.left;
-	height=bounds.bottom-bounds.top;
-
-	char *image=NEW char[3*width*height];
-#ifdef CAPTURE_TO_TARGA
-	//bytes are mixed in targa files, not rgb order.
-	for (y=0; y<height; y++)
-	{
-		for (x=0; x<width; x++)
-		{
-			// index for image
-			index=3*(x+y*width);
-			// index for fb
-			index2=y*lrect.Pitch+4*x;
-
-			image[index]=*((char *) lrect.pBits + index2+2);
-			image[index+1]=*((char *) lrect.pBits + index2+1);
-			image[index+2]=*((char *) lrect.pBits + index2+0);
-		}
-	}
-
-	fb->Release();
-
-	Targa targ;
-	memset(&targ.Header,0,sizeof(targ.Header));
-	targ.Header.Width=width;
-	targ.Header.Height=height;
-	targ.Header.PixelDepth=24;
-	targ.Header.ImageType=TGA_TRUECOLOR;
-	targ.SetImage(image);
-	targ.YFlip();
-
-	targ.Save(pathname,TGAF_IMAGE,false);
-#else	//capturing to bmp file
-	//bmp is same byte order
-	for (y=0; y<height; y++)
-	{
-		for (x=0; x<width; x++)
-		{
-			// index for image
-			index=3*(x+y*width);
-			// index for fb
-			index2=y*lrect.Pitch+4*x;
-
-			image[index]=*((char *) lrect.pBits + index2+0);
-			image[index+1]=*((char *) lrect.pBits + index2+1);
-			image[index+2]=*((char *) lrect.pBits + index2+2);
-		}
-	}
-
-	fb->Release();
-
-	//Flip the image
-	char *ptr,*ptr1;
-	char  v,v1;
-
-	for (y = 0; y < (height >> 1); y++)
-	{
-		/* Compute address of lines to exchange. */
-		ptr = (image + ((width * y) * 3));
-		ptr1 = (image + ((width * (height - 1)) * 3));
-		ptr1 -= ((width * y) * 3);
-
-		/* Exchange all the pixels on this scan line. */
-		for (x = 0; x < (width * 3); x++)
-			{
-			v = *ptr;
-			v1 = *ptr1;
-			*ptr = v1;
-			*ptr1 = v;
-			ptr++;
-			ptr1++;
-			}
-	}
-	CreateBMPFile(pathname, image, width, height);
+// FPS display is now inline in draw()
+
+// ============================================================================
+// Asset management - will be implemented with D3D11 texture/model loading
+// ============================================================================
+
+#if defined(RTS_DEBUG)
+void W3DDisplay::dumpModelAssets(const char *path) {}
+void W3DDisplay::dumpAssetUsage(const char* mapname) {}
 #endif
 
-	delete [] image;
-
-	UnicodeString ufileName;
-	ufileName.translate(leafname);
-	TheInGameUI->message(TheGameText->fetch("GUI:ScreenCapture"), ufileName.str());
+void W3DDisplay::preloadModelAssets(AsciiString model)
+{
+	// Force the W3DAssetManager to load and cache the render object prototype
+	// so it's ready when the draw module needs it (avoids hitching on first use).
+	if (m_assetManager && !model.isEmpty())
+		PreloadModelViaAssetManager(m_assetManager, model.str());
 }
 
-/** Start/Stop campturing an AVI movie*/
-void W3DDisplay::toggleMovieCapture(void)
+void W3DDisplay::preloadTextureAssets(AsciiString texture)
 {
-	WW3D::Toggle_Movie_Capture("Movie",30);
-}
-
-
-#if defined(_DEBUG) || defined(_INTERNAL)
-
-static FILE *AssetDumpFile=NULL;
-
-void dumpMeshAssets(MeshClass *mesh)
-{
-	if (mesh)
+	// Pre-load a texture into the D3D11 image cache so it's available
+	// without disk I/O when first drawn.
+	if (!texture.isEmpty())
 	{
-		TextureClass *texture;
-		//MaterialInfoClass	*material = mesh->Get_Material_Info();
-		MeshModelClass *model=mesh->Get_Model();
-		for (int stage=0;stage<MeshMatDescClass::MAX_TEX_STAGES;++stage)
-		{
-			for (int pass=0;pass<model->Get_Pass_Count();++pass) 
-			{
-				if (model->Has_Texture_Array(pass,stage))
-				{
-					for (int i=0;i<model->Get_Polygon_Count();++i)
-					{
-						if ((texture=model->Peek_Texture(i,pass,stage)) != NULL)
-						{
-							fprintf(AssetDumpFile,"\t%s\n",texture->Get_Texture_Name());
-						}
-					}
-				}
-				else
-				{
-					if ((texture=model->Peek_Single_Texture(pass,stage)) != NULL)
-					{
-						fprintf(AssetDumpFile,"\t%s\n",texture->Get_Texture_Name());
-					}
-				}
-			}
-		}
+		auto& device = Render::Renderer::Instance().GetDevice();
+		Render::ImageCache::Instance().GetTexture(device, texture.str());
 	}
 }
+void W3DDisplay::doSmartAssetPurgeAndPreload(const char* usageFileName) {}
 
-void dumpHLODAssets(HLodClass *hlod)
-{
-	if (hlod)
-	{
-		//model composed of multiple meshes.
-		for (Int i=0; i<hlod->Get_Num_Sub_Objects(); i++)
-		{
-			RenderObjClass *subObj=hlod->Get_Sub_Object(i);
-			if (subObj->Class_ID() == RenderObjClass::CLASSID_HLOD)
-				dumpHLODAssets((HLodClass *)subObj);
-			else
-			if (subObj->Class_ID() == RenderObjClass::CLASSID_MESH)
-				dumpMeshAssets((MeshClass *)subObj);
-		}
-	}
-}
+// ============================================================================
+// Stats
+// ============================================================================
 
-//-------------------------------------------------------------------------------------------------
-/**  dump all used models/textures to a file.*/
-//-------------------------------------------------------------------------------------------------
-void W3DDisplay::dumpModelAssets(const char *path)
-{
-	if (m_3DScene)
-	{	
-		AssetDumpFile=fopen(path,"w");
-		if (AssetDumpFile)
-		{
-			fprintf(AssetDumpFile,"Models and Textures used on %s:\n\n",TheGlobalData->m_mapName.str());
-			SceneIterator *sceneIter = m_3DScene->Create_Iterator();
-			sceneIter->First();
-			while(!sceneIter->Is_Done())
-			{
-				RenderObjClass * robj = sceneIter->Current_Item();
-				if (robj->Class_ID() == RenderObjClass::CLASSID_HLOD)
-				{	fprintf(AssetDumpFile,"%s.W3D:\n",robj->Get_Name());
-					dumpHLODAssets((HLodClass *)robj);
-				}
-				else
-				if (robj->Class_ID() == RenderObjClass::CLASSID_MESH)
-				{	fprintf(AssetDumpFile,"%s.W3D:\n",robj->Get_Name());
-					dumpMeshAssets((MeshClass *)robj);
-				}
-				sceneIter->Next();
-			}
-			m_3DScene->Destroy_Iterator(sceneIter);
-			fclose(AssetDumpFile);
-		}
-	}
-}
-#endif	//only include above code in debug and internal
-//-------------------------------------------------------------------------------------------------
-/** Preload using the W3D asset manager the model referenced by the string parameter */
-//-------------------------------------------------------------------------------------------------
-void W3DDisplay::preloadModelAssets( AsciiString model )
-{
-
-	if( m_assetManager )
-	{
-		AsciiString nameWithExtension;
-
-		nameWithExtension.format( "%s.w3d", model.str() );
-		m_assetManager->Load_3D_Assets( nameWithExtension.str() );
-
-	}  // end if
-
-}  // end preloadModelAssets
-
-//-------------------------------------------------------------------------------------------------
-/** Preload using the W3D asset manager the texture referenced by the string parameter */
-//-------------------------------------------------------------------------------------------------
-void W3DDisplay::preloadTextureAssets( AsciiString texture )
-{
-
-	if( m_assetManager )
-	{
-		TextureClass *theTexture = m_assetManager->Get_Texture( texture.str() );
-		theTexture->Release_Ref();//release reference
-	}  // end if
-
-}  // end preloadModelAssets
-
-//-------------------------------------------------------------------------------------------------
-//-------------------------------------------------------------------------------------------------
-void W3DDisplay::doSmartAssetPurgeAndPreload(const char* usageFileName)
-{
-	if (!m_assetManager || !usageFileName || !*usageFileName)
-		return;
-
-	DynamicVectorClass<StringClass> names(8000);
-
-	// use TheFileSystem here so we can bigify these files
-	File* f = TheFileSystem->openFile(usageFileName, File::READ | File::TEXT);
-	if (f)
-	{
-		for (;;)
-		{
-			AsciiString tmp;
-			if (f->scanString(tmp) == FALSE)
-				break;
-
-			// allow for comments in the file. Note that this doesn't allow for comments
-			// with spaces! doh. oh well. better than nothing.
-			if (tmp.str()[0] == ';')
-				continue;
-
-			names.Add(StringClass(tmp.str()));
-		}
-		f->close();
-	}
-
-	// just free everything if there's no exclusion list file (send in an empty list)
-	m_assetManager->Free_Assets_With_Exclusion_List(names);
-}
-
-//-------------------------------------------------------------------------------------------------
-//-------------------------------------------------------------------------------------------------
-#if defined(_DEBUG) || defined(_INTERNAL)
-void W3DDisplay::dumpAssetUsage(const char* mapname)
-{
-	if (!m_assetManager || !mapname || !*mapname)
-		return;
-
-	DynamicVectorClass<StringClass> names(8000);
-	m_assetManager->Create_Asset_List(names);
-
-	const char* leafname = strrchr(mapname, '\\');
-	if (leafname)
-		++leafname;					// point to first character after the last backslash
-	else
-		leafname = mapname;		// point to the start of the filename
-
-	char buf[256];
-	int idx = 1;
-	while (true)
-	{
-		sprintf(buf, "AssetUsage_%s_%04d.txt",leafname,idx);
-		if (_access(buf, 0) != 0)
-			break;	// it exists, we're good
-		++idx;
-	}
-	
-	FILE *fp = fopen(buf, "w");
-	if (fp)
-	{
-		for (int i=0; i<names.Count(); i++) 
-		{
-			const char* n = names[i];
-			fprintf(fp, "%s\n", n);
-		}
-		fclose(fp);
-	}
-}
-#endif
-
-//-------------------------------------------------------------------------------------------------
-static void drawFramerateBar(void)
-{
-	static DWORD prevTime = timeGetTime();
-	DWORD now = timeGetTime();
-	Real percTime = (1000.0f / (now - prevTime) ) / (1000.0f / TheGlobalData->m_framesPerSecondLimit);
-
-	if (percTime > 1.0f)
-		percTime = 1.0f;
-	else if (percTime < 0.0f)
-		percTime = 0.0f;
-	Int width = REAL_TO_INT(percTime * TheDisplay->getWidth());
-	UnsignedInt colorToUse = GameMakeColor( REAL_TO_UNSIGNEDBYTE((1.0f - percTime) * 255), 
-																					REAL_TO_UNSIGNEDBYTE(percTime * 255), 
-																					0, 
-																					0x7F);
-
-	TheDisplay->drawFillRect(1, 1, width, 15, colorToUse);
-	prevTime = now;
-}
+Real W3DDisplay::getAverageFPS() { return m_averageFPS; }
+Real W3DDisplay::getCurrentFPS() { return m_currentFPS; }
+Int W3DDisplay::getLastFrameDrawCalls() { return 0; }

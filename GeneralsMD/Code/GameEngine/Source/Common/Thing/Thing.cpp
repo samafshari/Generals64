@@ -32,7 +32,7 @@
 //						"Things"
 //
 //-----------------------------------------------------------------------------
-#include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 #include "Common/PerfTimer.h"
 #include "Common/Thing.h"
@@ -43,41 +43,46 @@
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "Common/Team.h"
-#include "Lib/Trig.h"
+#include "Lib/trig.h"
+#include "GameLogic/GameLogic.h"
 #include "GameLogic/TerrainLogic.h"
 
-#ifdef _INTERNAL
-// for occasional debugging...
-//#pragma optimize("", off)
-//#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
-#endif
+
+static constexpr const Real InitialThingPosX = 0.0f;
+static constexpr const Real InitialThingPosY = 0.0f;
 
 //=============================================================================
 /** Constructor */
 //=============================================================================
-Thing::Thing( const ThingTemplate *thingTemplate ) 
+Thing::Thing( const ThingTemplate *thingTemplate )
 {
 	// sanity
-	if( thingTemplate == NULL )
+	if( thingTemplate == nullptr )
 	{
-	
+
 		// cannot create thing without template
 		DEBUG_CRASH(( "no template" ));
 		return;
 
-	}  // end if
-		
+	}
+
 	m_template = thingTemplate;
-#if defined(_DEBUG) || defined(_INTERNAL)
+#if defined(RTS_DEBUG)
 	m_templateName = thingTemplate->getName();
 #endif
 	m_transform.Make_Identity();
-	m_cachedPos.zero();
+	m_cachedPos.x = InitialThingPosX;
+	m_cachedPos.y = InitialThingPosY;
+	m_cachedPos.z = 0.0f;
 	m_cachedAngle = 0.0f;
 	m_cachedDirVector.zero();
 	m_cachedAltitudeAboveTerrain = 0;
 	m_cachedAltitudeAboveTerrainOrWater = 0;
 	m_cacheFlags = 0;
+
+	m_prevTransform.Make_Identity();
+	m_prevTransformFrame = 0xFFFFFFFF;
+	m_prevTransformValid = FALSE;
 
 }
 
@@ -91,9 +96,49 @@ Thing::~Thing()
 //DECLARE_PERF_TIMER(ThingMatrixStuff)
 
 //=============================================================================
+/** Snapshot current transform as "previous" on the first change per logic frame.
+  * Used for visual interpolation between logic ticks. */
+//=============================================================================
+void Thing::capturePrevTransform()
+{
+	if (TheGameLogic == nullptr)
+		return;
+
+	UnsignedInt frame = TheGameLogic->getFrame();
+	if (m_prevTransformFrame == frame)
+		return; // already captured this logic tick
+
+	// Always snapshot the current m_transform before the setter mutates it.
+	// This is the right value to lerp FROM for motion that happens within
+	// the current logic tick.
+	m_prevTransform = m_transform;
+
+	// But only flip the "valid history" bit once capture has crossed a
+	// logic-frame boundary — i.e. the object already had a prev-frame
+	// assigned and we're now advancing past it. Same-frame placement
+	// sequences (multiple setters during object spawn all running inside
+	// the same logic tick) snapshot intermediate placement matrices that
+	// don't represent real motion; flipping valid=TRUE there would make
+	// static buildings oscillate between a half-placed intermediate and
+	// their final pose every render frame for the rest of the match.
+	if (m_prevTransformFrame != 0xFFFFFFFF)
+	{
+		m_prevTransformValid = TRUE;
+	}
+
+	m_prevTransformFrame = frame;
+}
+
+//=============================================================================
 const ThingTemplate *Thing::getTemplate() const
 {
 	return m_template;
+}
+
+//=============================================================================
+Bool Thing::isPositioned() const
+{
+	return m_cachedPos.x != InitialThingPosX || m_cachedPos.y != InitialThingPosY;
 }
 
 //=============================================================================
@@ -135,6 +180,8 @@ void Thing::setPositionZ( Real z )
 	//USE_PERF_TIMER(ThingMatrixStuff)
 	if( !m_template->isKindOf( KINDOF_STICK_TO_TERRAIN_SLOPE) )
 	{
+		capturePrevTransform();
+
 		Real oldAngle = m_cachedAngle;
 		Coord3D oldPos = m_cachedPos;
 		Matrix3D oldMtx = m_transform;
@@ -156,13 +203,13 @@ void Thing::setPositionZ( Real z )
 	else
 	{
 		Matrix3D mtx;
-		const Bool stickToGround = true;	// yes, set the "z" pos		
+		const Bool stickToGround = true;	// yes, set the "z" pos
 		Coord3D pos = m_cachedPos;
 		pos.z = z;
 		TheTerrainLogic->alignOnTerrain(getOrientation(), pos, stickToGround, mtx );
 		setTransformMatrix(&mtx);
 	}
-	DEBUG_ASSERTCRASH(!(_isnan(getPosition()->x) || _isnan(getPosition()->y) || _isnan(getPosition()->z)), ("Drawable/Object position NAN! '%s'\n", m_template->getName().str() ));
+	DEBUG_ASSERTCRASH(!(_isnan(getPosition()->x) || _isnan(getPosition()->y) || _isnan(getPosition()->z)), ("Drawable/Object position NAN! '%s'", m_template->getName().str() ));
 }
 
 //=============================================================================
@@ -171,11 +218,13 @@ void Thing::setPosition( const Coord3D *pos )
 	//USE_PERF_TIMER(ThingMatrixStuff)
 	if( !m_template->isKindOf( KINDOF_STICK_TO_TERRAIN_SLOPE) )
 	{
+		capturePrevTransform();
+
 		Real oldAngle = m_cachedAngle;
 		Coord3D oldPos = m_cachedPos;
 		Matrix3D oldMtx = m_transform;
 
-		//DEBUG_ASSERTCRASH(!(_isnan(pos->x) || _isnan(pos->y) || _isnan(pos->z)), ("Drawable/Object position NAN! '%s'\n", m_template->getName().str() ));
+		//DEBUG_ASSERTCRASH(!(_isnan(pos->x) || _isnan(pos->y) || _isnan(pos->z)), ("Drawable/Object position NAN! '%s'", m_template->getName().str() ));
 		m_transform.Set_X_Translation( pos->x );
 		m_transform.Set_Y_Translation( pos->y );
 		m_transform.Set_Z_Translation( pos->z );
@@ -187,17 +236,19 @@ void Thing::setPosition( const Coord3D *pos )
 	else
 	{
 		Matrix3D mtx;
-		const Bool stickToGround = true;	// yes, set the "z" pos				
+		const Bool stickToGround = true;	// yes, set the "z" pos
 		TheTerrainLogic->alignOnTerrain(getOrientation(), *pos, stickToGround, mtx );
 		setTransformMatrix(&mtx);
 	}
-	DEBUG_ASSERTCRASH(!(_isnan(getPosition()->x) || _isnan(getPosition()->y) || _isnan(getPosition()->z)), ("Drawable/Object position NAN! '%s'\n", m_template->getName().str() ));
+	DEBUG_ASSERTCRASH(!(_isnan(getPosition()->x) || _isnan(getPosition()->y) || _isnan(getPosition()->z)), ("Drawable/Object position NAN! '%s'", m_template->getName().str() ));
 }
 
 //=============================================================================
 void Thing::setOrientation( Real angle )
 {
 	//USE_PERF_TIMER(ThingMatrixStuff)
+	capturePrevTransform();
+
 	Coord3D u, x, y, z, pos;
 
 	// setOrientation always forces us straight up in the Z axis,
@@ -214,7 +265,7 @@ void Thing::setOrientation( Real angle )
 	if( m_template->isKindOf( KINDOF_STICK_TO_TERRAIN_SLOPE) )
 	{
 		Matrix3D mtx;
-		const Bool stickToGround = true;	// yes, set the "z" pos				
+		const Bool stickToGround = true;	// yes, set the "z" pos
 		TheTerrainLogic->alignOnTerrain(angle, pos, stickToGround, m_transform );
 	}
 	else
@@ -235,13 +286,13 @@ void Thing::setOrientation( Real angle )
 											x.z, y.z, z.z, pos.z );
 	}
 
-	//DEBUG_ASSERTCRASH(-PI <= angle && angle <= PI, ("Please pass only normalized (-PI..PI) angles to setOrientation (%f).\n", angle));
+	//DEBUG_ASSERTCRASH(-PI <= angle && angle <= PI, ("Please pass only normalized (-PI..PI) angles to setOrientation (%f).", angle));
 	m_cachedAngle = normalizeAngle(angle);
 	m_cachedPos = pos;
 	m_cacheFlags &= ~VALID_DIRVECTOR;	// but don't clear the altitude flags.
 
 	reactToTransformChange(&oldMtx, &oldPos, oldAngle);
-	DEBUG_ASSERTCRASH(!(_isnan(getPosition()->x) || _isnan(getPosition()->y) || _isnan(getPosition()->z)), ("Drawable/Object position NAN! '%s'\n", m_template->getName().str() ));
+	DEBUG_ASSERTCRASH(!(_isnan(getPosition()->x) || _isnan(getPosition()->y) || _isnan(getPosition()->z)), ("Drawable/Object position NAN! '%s'", m_template->getName().str() ));
 }
 
 //=============================================================================
@@ -250,6 +301,8 @@ void Thing::setOrientation( Real angle )
 void Thing::setTransformMatrix( const Matrix3D *mx )
 {
 	//USE_PERF_TIMER(ThingMatrixStuff)
+	capturePrevTransform();
+
 	Real oldAngle = m_cachedAngle;
 	Coord3D oldPos = m_cachedPos;
 	Matrix3D oldMtx = m_transform;
@@ -262,19 +315,19 @@ void Thing::setTransformMatrix( const Matrix3D *mx )
 	m_cacheFlags = 0;
 
 	reactToTransformChange(&oldMtx, &oldPos, oldAngle);
-	DEBUG_ASSERTCRASH(!(_isnan(getPosition()->x) || _isnan(getPosition()->y) || _isnan(getPosition()->z)), ("Drawable/Object position NAN! '%s'\n", m_template->getName().str() ));
+	DEBUG_ASSERTCRASH(!(_isnan(getPosition()->x) || _isnan(getPosition()->y) || _isnan(getPosition()->z)), ("Drawable/Object position NAN! '%s'", m_template->getName().str() ));
 }
 
 //-------------------------------------------------------------------------------------------------
-Bool Thing::isKindOf(KindOfType t) const 
-{ 
-	return getTemplate()->isKindOf(t); 
+Bool Thing::isKindOf(KindOfType t) const
+{
+	return getTemplate()->isKindOf(t);
 }
 
 //-------------------------------------------------------------------------------------------------
-Bool Thing::isKindOfMulti(const KindOfMaskType& mustBeSet, const KindOfMaskType& mustBeClear) const 
-{ 
-	return getTemplate()->isKindOfMulti(mustBeSet, mustBeClear); 
+Bool Thing::isKindOfMulti(const KindOfMaskType& mustBeSet, const KindOfMaskType& mustBeClear) const
+{
+	return getTemplate()->isKindOfMulti(mustBeSet, mustBeClear);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -284,7 +337,7 @@ Bool Thing::isAnyKindOf( const KindOfMaskType& anyKindOf ) const
 }
 
 // ------------------------------------------------------------------------------------------------
-Real Thing::calculateHeightAboveTerrain() const 
+Real Thing::calculateHeightAboveTerrain() const
 {
 	//USE_PERF_TIMER(ThingMatrixStuff)
 	const Coord3D* pos = getPosition();
@@ -312,10 +365,10 @@ Real Thing::getHeightAboveTerrainOrWater() const
 	{
 		const Coord3D* pos = getPosition();
 		Real waterZ;
-		if (TheTerrainLogic->isUnderwater(pos->x, pos->y, &waterZ)) 
+		if (TheTerrainLogic->isUnderwater(pos->x, pos->y, &waterZ))
 		{
 			m_cachedAltitudeAboveTerrainOrWater = pos->z - waterZ;
-		} 
+		}
 		else
 		{
 			m_cachedAltitudeAboveTerrainOrWater = getHeightAboveTerrain();
@@ -329,7 +382,7 @@ Real Thing::getHeightAboveTerrainOrWater() const
 /** If we treat this as airborne, then they slide down slopes.  This checks whether
 they are high enough that we should let them act like they're flying. jba. */
 //=============================================================================
-Bool Thing::isSignificantlyAboveTerrain() const 
+Bool Thing::isSignificantlyAboveTerrain() const
 {
 	// If it's high enough that it will take more than 3 frames to return to the ground,
 	// then it's significantly airborne.  jba
@@ -367,8 +420,8 @@ void Thing::convertBonePosToWorldPos(const Coord3D* bonePos, const Matrix3D* bon
 void Thing::transformPoint( const Coord3D *in, Coord3D *out )
 {
 
-	// santiy
-	if( in == NULL || out == NULL )
+	// sanity
+	if( in == nullptr || out == nullptr )
 		return;
 
 	// for conversion
@@ -389,4 +442,4 @@ void Thing::transformPoint( const Coord3D *in, Coord3D *out )
 	out->y = vectorOut.Y;
 	out->z = vectorOut.Z;
 
-}  // end transformPoint
+}

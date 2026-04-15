@@ -28,18 +28,15 @@
 
 #pragma once
 
-#ifndef _MISSILE_UPDATE_H_
-#define _MISSILE_UPDATE_H_
-
 #include "GameClient/RadiusDecal.h"
 #include "Common/GameType.h"
 #include "Common/GlobalData.h"
 #include "GameLogic/Module/UpdateModule.h"
 #include "GameLogic/Module/DieModule.h"
 #include "Common/INI.h"
-#include "WWMath/Matrix3D.h"
+#include "WWMath/matrix3d.h"
 
-enum ParticleSystemID;
+enum ParticleSystemID : Int;
 class FXList;
 
 //-------------------------------------------------------------------------------------------------
@@ -47,7 +44,7 @@ class NeutronMissileUpdateModuleData : public UpdateModuleData
 {
 public:
 	Real					m_initialDist;
-	Real					m_maxTurnRate;		
+	Real					m_maxTurnRate;
 	Real					m_forwardDamping;
 	Real					m_relativeSpeed;
 	Real					m_targetFromDirectlyAbove;	///< aim first for dest+offset, then dest
@@ -70,7 +67,7 @@ public:
 /**
  * This module encapsulates missile behavior.
  */
-class NeutronMissileUpdate : public UpdateModule, 
+class NeutronMissileUpdate : public UpdateModule,
 	public DieModuleInterface,
 	public ProjectileUpdateInterface
 {
@@ -108,7 +105,7 @@ public:
 	virtual void projectileNowJammed() {}
 
 	virtual UpdateSleepTime update();
-	virtual void onDelete( void );
+	virtual void onDelete();
 
 private:
 
@@ -124,7 +121,7 @@ private:
 	Coord3D m_vel;
 
 	UnsignedInt m_stateTimestamp;				///< time of state change
-	Bool m_isLaunched;							
+	Bool m_isLaunched;
 	Bool m_isArmed;											///< if true, missile will explode on contact
 	Real m_noTurnDistLeft;				///< when zero, ok to start turning
 	Bool m_reachedIntermediatePos;
@@ -134,12 +131,9 @@ private:
 
 	const ParticleSystemTemplate* m_exhaustSysTmpl;
 
-	void doLaunch( void );							///< implement LAUNCH state
-	void doAttack( void );							///< implement ATTACK state
+	void doLaunch();							///< implement LAUNCH state
+	void doAttack();							///< implement ATTACK state
 	void detonate();												///< blow it up. (usually only called by MissileCollide)
 
 
 };
-
-#endif // _MISSILE_UPDATE_H_
-

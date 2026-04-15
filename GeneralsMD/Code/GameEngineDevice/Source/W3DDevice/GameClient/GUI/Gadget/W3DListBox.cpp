@@ -25,12 +25,12 @@
 
 // FILE: W3DListBox.cpp ///////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-//                                                                          
-//                       Westwood Studios Pacific.                          
-//                                                                          
-//                       Confidential Information                           
-//                Copyright (C) 2001 - All Rights Reserved                  
-//                                                                          
+//
+//                       Westwood Studios Pacific.
+//
+//                       Confidential Information
+//                Copyright (C) 2001 - All Rights Reserved
+//
 //-----------------------------------------------------------------------------
 //
 // Project:   RTS3
@@ -46,6 +46,8 @@
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include <stdlib.h>
+#include <math.h>
+#include <windows.h> // GetTickCount for shader animation clock
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "GameClient/GameWindowGlobal.h"
@@ -53,6 +55,160 @@
 #include "GameClient/GadgetListBox.h"
 #include "W3DDevice/GameClient/W3DGadget.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"
+
+// Shader ids on the wire (see Data/GeneralsRemastered.Data/ShaderEffects.cs
+// and Launcher/.../ShaderEffectPreview.cs — kept in lockstep with both).
+// 0 = stock (no animation). Non-zero means the chat row was sent by a
+// launcher client who picked a cosmetic shader for their house color.
+enum ChatShaderId
+{
+	CHAT_SHADER_STOCK       = 0,
+	CHAT_SHADER_PULSE       = 1,
+	CHAT_SHADER_RAINBOW     = 2,
+	CHAT_SHADER_SHIMMER     = 3,
+	CHAT_SHADER_CHROME      = 4,
+	CHAT_SHADER_HOLOGRAPHIC = 5,
+	CHAT_SHADER_HEXCAMO     = 6,
+	CHAT_SHADER_FROST       = 7,
+};
+
+// Modulate a base ARGB color by a time-varying cosmetic shader effect.
+// Called per-frame at list draw time so animated chat entries pulse /
+// cycle hue / flicker without any gameplay-tick plumbing. Returns the
+// input color unchanged for shaderId 0 so entries without a shader cost
+// nothing beyond the branch.
+//
+// The specific curves are lightweight approximations of the HLSL
+// ApplyShaderEffect in Shader3D.hlsl — not identical, but visually
+// recognisable as the same effect so players can spot "oh that's
+// Rainbow / Chrome / Frost" at a glance in chat.
+static Color applyChatShaderColor(Color base, Int shaderId, UnsignedInt tMs)
+{
+	if (shaderId <= CHAT_SHADER_STOCK || shaderId > CHAT_SHADER_FROST)
+		return base;
+
+	// Unpack ARGB. The engine uses 0xAARRGGBB everywhere.
+	UnsignedInt a = (base >> 24) & 0xFF;
+	UnsignedInt r = (base >> 16) & 0xFF;
+	UnsignedInt g = (base >>  8) & 0xFF;
+	UnsignedInt b =  base        & 0xFF;
+
+	// Period helpers. sinf is plenty — the animation is a visual
+	// cue, not gameplay-critical, so precision beyond a byte of
+	// color is wasted.
+	const Real t = (Real)tMs * 0.001f;
+
+	switch (shaderId)
+	{
+		case CHAT_SHADER_PULSE:
+		{
+			// Brightness wobbles between 78% and 100% (same envelope
+			// as the swatch preview's scale pulse) — scaled text
+			// would re-flow the list, so we ride the color instead.
+			Real k = 0.89f + 0.11f * sinf(t * (2.0f * 3.14159f / 1.2f));
+			r = (UnsignedInt)(r * k); if (r > 255) r = 255;
+			g = (UnsignedInt)(g * k); if (g > 255) g = 255;
+			b = (UnsignedInt)(b * k); if (b > 255) b = 255;
+			break;
+		}
+		case CHAT_SHADER_RAINBOW:
+		{
+			// Full 3s hue cycle through the same 7 key colors the
+			// swatch preview uses — looked up with a crude
+			// piecewise-linear LUT.
+			static const UnsignedInt rainbow[7][3] = {
+				{0xFF,0x33,0x33}, {0xFF,0xCC,0x33}, {0x33,0xFF,0x33},
+				{0x33,0xCC,0xFF}, {0x66,0x33,0xFF}, {0xFF,0x33,0xCC},
+				{0xFF,0x33,0x33},
+			};
+			Real phase = t / 3.0f; phase -= floorf(phase);
+			Real idxF = phase * 6.0f;
+			Int  i0 = (Int)idxF; if (i0 > 5) i0 = 5;
+			Int  i1 = i0 + 1;
+			Real frac = idxF - (Real)i0;
+			r = (UnsignedInt)((1.0f - frac) * rainbow[i0][0] + frac * rainbow[i1][0]);
+			g = (UnsignedInt)((1.0f - frac) * rainbow[i0][1] + frac * rainbow[i1][1]);
+			b = (UnsignedInt)((1.0f - frac) * rainbow[i0][2] + frac * rainbow[i1][2]);
+			break;
+		}
+		case CHAT_SHADER_SHIMMER:
+		{
+			// Alpha flicker on the 0.9s envelope the swatch uses.
+			// Clamped so text never goes fully transparent.
+			Real phase = t / 0.9f; phase -= floorf(phase);
+			Real mult;
+			if      (phase < 0.30f) mult = 1.0f - 1.50f * phase;       // 1.00 → 0.55
+			else if (phase < 0.45f) mult = 0.55f + 3.00f * (phase - 0.30f); // 0.55 → 1.00
+			else if (phase < 0.75f) mult = 1.0f  - 1.00f * (phase - 0.45f); // 1.00 → 0.70
+			else                    mult = 0.70f + 1.20f * (phase - 0.75f); // 0.70 → 1.00
+			UnsignedInt am = (UnsignedInt)(a * mult);
+			if (am > 255) am = 255;
+			a = am;
+			break;
+		}
+		case CHAT_SHADER_CHROME:
+		{
+			// Metallic look — desaturate toward a bright silver and
+			// overdrive brightness. Ignores base color on purpose,
+			// same as the swatch preview's white→silver gradient.
+			Real phase = 0.5f + 0.5f * sinf(t * 2.0f);
+			r = (UnsignedInt)(0x88 + (0xFF - 0x88) * phase);
+			g = (UnsignedInt)(0x99 + (0xFF - 0x99) * phase);
+			b = (UnsignedInt)(0xAA + (0xFF - 0xAA) * phase);
+			break;
+		}
+		case CHAT_SHADER_HOLOGRAPHIC:
+		{
+			// Cycles magenta / cyan / yellow. Base color ignored on
+			// purpose so the effect reads as "iridescent film".
+			Real phase = t / 3.0f; phase -= floorf(phase);
+			if (phase < 1.0f/3.0f)
+			{
+				Real k = phase * 3.0f;
+				r = (UnsignedInt)((1.0f - k) * 0xFF + k * 0x33);
+				g = (UnsignedInt)((1.0f - k) * 0x33 + k * 0xFF);
+				b = (UnsignedInt)((1.0f - k) * 0xFF + k * 0xFF);
+			}
+			else if (phase < 2.0f/3.0f)
+			{
+				Real k = (phase - 1.0f/3.0f) * 3.0f;
+				r = (UnsignedInt)((1.0f - k) * 0x33 + k * 0xFF);
+				g = (UnsignedInt)((1.0f - k) * 0xFF + k * 0xFF);
+				b = (UnsignedInt)((1.0f - k) * 0xFF + k * 0x33);
+			}
+			else
+			{
+				Real k = (phase - 2.0f/3.0f) * 3.0f;
+				r = (UnsignedInt)((1.0f - k) * 0xFF + k * 0xFF);
+				g = (UnsignedInt)((1.0f - k) * 0xFF + k * 0x33);
+				b = (UnsignedInt)((1.0f - k) * 0x33 + k * 0xFF);
+			}
+			break;
+		}
+		case CHAT_SHADER_HEXCAMO:
+		{
+			// Darker base color, matches the swatch preview's 70%
+			// darkened fill. Static — no time dependency.
+			r = (UnsignedInt)(r * 7) / 10;
+			g = (UnsignedInt)(g * 7) / 10;
+			b = (UnsignedInt)(b * 7) / 10;
+			break;
+		}
+		case CHAT_SHADER_FROST:
+		{
+			// Pale cyan with a subtle breathing shift toward white
+			// — the swatch's cool glow isn't replicable in a single
+			// text color so we hint at it via brightness breathing.
+			Real k = 0.9f + 0.1f * sinf(t * 1.6f);
+			r = (UnsignedInt)(0xCC * k); if (r > 255) r = 255;
+			g = (UnsignedInt)(0xEE * k); if (g > 255) g = 255;
+			b = (UnsignedInt)(0xFF * k); if (b > 255) b = 255;
+			break;
+		}
+	}
+
+	return (Color)((a << 24) | ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF));
+}
 
 // DEFINES ////////////////////////////////////////////////////////////////////
 
@@ -71,8 +227,8 @@
 // drawHiliteBar ==============================================================
 /** Draw image for the hilite bar */
 //=============================================================================
-static void drawHiliteBar( const Image *left, const Image *right, 
-													 const Image *center, const Image *smallCenter, 
+static void drawHiliteBar( const Image *left, const Image *right,
+													 const Image *center, const Image *smallCenter,
 													 Int startX, Int startY,
 													 Int endX, Int endY )
 {
@@ -88,7 +244,7 @@ static void drawHiliteBar( const Image *left, const Image *right,
 	barWindowSize.y = endY - startY;
 
 	//
-	// the bar window size will always be at least big enough to accomodate
+	// the bar window size will always be at least big enough to accommodate
 	// the left and right ends
 	//
 	if( barWindowSize.x < left->getImageWidth() + right->getImageWidth() )
@@ -127,12 +283,12 @@ static void drawHiliteBar( const Image *left, const Image *right,
 	{
 
 		end.x = start.x + center->getImageWidth();
-		TheWindowManager->winDrawImage( center, 
+		TheWindowManager->winDrawImage( center,
 																		start.x, start.y,
 																		end.x, end.y );
 		start.x += center->getImageWidth();
 
-	}  // end for i
+	}
 
 	//
 	// how many small repeating pieces will fit in the gap from where the
@@ -160,9 +316,9 @@ static void drawHiliteBar( const Image *left, const Image *right,
 																			end.x, end.y );
 			start.x += smallCenter->getImageWidth();
 
-		}  // end for i
+		}
 
-	}  // end if
+	}
 	TheDisplay->enableClipping(FALSE);
 	// draw left end
 	start.x = startX + xOffset;
@@ -176,7 +332,7 @@ static void drawHiliteBar( const Image *left, const Image *right,
 	end.y = start.y + barWindowSize.y;
 	TheWindowManager->winDrawImage(right, start.x, start.y, end.x, end.y);
 
-}  // end drawHiliteBar
+}
 
 // drawListBoxText ============================================================
 /** Draw the text for a listbox */
@@ -216,7 +372,7 @@ static void drawListBoxText( GameWindow *window, WinInstanceData *instData,
 	{
 
 		if( i > 0 )
-			if( list->listData[(i - 1)].listHeight > 
+			if( list->listData[(i - 1)].listHeight >
 					(list->displayPos + list->displayHeight) )
 				break;
 
@@ -257,12 +413,12 @@ static void drawListBoxText( GameWindow *window, WinInstanceData *instData,
 		// this item is selected, draw the selection color or image
 		if( selected )
 		{
-			
+
 			if( useImages )
 			{
 				const Image *left, *right, *center, *smallCenter;
 
-				if( BitTest( window->winGetStatus(), WIN_STATUS_ENABLED ) == FALSE )
+				if( BitIsSet( window->winGetStatus(), WIN_STATUS_ENABLED ) == FALSE )
 				{
 
 					left				= GadgetListBoxGetDisabledSelectedItemImageLeft( window );
@@ -270,16 +426,16 @@ static void drawListBoxText( GameWindow *window, WinInstanceData *instData,
 					center			= GadgetListBoxGetDisabledSelectedItemImageCenter( window );
 					smallCenter = GadgetListBoxGetDisabledSelectedItemImageSmallCenter( window );
 
-				}  // end if
-				else if( BitTest( instData->getState(), WIN_STATE_HILITED ) )
+				}
+				else if( BitIsSet( instData->getState(), WIN_STATE_HILITED ) )
 				{
 
 					left				= GadgetListBoxGetHiliteSelectedItemImageLeft( window );
 					right				= GadgetListBoxGetHiliteSelectedItemImageRight( window );
 					center			= GadgetListBoxGetHiliteSelectedItemImageCenter( window );
 					smallCenter = GadgetListBoxGetHiliteSelectedItemImageSmallCenter( window );
-				
-				}  // end else if
+
+				}
 				else
 				{
 
@@ -288,7 +444,7 @@ static void drawListBoxText( GameWindow *window, WinInstanceData *instData,
 					center			= GadgetListBoxGetEnabledSelectedItemImageCenter( window );
 					smallCenter = GadgetListBoxGetEnabledSelectedItemImageSmallCenter( window );
 
-				}  // end else
+				}
 
 				// draw select image across area
 
@@ -309,27 +465,27 @@ static void drawListBoxText( GameWindow *window, WinInstanceData *instData,
 				if( left && right && center && smallCenter )
 					drawHiliteBar( left, right, center, smallCenter, start.x + 1, start.y, end.x , end.y );
 
-			}  // end if, use images
+			}
 			else
 			{
 				Color selectColor = WIN_COLOR_UNDEFINED,
 							selectBorder = WIN_COLOR_UNDEFINED;
 
-				if( BitTest( window->winGetStatus(), WIN_STATUS_ENABLED ) == FALSE )
+				if( BitIsSet( window->winGetStatus(), WIN_STATUS_ENABLED ) == FALSE )
 				{
 					selectColor  = GadgetListBoxGetDisabledSelectedItemColor( window );
 					selectBorder = GadgetListBoxGetDisabledSelectedItemBorderColor( window );
-				}  // end if, disabled
-				else if( BitTest( instData->getState(), WIN_STATE_HILITED ) )
+				}
+				else if( BitIsSet( instData->getState(), WIN_STATE_HILITED ) )
 				{
 					selectColor  = GadgetListBoxGetHiliteSelectedItemColor( window );
 					selectBorder = GadgetListBoxGetHiliteSelectedItemBorderColor( window );
-				}  // end else if, hilited
+				}
 				else
 				{
 					selectColor  = GadgetListBoxGetEnabledSelectedItemColor( window );
 					selectBorder = GadgetListBoxGetEnabledSelectedItemBorderColor( window );
-				}  // end else, enabled
+				}
 
 				// draw border
 
@@ -348,7 +504,7 @@ static void drawListBoxText( GameWindow *window, WinInstanceData *instData,
 					start.y = clipRegion.lo.y;
 
 				if( selectBorder != WIN_COLOR_UNDEFINED )
-					TheWindowManager->winOpenRect( selectBorder,	
+					TheWindowManager->winOpenRect( selectBorder,
 																				 WIN_DRAW_LINE_WIDTH,
 																				 start.x, start.y,
 																				 end.x, end.y );
@@ -375,13 +531,13 @@ static void drawListBoxText( GameWindow *window, WinInstanceData *instData,
 																				 start.x, start.y,
 																				 end.x, end.y );
 
-			}  // end else, draw selection with colors
+			}
 
-		}  // end if
+		}
 
-		
 
-		
+
+
 		Color dropColor = TheWindowManager->winMakeColor( 0, 0, 0, 255 );
 		DisplayString *string;
 
@@ -406,13 +562,20 @@ static void drawListBoxText( GameWindow *window, WinInstanceData *instData,
 					columnRegion.lo.y = clipRegion.lo.y;
 				if( columnRegion.hi.y > clipRegion.hi.y )
 					columnRegion.hi.y = clipRegion.hi.y;
-				
+
 				// Display the Text Case;
 				if(cells[j].cellType == LISTBOX_TEXT)
 				{
 					textColor = cells[j].color;
+					// Cosmetic chat shader — modulates the entry's
+					// base color in place of solid draw so a chat row
+					// from a launcher client with e.g. Rainbow shows
+					// the cycling hues in-game too. Cost is one branch
+					// per cell when no shader is set (the common case).
+					if (cells[j].shaderId != 0)
+						textColor = applyChatShaderColor(textColor, cells[j].shaderId, GetTickCount());
 					string = (DisplayString *)cells[j].data;
-					if( BitTest( window->winGetStatus(), WIN_STATUS_ONE_LINE ) == TRUE )
+					if( BitIsSet( window->winGetStatus(), WIN_STATUS_ONE_LINE ) == TRUE )
 					{
 						string->setWordWrap(0);
 						// make sure the font of the text is the same as the windows
@@ -425,11 +588,11 @@ static void drawListBoxText( GameWindow *window, WinInstanceData *instData,
 													drawY,
 													textColor,
 													dropColor );
-									
+
 					}
 					else
 					{
-					
+
 						// make sure the font of the text is the same as the windows
 						if( string->getFont() != window->winGetFont() )
 							string->setFont( window->winGetFont() );
@@ -440,8 +603,8 @@ static void drawListBoxText( GameWindow *window, WinInstanceData *instData,
 													drawY,
 													textColor,
 													dropColor );
-					}//else
-				}// if
+					}
+				}
 				else if(cells[j].cellType == LISTBOX_IMAGE && cells[j].data)
 				{
 					Int width, height;
@@ -468,16 +631,16 @@ static void drawListBoxText( GameWindow *window, WinInstanceData *instData,
 					offsetY++;
 					if(offsetX <x+1)
 						offsetX = x+1;
-					TheDisplay->setClipRegion( &columnRegion );					
-					TheWindowManager->winDrawImage( (const Image *)cells[j].data, 
+					TheDisplay->setClipRegion( &columnRegion );
+					TheWindowManager->winDrawImage( (const Image *)cells[j].data,
 																offsetX, offsetY,
 																offsetX + width, offsetY + height,cells[j].color );
 
-				}//else
+				}
 				columnX = columnX + list->columnWidth[j];
-			}// for
-		}//if
-		
+			}
+		}
+
 
 		drawY += listLineHeight;
 		TheDisplay->enableClipping(FALSE);
@@ -486,7 +649,7 @@ static void drawListBoxText( GameWindow *window, WinInstanceData *instData,
 //	TheWindowManager->winSetClipRegion( clipRegion.lo.x, clipRegion.lo.y,
 //																			clipRegion.hi.x, clipRegion.hi.y );
 
-}  // end drawListBoxText
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // PUBLIC FUNCTIONS ///////////////////////////////////////////////////////////
@@ -515,43 +678,43 @@ void W3DGadgetListBoxDraw( GameWindow *window, WinInstanceData *instData )
 	height = size.y;
 
 	// get the right colors
-	if( BitTest( window->winGetStatus(), WIN_STATUS_ENABLED ) == FALSE )
+	if( BitIsSet( window->winGetStatus(), WIN_STATUS_ENABLED ) == FALSE )
 	{
 		background		= GadgetListBoxGetDisabledColor( window );
 		border				= GadgetListBoxGetDisabledBorderColor( window );
 		titleColor		= window->winGetDisabledTextColor();
 		titleBorder		= window->winGetDisabledTextBorderColor();
-	}  // end if, disabled
-	else if( BitTest( instData->getState(), WIN_STATE_HILITED ) )
+	}
+	else if( BitIsSet( instData->getState(), WIN_STATE_HILITED ) )
 	{
 		background		= GadgetListBoxGetHiliteColor( window );
 		border				= GadgetListBoxGetHiliteBorderColor( window );
 		titleColor		= window->winGetHiliteTextColor();
 		titleBorder		= window->winGetHiliteTextBorderColor();
-	}  // end else if, hilited
+	}
 	else
 	{
 		background		= GadgetListBoxGetEnabledColor( window );
 		border				= GadgetListBoxGetEnabledBorderColor( window );
 		titleColor		= window->winGetEnabledTextColor();
 		titleBorder		= window->winGetEnabledTextBorderColor();
-	}  // end else, enabled
+	}
 
 	// Draw the title
 	if( title && title->getTextLength() )
 	{
-	
+
 		// set the font of this text to that of the window if not already
 		if( title->getFont() != window->winGetFont() )
 			title->setFont( window->winGetFont() );
-			
+
 		// draw the text
-		title->draw( x + 1, y, titleColor, titleBorder );		
+		title->draw( x + 1, y, titleColor, titleBorder );
 
 		y += fontHeight + 1;
 		height -= fontHeight + 1;
 
-	}  // end if
+	}
 
 	// draw the back border
 	if( border != WIN_COLOR_UNDEFINED )
@@ -561,7 +724,7 @@ void W3DGadgetListBoxDraw( GameWindow *window, WinInstanceData *instData )
 	// draw background
 	if( background != WIN_COLOR_UNDEFINED )
 		TheWindowManager->winFillRect( background, WIN_DRAW_LINE_WIDTH,
-																	 x + 1, y + 1, 
+																	 x + 1, y + 1,
 																	 x + width - 1, y + height - 1 );
 
 	// If ScrollBar was requested ... adjust width.
@@ -572,14 +735,14 @@ void W3DGadgetListBoxDraw( GameWindow *window, WinInstanceData *instData )
 		list->slider->winGetSize( &sliderSize.x, &sliderSize.y );
 		width -= (sliderSize.x +3);
 
-	}  // end if
+	}
 
 	// draw the text
 	drawListBoxText( window, instData, x, y + 4 , width, height-4, TRUE );
 
-	
 
-}  // end W3DGadgetListBoxDraw
+
+}
 
 // W3DGadgetListBoxImageDraw ==================================================
 /** Draw list box with user supplied images */
@@ -609,16 +772,16 @@ void W3DGadgetListBoxImageDraw( GameWindow *window, WinInstanceData *instData )
 		list->slider->winGetSize( &sliderSize.x, &sliderSize.y );
 		width -= sliderSize.x;
 
-	}  // end if
+	}
 
 	// get the image
-	if( BitTest( window->winGetStatus(), WIN_STATUS_ENABLED ) == FALSE )
+	if( BitIsSet( window->winGetStatus(), WIN_STATUS_ENABLED ) == FALSE )
 	{
 		image				= GadgetListBoxGetDisabledImage( window );
 		titleColor	= window->winGetDisabledTextColor();
 		titleBorder = window->winGetDisabledTextBorderColor();
 	}
-	else if( BitTest( instData->getState(), WIN_STATE_HILITED ) )
+	else if( BitIsSet( instData->getState(), WIN_STATE_HILITED ) )
 	{
 		image				= GadgetListBoxGetHiliteImage( window );
 		titleColor	= window->winGetHiliteTextColor();
@@ -640,11 +803,11 @@ void W3DGadgetListBoxImageDraw( GameWindow *window, WinInstanceData *instData )
 		start.y = y + instData->m_imageOffset.y;
 		end.x = start.x + width;
 		end.y = start.y + height;
-		TheWindowManager->winDrawImage( image, 
-																		start.x, start.y, 
+		TheWindowManager->winDrawImage( image,
+																		start.x, start.y,
 																		end.x, end.y );
 
-	}  // end if
+	}
 
 	// Draw the title
 	if( title && title->getTextLength() )
@@ -660,12 +823,12 @@ void W3DGadgetListBoxImageDraw( GameWindow *window, WinInstanceData *instData )
 		y += TheWindowManager->winFontHeight( instData->getFont() );
 		height -= TheWindowManager->winFontHeight( instData->getFont() ) + 1;
 
-	}  // end if
+	}
 
 	// draw the listbox text
 	drawListBoxText( window, instData, x, y+4, width, height-4, TRUE );
 
-	
 
-}  // end W3DGadgetListBoxImageDraw
+
+}
 

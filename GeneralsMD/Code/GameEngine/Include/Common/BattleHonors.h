@@ -24,12 +24,12 @@
 
 // FILE: BattleHonors.h /////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-//                                                                          
-//                       Electronic Arts Pacific.                          
-//                                                                          
-//                       Confidential Information                           
-//                Copyright (C) 2002 - All Rights Reserved                  
-//                                                                          
+//
+//                       Electronic Arts Pacific.
+//
+//                       Confidential Information
+//                Copyright (C) 2002 - All Rights Reserved
+//
 //-----------------------------------------------------------------------------
 //
 //	created:	Sep 2002
@@ -37,16 +37,13 @@
 //	Filename: 	BattleHonors.h
 //
 //	author:		Chris Huybregts
-//	
-//	purpose:	
+//
+//	purpose:
 //
 //-----------------------------------------------------------------------------
 ///////////////////////////////////////////////////////////////////////////////
 
 #pragma once
-
-#ifndef __BATTLE_HONORS_H_
-#define __BATTLE_HONORS_H_
 
 //-----------------------------------------------------------------------------
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
@@ -106,12 +103,9 @@ enum
 	BH_CHALLENGE_MASK_7 = 0x0040,
 };
 
-enum
-{
-	MAX_BATTLE_HONOR_COLUMNS = 4,
-	MAX_BATTLE_HONOR_IMAGE_WIDTH = 40,
-	MAX_BATTLE_HONOR_IMAGE_HEIGHT = 41,
-};
+static constexpr int MAX_BATTLE_HONOR_COLUMNS = 4;
+static constexpr int MAX_BATTLE_HONOR_IMAGE_WIDTH = 40;
+static constexpr int MAX_BATTLE_HONOR_IMAGE_HEIGHT = 41;
 
 //-----------------------------------------------------------------------------
 // INLINING ///////////////////////////////////////////////////////////////////
@@ -120,5 +114,3 @@ enum
 //-----------------------------------------------------------------------------
 // EXTERNALS //////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-
-#endif // __BATTLE_HONORS_H_

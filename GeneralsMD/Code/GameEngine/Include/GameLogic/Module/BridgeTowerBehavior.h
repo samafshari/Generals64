@@ -29,13 +29,10 @@
 
 #pragma once
 
-#ifndef __BRIDGE_TOWER_BEHAVIOR_H_
-#define __BRIDGE_TOWER_BEHAVIOR_H_
-
 // USER INCLUDES //////////////////////////////////////////////////////////////////////////////////
 #include "GameLogic/Module/BehaviorModule.h"
 #include "GameLogic/Module/DamageModule.h"
-#include "GameLogic/Module/Diemodule.h"
+#include "GameLogic/Module/DieModule.h"
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
 
@@ -47,9 +44,9 @@ class BridgeTowerBehaviorInterface
 public:
 
 	virtual void setBridge( Object *bridge ) = 0;
-	virtual ObjectID getBridgeID( void ) = 0;
+	virtual ObjectID getBridgeID() = 0;
 	virtual void setTowerType( BridgeTowerType type ) = 0;
-	
+
 };
 
 // ------------------------------------------------------------------------------------------------
@@ -69,10 +66,10 @@ public:
 	// virtual destructor prototype provided by memory pool declaration
 
 	static Int getInterfaceMask() { return (MODULEINTERFACE_DAMAGE) | (MODULEINTERFACE_DIE); }
-	BridgeTowerBehaviorInterface* getBridgeTowerBehaviorInterface( void ) { return this; }
+	BridgeTowerBehaviorInterface* getBridgeTowerBehaviorInterface() { return this; }
 
 	virtual void setBridge( Object *bridge );
-	virtual ObjectID getBridgeID( void );
+	virtual ObjectID getBridgeID();
 	virtual void setTowerType( BridgeTowerType type );
 
 	static BridgeTowerBehaviorInterface *getBridgeTowerBehaviorInterfaceFromObject( Object *obj );
@@ -81,8 +78,8 @@ public:
 	virtual DamageModuleInterface* getDamage() { return this; }
 	virtual void onDamage( DamageInfo *damageInfo );
 	virtual void onHealing( DamageInfo *damageInfo );
-	virtual void onBodyDamageStateChange( const DamageInfo* damageInfo, 
-																				BodyDamageType oldState, 
+	virtual void onBodyDamageStateChange( const DamageInfo* damageInfo,
+																				BodyDamageType oldState,
 																				BodyDamageType newState );
 
 	// Die methods
@@ -95,5 +92,3 @@ protected:
 	BridgeTowerType m_type;				///< type of tower (positioning) we are
 
 };
-
-#endif  // end __BRIDGE_TOWER_DAMAGE_H_

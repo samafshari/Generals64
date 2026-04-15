@@ -24,12 +24,12 @@
 
 // FILE: GameWindowTransitionsStyles.cpp /////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-//                                                                          
-//                       Electronic Arts Pacific.                          
-//                                                                          
-//                       Confidential Information                           
-//                Copyright (C) 2002 - All Rights Reserved                  
-//                                                                          
+//
+//                       Electronic Arts Pacific.
+//
+//                       Confidential Information
+//                Copyright (C) 2002 - All Rights Reserved
+//
 //-----------------------------------------------------------------------------
 //
 //	created:	Dec 2002
@@ -37,7 +37,7 @@
 //	Filename: 	GameWindowTransitionsStyles.cpp
 //
 //	author:		Chris Huybregts
-//	
+//
 //	purpose:	The Actual Styles that can fire off.
 //
 //-----------------------------------------------------------------------------
@@ -46,12 +46,7 @@
 //-----------------------------------------------------------------------------
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-#include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
-#ifdef _INTERNAL
-// for occasional debugging...
-//#pragma optimize("", off)
-//#pragma message("************************************** WARNING, optimization disabled for debugging purposes")
-#endif
+#include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 //-----------------------------------------------------------------------------
 // USER INCLUDES //////////////////////////////////////////////////////////////
@@ -65,37 +60,37 @@
 #include "GameClient/DisplayStringManager.h"
 #include "GameClient/GadgetPushButton.h"
 #include "GameClient/GadgetStaticText.h"
-#include "GameClient/Controlbar.h"
+#include "GameClient/ControlBar.h"
 
 //-----------------------------------------------------------------------------
 // DEFINES ////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-void drawTypeText( GameWindow *window, DisplayString *str);
+static void drawTypeText( GameWindow *window, DisplayString *str);
 //-----------------------------------------------------------------------------
 // PUBLIC FUNCTIONS ///////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-Transition::Transition ( void )
+Transition::Transition ()
 {
-	
+
 }
 
-Transition::~Transition( void )
+Transition::~Transition()
 {
 
 }
 //-----------------------------------------------------------------------------
 
-FlashTransition::FlashTransition ( void )
+FlashTransition::FlashTransition ()
 {
 	m_frameLength = FLASHTRANSITION_END;
-	m_win = NULL;
+	m_win = nullptr;
 	m_drawState = -1;
 	m_isForward = TRUE;
 }
 
-FlashTransition::~FlashTransition( void )
+FlashTransition::~FlashTransition()
 {
-	m_win = NULL;
+	m_win = nullptr;
 }
 
 void FlashTransition::init( GameWindow *win )
@@ -118,13 +113,13 @@ void FlashTransition::update( Int frame )
 	m_drawState = -1;
 	if(frame < FLASHTRANSITION_START || frame > FLASHTRANSITION_END)
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("FlashTransition::update - Frame is out of the range the this update can handle %d", frame));
+		DEBUG_CRASH(("FlashTransition::update - Frame is out of the range the this update can handle %d", frame));
 		return;
 	}
 	switch (frame) {
 	case FLASHTRANSITION_START:
 		{
-			
+
 			if(m_isForward || !m_win)
 				break;
 			m_win->winHide(TRUE);
@@ -139,9 +134,11 @@ void FlashTransition::update( Int frame )
 			if( TheAudio )
 			{
 				TheAudio->addAudioEvent( &buttonClick );
-			}  // end if
-		
+			}
+
 		}
+		[[fallthrough]];
+
 	case FLASHTRANSITION_FADE_IN_2:
 	case FLASHTRANSITION_FADE_IN_3:
 		{
@@ -171,20 +168,20 @@ void FlashTransition::update( Int frame )
 		}
 		break;
 	}
-	
-	
+
+
 }
 
-void FlashTransition::reverse( void )
+void FlashTransition::reverse()
 {
 	m_isFinished = FALSE;
 	m_isForward = FALSE;
 
 }
 
-void FlashTransition::draw( void )
+void FlashTransition::draw()
 {
-	switch (m_drawState) 
+	switch (m_drawState)
 	{
 		case FLASHTRANSITION_FADE_IN_1:
 		{
@@ -230,26 +227,26 @@ void FlashTransition::draw( void )
 		break;
 	}
 }
-	
-void FlashTransition::skip( void )
+
+void FlashTransition::skip()
 {
 	update(FLASHTRANSITION_END);
 }
-	
+
 //-----------------------------------------------------------------------------
 
 
-ButtonFlashTransition::ButtonFlashTransition ( void )
+ButtonFlashTransition::ButtonFlashTransition ()
 {
 	m_frameLength = BUTTONFLASHTRANSITION_END;
-	m_win = NULL;
+	m_win = nullptr;
 	m_drawState = -1;
 	m_isForward = TRUE;
 }
 
-ButtonFlashTransition::~ButtonFlashTransition( void )
+ButtonFlashTransition::~ButtonFlashTransition()
 {
-	m_win = NULL;
+	m_win = nullptr;
 }
 
 void ButtonFlashTransition::init( GameWindow *win )
@@ -272,13 +269,13 @@ void ButtonFlashTransition::update( Int frame )
 	m_drawState = -1;
 	if(frame < BUTTONFLASHTRANSITION_START || frame > BUTTONFLASHTRANSITION_END)
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("ButtonFlashTransition::update - Frame is out of the range the this update can handle %d", frame));
+		DEBUG_CRASH(("ButtonFlashTransition::update - Frame is out of the range the this update can handle %d", frame));
 		return;
 	}
 	switch (frame) {
 	case BUTTONFLASHTRANSITION_START:
 		{
-			
+
 			if(m_isForward || !m_win)
 				break;
 			m_win->winHide(TRUE);
@@ -293,11 +290,11 @@ void ButtonFlashTransition::update( Int frame )
 				if(m_isForward)
 				{
 					AudioEventRTS buttonClick("GUIButtonsFadeIn");
-	
+
 					if( TheAudio )
 					{
 						TheAudio->addAudioEvent( &buttonClick );
-					}  // end if
+					}
 
 					m_drawState = frame;
 				}
@@ -324,7 +321,7 @@ void ButtonFlashTransition::update( Int frame )
 				if(m_isForward)
 					m_drawState = frame;
 				else
-					m_drawState = BUTTONFLASHTRANSITION_FADE_TO_BACKGROUND_2;		
+					m_drawState = BUTTONFLASHTRANSITION_FADE_TO_BACKGROUND_2;
 		}
 		break;
 	case BUTTONFLASHTRANSITION_FADE_TO_BACKGROUND_1:
@@ -378,19 +375,19 @@ void ButtonFlashTransition::update( Int frame )
 			if(m_isForward)
 			{
 //				AudioEventRTS buttonClick("GUIBlip");
-//	
+//
 //				if( TheAudio )
 //				{
 //					TheAudio->addAudioEvent( &buttonClick );
 //				}  // end if
 
-				m_win->winHide(FALSE);			
+				m_win->winHide(FALSE);
 				m_drawState = frame;
 			}
 			else
 			{
-				
-				m_win->winHide(TRUE);	
+
+				m_win->winHide(TRUE);
 				m_drawState = BUTTONFLASHTRANSITION_FADE_TO_GRADE_OUT_4;
 			}
 
@@ -402,12 +399,12 @@ void ButtonFlashTransition::update( Int frame )
 				break;
 			if(m_isForward)
 			{
-				m_win->winHide(FALSE);			
+				m_win->winHide(FALSE);
 				m_drawState = frame;
 			}
 			else
 			{
-				m_win->winHide(TRUE);	
+				m_win->winHide(TRUE);
 				m_drawState = BUTTONFLASHTRANSITION_FADE_TO_GRADE_OUT_3;
 			}
 		}
@@ -418,12 +415,12 @@ void ButtonFlashTransition::update( Int frame )
 				break;
 			if(m_isForward)
 			{
-				m_win->winHide(FALSE);			
+				m_win->winHide(FALSE);
 				m_drawState = frame;
 			}
 			else
 			{
-				m_win->winHide(TRUE);	
+				m_win->winHide(TRUE);
 				m_drawState = BUTTONFLASHTRANSITION_FADE_TO_GRADE_OUT_2;
 			}
 		}
@@ -434,12 +431,12 @@ void ButtonFlashTransition::update( Int frame )
 				break;
 			if(m_isForward)
 			{
-				m_win->winHide(FALSE);			
+				m_win->winHide(FALSE);
 				m_drawState = frame;
 			}
 			else
 			{
-				m_win->winHide(TRUE);	
+				m_win->winHide(TRUE);
 				m_drawState = BUTTONFLASHTRANSITION_FADE_TO_GRADE_OUT_1;
 			}
 		}
@@ -450,12 +447,12 @@ void ButtonFlashTransition::update( Int frame )
 				break;
 			if(m_isForward)
 			{
-				m_win->winHide(FALSE);			
+				m_win->winHide(FALSE);
 				m_drawState = frame;
 			}
 			else
 			{
-				m_win->winHide(FALSE);			
+				m_win->winHide(FALSE);
 				m_drawState = BUTTONFLASHTRANSITION_FADE_TO_GRADE_IN_2;
 			}
 		}
@@ -467,15 +464,15 @@ void ButtonFlashTransition::update( Int frame )
 				break;
 			if(m_isForward)
 			{
-				m_win->winHide(FALSE);			
+				m_win->winHide(FALSE);
 				m_drawState = frame;
 			}
 			else
 			{
-				m_win->winHide(FALSE);	
+				m_win->winHide(FALSE);
 				m_drawState = BUTTONFLASHTRANSITION_FADE_TO_GRADE_IN_1;
 			}
-			
+
 		}
 		break;
 	case BUTTONFLASHTRANSITION_END:
@@ -489,19 +486,32 @@ void ButtonFlashTransition::update( Int frame )
 	}
 	if(frame > BUTTONFLASHTRANSITION_FADE_TO_BACKGROUND_4 && frame < BUTTONFLASHTRANSITION_FADE_TO_GRADE_IN_1)
 		m_drawState = BUTTONFLASHTRANSITION_SHOW_BACKGROUND;
-	
+
 }
 
-void ButtonFlashTransition::reverse( void )
+void ButtonFlashTransition::reverse()
 {
 	m_isFinished = FALSE;
 	m_isForward = FALSE;
 
 }
 
-void ButtonFlashTransition::draw( void )
+void ButtonFlashTransition::draw()
 {
-	switch (m_drawState) 
+	// Defensive guard matching every other transition draw() in this
+	// file (FadeTransition::draw, ScaleUpTransition::draw, etc.). When
+	// WindowTransitions.ini lists a WinName that no longer exists in
+	// the .wnd (e.g. after we removed ButtonMultiplayer / ButtonCustom-
+	// Mission from MainMenu.wnd), init() leaves m_win == nullptr, and
+	// the BUTTONFLASHTRANSITION_FADE_TO_BACKGROUND_* / SHOW_BACKGROUND
+	// cases below dereference m_win via PushButtonImageDrawThree and
+	// crash. The data fix is to delete the orphan Window blocks from
+	// WindowTransitions.ini, but the missing guard here was the actual
+	// bug — every sibling draw() in this file already has it.
+	if (!m_win)
+		return;
+
+	switch (m_drawState)
 	{
 		case BUTTONFLASHTRANSITION_FADE_IN_1:
 		{
@@ -604,8 +614,8 @@ void ButtonFlashTransition::draw( void )
 
 	}
 }
-	
-void ButtonFlashTransition::skip( void )
+
+void ButtonFlashTransition::skip()
 {
 	update(BUTTONFLASHTRANSITION_END);
 }
@@ -613,17 +623,17 @@ void ButtonFlashTransition::skip( void )
 
 //-----------------------------------------------------------------------------
 
-FadeTransition::FadeTransition ( void )
+FadeTransition::FadeTransition ()
 {
 	m_frameLength = FADETRANSITION_END;
-	m_win = NULL;
+	m_win = nullptr;
 	m_drawState = -1;
 	m_isForward = TRUE;
 }
 
-FadeTransition::~FadeTransition( void )
+FadeTransition::~FadeTransition()
 {
-	m_win = NULL;
+	m_win = nullptr;
 }
 
 void FadeTransition::init( GameWindow *win )
@@ -645,13 +655,13 @@ void FadeTransition::update( Int frame )
 	m_drawState = -1;
 	if(frame < FADETRANSITION_START || frame > FADETRANSITION_END)
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("FadeTransition::update - Frame is out of the range the this update can handle %d", frame));
+		DEBUG_CRASH(("FadeTransition::update - Frame is out of the range the this update can handle %d", frame));
 		return;
 	}
 	switch (frame) {
 	case FADETRANSITION_START:
 		{
-			
+
 			if(m_isForward || !m_win)
 				break;
 			m_win->winHide(TRUE);
@@ -678,22 +688,24 @@ void FadeTransition::update( Int frame )
 			m_win->winHide(FALSE);
 			m_isFinished = TRUE;
 		}
-	}	
+	}
 }
 
-void FadeTransition::reverse( void )
+void FadeTransition::reverse()
 {
 	m_isFinished = FALSE;
 	m_isForward = FALSE;
 
 }
 
-void FadeTransition::draw( void )
+void FadeTransition::draw()
 {
 	if(!m_win)
 		return;
+	if(m_drawState <= FADETRANSITION_START || m_drawState >= FADETRANSITION_END)
+		return;
 	const Image *image = m_win->winGetEnabledImage(0);
-	switch (m_drawState) 
+	switch (m_drawState)
 	{
 		case FADETRANSITION_FADE_IN_1:
 		{
@@ -741,24 +753,24 @@ void FadeTransition::draw( void )
 		}
 	}
 }
-	
-void FadeTransition::skip( void )
+
+void FadeTransition::skip()
 {
 	update(FADETRANSITION_END);
 }
 //-----------------------------------------------------------------------------
 
-ScaleUpTransition::ScaleUpTransition ( void )
+ScaleUpTransition::ScaleUpTransition ()
 {
 	m_frameLength = SCALEUPTRANSITION_END;
-	m_win = NULL;
+	m_win = nullptr;
 	m_drawState = -1;
 	m_isForward = TRUE;
 }
 
-ScaleUpTransition::~ScaleUpTransition( void )
+ScaleUpTransition::~ScaleUpTransition()
 {
-	m_win = NULL;
+	m_win = nullptr;
 }
 
 void ScaleUpTransition::init( GameWindow *win )
@@ -773,7 +785,7 @@ void ScaleUpTransition::init( GameWindow *win )
 	update(SCALEUPTRANSITION_START);
 	m_isFinished = FALSE;
 	m_isForward = TRUE;
-	
+
 	m_centerPos.x = m_pos.x + m_size.x / 2;
 	m_centerPos.y = m_pos.y + m_size.y / 2;
 	m_incrementSize.x = m_size.x / SCALEUPTRANSITION_END;
@@ -786,7 +798,7 @@ void ScaleUpTransition::update( Int frame )
 	m_drawState = -1;
 	if(frame < SCALEUPTRANSITION_START || frame > SCALEUPTRANSITION_END)
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("ScaleUpTransition::update - Frame is out of the range the this update can handle %d", frame));
+		DEBUG_CRASH(("ScaleUpTransition::update - Frame is out of the range the this update can handle %d", frame));
 		return;
 	}
 	switch (frame) {
@@ -806,10 +818,10 @@ void ScaleUpTransition::update( Int frame )
 			if( TheAudio )
 			{
 				TheAudio->addAudioEvent( &buttonClick );
-			}  // end if
+			}
 
-			
 		}
+		[[fallthrough]];
 
 	case SCALEUPTRANSITION_2:
 	case SCALEUPTRANSITION_3:
@@ -840,48 +852,48 @@ void ScaleUpTransition::update( Int frame )
 			m_win->winHide(FALSE);
 			m_isFinished = TRUE;
 		}
-	}	
+	}
 }
 
-void ScaleUpTransition::reverse( void )
+void ScaleUpTransition::reverse()
 {
 	m_isFinished = FALSE;
 	m_isForward = FALSE;
 
 }
 
-void ScaleUpTransition::draw( void )
+void ScaleUpTransition::draw()
 {
 	if(!m_win)
 		return;
-	const Image *image = m_win->winGetEnabledImage(0);
 	if(m_drawState <= SCALEUPTRANSITION_START || m_drawState >= SCALEUPTRANSITION_END)
 		return;
+	const Image *image = m_win->winGetEnabledImage(0);
 	Int x = m_centerPos.x - ((m_incrementSize.x * m_drawState) / 2);
 	Int y = m_centerPos.y - ((m_incrementSize.y * m_drawState) / 2);
 	Int x1 = x + m_incrementSize.x * m_drawState;
 	Int y1 = y + m_incrementSize.y * m_drawState;
 	TheDisplay->drawImage(image, x,y, x1, y1);
 }
-	
-void ScaleUpTransition::skip( void )
+
+void ScaleUpTransition::skip()
 {
 	update(SCALEUPTRANSITION_END);
 }
 
 //-----------------------------------------------------------------------------
 
-ScoreScaleUpTransition::ScoreScaleUpTransition ( void )
+ScoreScaleUpTransition::ScoreScaleUpTransition ()
 {
 	m_frameLength = SCORESCALEUPTRANSITION_END;
-	m_win = NULL;
+	m_win = nullptr;
 	m_drawState = -1;
 	m_isForward = TRUE;
 }
 
-ScoreScaleUpTransition::~ScoreScaleUpTransition( void )
+ScoreScaleUpTransition::~ScoreScaleUpTransition()
 {
-	m_win = NULL;
+	m_win = nullptr;
 }
 
 void ScoreScaleUpTransition::init( GameWindow *win )
@@ -896,7 +908,7 @@ void ScoreScaleUpTransition::init( GameWindow *win )
 	update(SCORESCALEUPTRANSITION_START);
 	m_isFinished = FALSE;
 	m_isForward = TRUE;
-	
+
 	m_centerPos.x = m_pos.x + m_size.x / 2;
 	m_centerPos.y = m_pos.y + m_size.y / 2;
 	m_incrementSize.x = m_size.x / SCORESCALEUPTRANSITION_END;
@@ -909,7 +921,7 @@ void ScoreScaleUpTransition::update( Int frame )
 	m_drawState = -1;
 	if(frame < SCORESCALEUPTRANSITION_START || frame > SCORESCALEUPTRANSITION_END)
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("ScoreScaleUpTransition::update - Frame is out of the range the this update can handle %d", frame));
+		DEBUG_CRASH(("ScoreScaleUpTransition::update - Frame is out of the range the this update can handle %d", frame));
 		return;
 	}
 	switch (frame) {
@@ -929,10 +941,10 @@ void ScoreScaleUpTransition::update( Int frame )
 			if( TheAudio )
 			{
 				TheAudio->addAudioEvent( &buttonClick );
-			}  // end if
+			}
 
-			
 		}
+		[[fallthrough]];
 
 	case SCORESCALEUPTRANSITION_2:
 	case SCORESCALEUPTRANSITION_3:
@@ -963,48 +975,48 @@ void ScoreScaleUpTransition::update( Int frame )
 			m_win->winHide(FALSE);
 			m_isFinished = TRUE;
 		}
-	}	
+	}
 }
 
-void ScoreScaleUpTransition::reverse( void )
+void ScoreScaleUpTransition::reverse()
 {
 	m_isFinished = FALSE;
 	m_isForward = FALSE;
 
 }
 
-void ScoreScaleUpTransition::draw( void )
+void ScoreScaleUpTransition::draw()
 {
 	if(!m_win)
 		return;
-	const Image *image = m_win->winGetEnabledImage(0);
 	if(m_drawState <= SCORESCALEUPTRANSITION_START || m_drawState >= SCORESCALEUPTRANSITION_END)
 		return;
+	const Image *image = m_win->winGetEnabledImage(0);
 	Int x = m_centerPos.x - ((m_incrementSize.x * m_drawState) / 2);
 	Int y = m_centerPos.y - ((m_incrementSize.y * m_drawState) / 2);
 	Int x1 = x + m_incrementSize.x * m_drawState;
 	Int y1 = y + m_incrementSize.y * m_drawState;
 	TheDisplay->drawImage(image, x,y, x1, y1);
 }
-	
-void ScoreScaleUpTransition::skip( void )
+
+void ScoreScaleUpTransition::skip()
 {
 	update(SCORESCALEUPTRANSITION_END);
 }
 
 //-----------------------------------------------------------------------------
 
-MainMenuScaleUpTransition::MainMenuScaleUpTransition ( void )
+MainMenuScaleUpTransition::MainMenuScaleUpTransition ()
 {
 	m_frameLength = MAINMENUSCALEUPTRANSITION_END;
-	m_win = NULL;
+	m_win = nullptr;
 	m_drawState = -1;
 	m_isForward = TRUE;
 }
 
-MainMenuScaleUpTransition::~MainMenuScaleUpTransition( void )
+MainMenuScaleUpTransition::~MainMenuScaleUpTransition()
 {
-	m_win = NULL;
+	m_win = nullptr;
 }
 
 void MainMenuScaleUpTransition::init( GameWindow *win )
@@ -1015,7 +1027,7 @@ void MainMenuScaleUpTransition::init( GameWindow *win )
 		m_win->winGetSize(&m_size.x, &m_size.y);
 		m_win->winGetScreenPosition(&m_pos.x, &m_pos.y );
 	}
-	m_growWin = TheWindowManager->winGetWindowFromId(NULL, TheNameKeyGenerator->nameToKey("MainMenu.wnd:WinGrowMarker"));
+	m_growWin = TheWindowManager->winGetWindowFromId(nullptr, TheNameKeyGenerator->nameToKey("MainMenu.wnd:WinGrowMarker"));
 	if(!m_growWin)
 		return;
 
@@ -1032,7 +1044,7 @@ void MainMenuScaleUpTransition::init( GameWindow *win )
 	m_incrementSize.y = (m_growSize.y - m_size.y) / MAINMENUSCALEUPTRANSITION_END;
 	const Image *image = m_win->winGetDisabledImage(0);
 	m_growWin->winSetEnabledImage(0, image);
-	
+
 }
 
 void MainMenuScaleUpTransition::update( Int frame )
@@ -1040,13 +1052,13 @@ void MainMenuScaleUpTransition::update( Int frame )
 	m_drawState = -1;
 	if(frame < MAINMENUSCALEUPTRANSITION_START || frame > MAINMENUSCALEUPTRANSITION_END)
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("MainMenuScaleUpTransition::update - Frame is out of the range the this update can handle %d", frame));
+		DEBUG_CRASH(("MainMenuScaleUpTransition::update - Frame is out of the range the this update can handle %d", frame));
 		return;
 	}
 	switch (frame) {
 	case MAINMENUSCALEUPTRANSITION_START:
 		{
-			
+
 			if(m_isForward || !m_win || !m_growWin)
 				break;
 //			m_win->winHide(TRUE);
@@ -1062,7 +1074,7 @@ void MainMenuScaleUpTransition::update( Int frame )
 			m_growWin->winHide(FALSE);
 			m_isFinished = TRUE;
 		}
-	}	
+	}
 	if(frame == 1)
 	{
 		AudioEventRTS buttonClick("GUILogoSelect");
@@ -1070,7 +1082,7 @@ void MainMenuScaleUpTransition::update( Int frame )
 		if( TheAudio )
 		{
 			TheAudio->addAudioEvent( &buttonClick );
-		}  // end if			
+		}
 	}
 	if(frame > MAINMENUSCALEUPTRANSITION_START && frame < MAINMENUSCALEUPTRANSITION_END)
 	{
@@ -1083,45 +1095,45 @@ void MainMenuScaleUpTransition::update( Int frame )
 
 }
 
-void MainMenuScaleUpTransition::reverse( void )
+void MainMenuScaleUpTransition::reverse()
 {
 	m_isFinished = FALSE;
 	m_isForward = FALSE;
 
 }
 
-void MainMenuScaleUpTransition::draw( void )
+void MainMenuScaleUpTransition::draw()
 {
 	if(!m_win)
 		return;
-	const Image *image = m_growWin->winGetEnabledImage(0);
 	if(m_drawState <= MAINMENUSCALEUPTRANSITION_START || m_drawState >= MAINMENUSCALEUPTRANSITION_END)
 		return;
+	const Image *image = m_growWin->winGetEnabledImage(0);
 	Int x = m_pos.x + ((m_incrementPos.x * m_drawState));
 	Int y = m_pos.y + ((m_incrementPos.y * m_drawState));
 	Int x1 = x + m_size.x + ((m_incrementSize.x * m_drawState));
 	Int y1 = y + m_size.y + ((m_incrementSize.y * m_drawState));
 	TheDisplay->drawImage(image, x,y, x1, y1);
 }
-	
-void MainMenuScaleUpTransition::skip( void )
+
+void MainMenuScaleUpTransition::skip()
 {
 	update(MAINMENUSCALEUPTRANSITION_END);
 }
 
 //-----------------------------------------------------------------------------
 
-MainMenuMediumScaleUpTransition::MainMenuMediumScaleUpTransition ( void )
+MainMenuMediumScaleUpTransition::MainMenuMediumScaleUpTransition ()
 {
 	m_frameLength = MAINMENUMEDIUMSCALEUPTRANSITION_END;
-	m_win = NULL;
+	m_win = nullptr;
 	m_drawState = -1;
 	m_isForward = TRUE;
 }
 
-MainMenuMediumScaleUpTransition::~MainMenuMediumScaleUpTransition( void )
+MainMenuMediumScaleUpTransition::~MainMenuMediumScaleUpTransition()
 {
-	m_win = NULL;
+	m_win = nullptr;
 }
 
 void MainMenuMediumScaleUpTransition::init( GameWindow *win )
@@ -1135,7 +1147,7 @@ void MainMenuMediumScaleUpTransition::init( GameWindow *win )
 	AsciiString growWinName;
 	growWinName = m_win->winGetInstanceData()->m_decoratedNameString;
 	growWinName.concat("Medium");
-	m_growWin = TheWindowManager->winGetWindowFromId(NULL, TheNameKeyGenerator->nameToKey(growWinName));
+	m_growWin = TheWindowManager->winGetWindowFromId(nullptr, TheNameKeyGenerator->nameToKey(growWinName));
 	if(!m_growWin)
 		return;
 
@@ -1146,12 +1158,12 @@ void MainMenuMediumScaleUpTransition::init( GameWindow *win )
 	update(MAINMENUMEDIUMSCALEUPTRANSITION_START);
 	m_isFinished = FALSE;
 	m_isForward = TRUE;
-	
+
 	m_incrementSize.x = (m_growSize.x - m_size.x) / MAINMENUMEDIUMSCALEUPTRANSITION_END;
 	m_incrementSize.y = (m_growSize.y - m_size.y) / MAINMENUMEDIUMSCALEUPTRANSITION_END;
 //	const Image *image = m_win->winGetEnabledImage(0);
 	//m_growWin->winSetEnabledImage(0, image);
-	
+
 }
 
 void MainMenuMediumScaleUpTransition::update( Int frame )
@@ -1159,13 +1171,13 @@ void MainMenuMediumScaleUpTransition::update( Int frame )
 	m_drawState = -1;
 	if(frame < MAINMENUMEDIUMSCALEUPTRANSITION_START || frame > MAINMENUMEDIUMSCALEUPTRANSITION_END)
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("MainMenuMediumScaleUpTransition::update - Frame is out of the range the this update can handle %d", frame));
+		DEBUG_CRASH(("MainMenuMediumScaleUpTransition::update - Frame is out of the range the this update can handle %d", frame));
 		return;
 	}
 	switch (frame) {
 	case MAINMENUMEDIUMSCALEUPTRANSITION_START:
 		{
-			
+
 			if(m_isForward || !m_win || !m_growWin)
 				break;
 			m_win->winHide(FALSE);
@@ -1181,7 +1193,7 @@ void MainMenuMediumScaleUpTransition::update( Int frame )
 			m_growWin->winHide(FALSE);
 			m_isFinished = TRUE;
 		}
-	}	
+	}
 	if(frame > MAINMENUMEDIUMSCALEUPTRANSITION_START && frame < MAINMENUMEDIUMSCALEUPTRANSITION_END)
 	{
 		if(frame == 1 && m_isForward)
@@ -1191,7 +1203,7 @@ void MainMenuMediumScaleUpTransition::update( Int frame )
 			if( TheAudio )
 			{
 				TheAudio->addAudioEvent( &buttonClick );
-			}  // end if			
+			}
 		}
 		if(m_win)
 			m_win->winHide(TRUE);
@@ -1201,7 +1213,7 @@ void MainMenuMediumScaleUpTransition::update( Int frame )
 	}
 }
 
-void MainMenuMediumScaleUpTransition::reverse( void )
+void MainMenuMediumScaleUpTransition::reverse()
 {
 	m_isFinished = FALSE;
 	m_isForward = FALSE;
@@ -1210,37 +1222,37 @@ void MainMenuMediumScaleUpTransition::reverse( void )
 
 }
 
-void MainMenuMediumScaleUpTransition::draw( void )
+void MainMenuMediumScaleUpTransition::draw()
 {
 	if(!m_win)
 		return;
-	const Image *image = m_win->winGetEnabledImage(0);
 	if(m_drawState <= MAINMENUMEDIUMSCALEUPTRANSITION_START || m_drawState >= MAINMENUMEDIUMSCALEUPTRANSITION_END)
 		return;
+	const Image *image = m_win->winGetEnabledImage(0);
 	Int x = m_pos.x - ((m_incrementSize.x * m_drawState) /2);
 	Int y = m_pos.y - ((m_incrementSize.y * m_drawState) / 2);
 	Int x1 = m_pos.x + m_size.x + ((m_incrementSize.x * m_drawState) / 2);
 	Int y1 = m_pos.y + m_size.y + ((m_incrementSize.y * m_drawState) / 2);
 	TheDisplay->drawImage(image, x,y, x1, y1);
 }
-	
-void MainMenuMediumScaleUpTransition::skip( void )
+
+void MainMenuMediumScaleUpTransition::skip()
 {
 	update(MAINMENUMEDIUMSCALEUPTRANSITION_END);
 }
 //-----------------------------------------------------------------------------
 
-MainMenuSmallScaleDownTransition::MainMenuSmallScaleDownTransition ( void )
+MainMenuSmallScaleDownTransition::MainMenuSmallScaleDownTransition ()
 {
 	m_frameLength = MAINMENUSMALLSCALEDOWNTRANSITION_END;
-	m_win = NULL;
+	m_win = nullptr;
 	m_drawState = -1;
 	m_isForward = TRUE;
 }
 
-MainMenuSmallScaleDownTransition::~MainMenuSmallScaleDownTransition( void )
+MainMenuSmallScaleDownTransition::~MainMenuSmallScaleDownTransition()
 {
-	m_win = NULL;
+	m_win = nullptr;
 }
 
 void MainMenuSmallScaleDownTransition::init( GameWindow *win )
@@ -1254,7 +1266,7 @@ void MainMenuSmallScaleDownTransition::init( GameWindow *win )
 	AsciiString growWinName;
 	growWinName = m_win->winGetInstanceData()->m_decoratedNameString;
 	growWinName.concat("Small");
-	m_growWin = TheWindowManager->winGetWindowFromId(NULL, TheNameKeyGenerator->nameToKey(growWinName));
+	m_growWin = TheWindowManager->winGetWindowFromId(nullptr, TheNameKeyGenerator->nameToKey(growWinName));
 	if(!m_growWin)
 		return;
 
@@ -1265,12 +1277,12 @@ void MainMenuSmallScaleDownTransition::init( GameWindow *win )
 	update(MAINMENUSMALLSCALEDOWNTRANSITION_START);
 	m_isFinished = FALSE;
 	m_isForward = TRUE;
-	
+
 	m_incrementSize.x = (m_growSize.x - m_size.x) / MAINMENUSMALLSCALEDOWNTRANSITION_END;
 	m_incrementSize.y = (m_growSize.y - m_size.y) / MAINMENUSMALLSCALEDOWNTRANSITION_END;
 	const Image *image = m_win->winGetEnabledImage(0);
 	m_growWin->winSetEnabledImage(0, image);
-	
+
 }
 
 void MainMenuSmallScaleDownTransition::update( Int frame )
@@ -1278,13 +1290,13 @@ void MainMenuSmallScaleDownTransition::update( Int frame )
 	m_drawState = -1;
 	if(frame < MAINMENUSMALLSCALEDOWNTRANSITION_START || frame > MAINMENUSMALLSCALEDOWNTRANSITION_END)
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("MainMenuSmallScaleDownTransition::update - Frame is out of the range the this update can handle %d", frame));
+		DEBUG_CRASH(("MainMenuSmallScaleDownTransition::update - Frame is out of the range the this update can handle %d", frame));
 		return;
 	}
 	switch (frame) {
 	case MAINMENUSMALLSCALEDOWNTRANSITION_START:
 		{
-			
+
 			if(m_isForward || !m_win || !m_growWin)
 				break;
 			m_win->winHide(FALSE);
@@ -1311,31 +1323,31 @@ void MainMenuSmallScaleDownTransition::update( Int frame )
 			m_growWin->winHide(FALSE);
 			m_isFinished = TRUE;
 		}
-	}	
+	}
 }
 
-void MainMenuSmallScaleDownTransition::reverse( void )
+void MainMenuSmallScaleDownTransition::reverse()
 {
 	m_isFinished = FALSE;
 	m_isForward = FALSE;
 
 }
 
-void MainMenuSmallScaleDownTransition::draw( void )
+void MainMenuSmallScaleDownTransition::draw()
 {
 	if(!m_win)
 		return;
-	const Image *image = m_win->winGetEnabledImage(0);
 	if(m_drawState <= MAINMENUSMALLSCALEDOWNTRANSITION_START || m_drawState >= MAINMENUSMALLSCALEDOWNTRANSITION_END)
 		return;
+	const Image *image = m_win->winGetEnabledImage(0);
 	Int x = m_pos.x - ((m_incrementSize.x * m_drawState) /2);
 	Int y = m_pos.y - ((m_incrementSize.y * m_drawState) / 2);
 	Int x1 = m_pos.x + m_size.x + ((m_incrementSize.x * m_drawState) / 2);
 	Int y1 = m_pos.y + m_size.y + ((m_incrementSize.y * m_drawState) / 2);
 	TheDisplay->drawImage(image, x,y, x1, y1);
 }
-	
-void MainMenuSmallScaleDownTransition::skip( void )
+
+void MainMenuSmallScaleDownTransition::skip()
 {
 	update(MAINMENUSMALLSCALEDOWNTRANSITION_END);
 }
@@ -1343,21 +1355,21 @@ void MainMenuSmallScaleDownTransition::skip( void )
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 
-TextTypeTransition::TextTypeTransition ( void )
+TextTypeTransition::TextTypeTransition ()
 {
 	m_frameLength = TEXTTYPETRANSITION_END;
-	m_win = NULL;
+	m_win = nullptr;
 	m_drawState = -1;
 	m_isForward = TRUE;
-	m_dStr = NULL;
+	m_dStr = nullptr;
 }
 
-TextTypeTransition::~TextTypeTransition( void )
+TextTypeTransition::~TextTypeTransition()
 {
-	m_win = NULL;
+	m_win = nullptr;
 	if(m_dStr)
 		TheDisplayStringManager->freeDisplayString(m_dStr);
-	m_dStr = NULL;
+	m_dStr = nullptr;
 }
 
 void TextTypeTransition::init( GameWindow *win )
@@ -1373,7 +1385,7 @@ void TextTypeTransition::init( GameWindow *win )
 	m_isFinished = FALSE;
 	m_isForward = TRUE;
 	m_dStr = TheDisplayStringManager->newDisplayString();
-	m_fullText = GadgetStaticTextGetText(m_win);		
+	m_fullText = GadgetStaticTextGetText(m_win);
 	Int length = m_fullText.getLength();
 	m_frameLength = MIN(length, TEXTTYPETRANSITION_END);
 }
@@ -1383,13 +1395,13 @@ void TextTypeTransition::update( Int frame )
 	m_drawState = -1;
 	if(frame < TEXTTYPETRANSITION_START || frame > TEXTTYPETRANSITION_END)
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("TextTypeTransition::update - Frame is out of the range the this update can handle %d", frame));
+		DEBUG_CRASH(("TextTypeTransition::update - Frame is out of the range the this update can handle %d", frame));
 		return;
 	}
 	switch (frame) {
 	case TEXTTYPETRANSITION_START:
 		{
-			
+
 			if(m_isForward || !m_win )
 				break;
 			m_win->winHide(TRUE);
@@ -1403,7 +1415,7 @@ void TextTypeTransition::update( Int frame )
 			m_win->winHide(FALSE);
 			m_isFinished = TRUE;
 		}
-	}	
+	}
 	if(frame >= m_frameLength)
 	{
 		m_win->winHide(FALSE);
@@ -1418,7 +1430,7 @@ void TextTypeTransition::update( Int frame )
 		if( TheAudio )
 		{
 			TheAudio->addAudioEvent( &buttonClick );
-		}  // end if
+		}
 		if(m_isForward)
 		{
 			m_partialText.concat(m_fullText.getCharAt(frame - 1));
@@ -1430,7 +1442,7 @@ void TextTypeTransition::update( Int frame )
 	}
 }
 
-void TextTypeTransition::reverse( void )
+void TextTypeTransition::reverse()
 {
 	m_isFinished = FALSE;
 	m_isForward = FALSE;
@@ -1438,7 +1450,7 @@ void TextTypeTransition::reverse( void )
 	m_partialText = m_fullText;
 }
 
-void TextTypeTransition::draw( void )
+void TextTypeTransition::draw()
 {
 	if(m_drawState > TEXTTYPETRANSITION_START && m_drawState < m_frameLength)
 	{
@@ -1446,8 +1458,8 @@ void TextTypeTransition::draw( void )
 		drawTypeText(m_win, m_dStr);
 	}
 }
-	
-void TextTypeTransition::skip( void )
+
+void TextTypeTransition::skip()
 {
 	update(TEXTTYPETRANSITION_END);
 }
@@ -1455,18 +1467,18 @@ void TextTypeTransition::skip( void )
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 
-CountUpTransition::CountUpTransition ( void )
+CountUpTransition::CountUpTransition ()
 {
 	m_frameLength = COUNTUPTRANSITION_END;
-	m_win = NULL;
+	m_win = nullptr;
 	m_drawState = -1;
 	m_isForward = TRUE;
 
 }
 
-CountUpTransition::~CountUpTransition( void )
+CountUpTransition::~CountUpTransition()
 {
-	m_win = NULL;
+	m_win = nullptr;
 }
 
 void CountUpTransition::init( GameWindow *win )
@@ -1485,16 +1497,16 @@ void CountUpTransition::init( GameWindow *win )
 			return;
 		}
 	}
-	m_fullText = GadgetStaticTextGetText(m_win);		
+	m_fullText = GadgetStaticTextGetText(m_win);
 	m_isForward = FALSE;
 	update(COUNTUPTRANSITION_START);
 	m_isFinished = FALSE;
 	m_isForward = TRUE;
-	
+
 	AsciiString tempStr;
 	tempStr.translate(m_fullText);
 	m_intValue = atoi(tempStr.str());
-	DEBUG_LOG(("CountUpTransition::init %hs %s %d\n", m_fullText.str(), tempStr.str(), m_intValue));
+	DEBUG_LOG(("CountUpTransition::init %hs %s %d", m_fullText.str(), tempStr.str(), m_intValue));
 	if(m_intValue < COUNTUPTRANSITION_END)
 	{
 		m_countState = COUNT_ONES;
@@ -1510,7 +1522,7 @@ void CountUpTransition::init( GameWindow *win )
 		m_countState = COUNT_1000S;
 		m_frameLength = MIN(m_intValue/1000, COUNTUPTRANSITION_END);
 	}
-	
+
 	m_currentValue = 0;
 	UnicodeString currVal;
 	currVal.format(L"%d",m_currentValue);
@@ -1522,13 +1534,13 @@ void CountUpTransition::update( Int frame )
 	m_drawState = -1;
 	if(frame < COUNTUPTRANSITION_START || frame > COUNTUPTRANSITION_END)
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("CountUpTransition::update - Frame is out of the range the this update can handle %d", frame));
+		DEBUG_CRASH(("CountUpTransition::update - Frame is out of the range the this update can handle %d", frame));
 		return;
 	}
 	switch (frame) {
 	case COUNTUPTRANSITION_START:
 		{
-			
+
 			if(m_isForward || !m_win )
 				break;
 			m_currentValue = 0;
@@ -1547,7 +1559,7 @@ void CountUpTransition::update( Int frame )
 			m_win->winHide(FALSE);
 			m_isFinished = TRUE;
 		}
-	}	
+	}
 	if(frame >= m_frameLength)
 	{
 		m_win->winHide(FALSE);
@@ -1562,7 +1574,7 @@ void CountUpTransition::update( Int frame )
 		if( TheAudio )
 		{
 			TheAudio->addAudioEvent( &buttonClick );
-		}  // end if
+		}
 		m_currentValue +=m_countState;
 		if(m_currentValue > m_intValue)
 			m_currentValue = m_intValue;
@@ -1578,7 +1590,7 @@ void CountUpTransition::update( Int frame )
 	}
 }
 
-void CountUpTransition::reverse( void )
+void CountUpTransition::reverse()
 {
 	if( m_win->winIsHidden() )
 	{
@@ -1592,11 +1604,11 @@ void CountUpTransition::reverse( void )
 
 }
 
-void CountUpTransition::draw( void )
+void CountUpTransition::draw()
 {
 }
-	
-void CountUpTransition::skip( void )
+
+void CountUpTransition::skip()
 {
 	if (!m_isFinished)
 		update(COUNTUPTRANSITION_END);
@@ -1604,19 +1616,19 @@ void CountUpTransition::skip( void )
 
 //-----------------------------------------------------------------------------
 
-ScreenFadeTransition::ScreenFadeTransition ( void )
+ScreenFadeTransition::ScreenFadeTransition ()
 {
 	m_frameLength = SCREENFADETRANSITION_END;
-	m_win = NULL;
+	m_win = nullptr;
 	m_drawState = -1;
 	m_isForward = TRUE;
-	
+
 }
 
-ScreenFadeTransition::~ScreenFadeTransition( void )
+ScreenFadeTransition::~ScreenFadeTransition()
 {
-	m_win = NULL;
-	
+	m_win = nullptr;
+
 }
 
 void ScreenFadeTransition::init( GameWindow *win )
@@ -1639,7 +1651,7 @@ void ScreenFadeTransition::update( Int frame )
 	m_drawState = -1;
 	if(frame < SCREENFADETRANSITION_START || frame > SCREENFADETRANSITION_END)
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("ScreenFadeTransition::update - Frame is out of the range the this update can handle %d", frame));
+		DEBUG_CRASH(("ScreenFadeTransition::update - Frame is out of the range the this update can handle %d", frame));
 		return;
 	}
 	switch (frame) {
@@ -1652,17 +1664,17 @@ void ScreenFadeTransition::update( Int frame )
 		{
 			m_isFinished = TRUE;
 		}
-	}	
-	m_drawState = frame;	
+	}
+	m_drawState = frame;
 }
 
-void ScreenFadeTransition::reverse( void )
+void ScreenFadeTransition::reverse()
 {
 	m_isFinished = FALSE;
 	m_isForward = FALSE;
 }
 
-void ScreenFadeTransition::draw( void )
+void ScreenFadeTransition::draw()
 {
 	Int alpha = m_percent*255 *m_drawState;
 	if(alpha > 255)
@@ -1670,8 +1682,8 @@ void ScreenFadeTransition::draw( void )
 	TheDisplay->drawFillRect(m_pos.x, m_pos.y, m_size.x, m_size.y , GameMakeColor(0,0,0,alpha));
 
 }
-	
-void ScreenFadeTransition::skip( void )
+
+void ScreenFadeTransition::skip()
 {
 	update(SCREENFADETRANSITION_END);
 }
@@ -1679,20 +1691,20 @@ void ScreenFadeTransition::skip( void )
 
 //-----------------------------------------------------------------------------
 
-ControlBarArrowTransition::ControlBarArrowTransition ( void )
+ControlBarArrowTransition::ControlBarArrowTransition ()
 {
 	m_frameLength = CONTROLBARARROWTRANSITION_END;
-	m_win = NULL;
+	m_win = nullptr;
 	m_drawState = -1;
 	m_isForward = TRUE;
-	m_arrowImage = NULL;
-	
+	m_arrowImage = nullptr;
+
 }
 
-ControlBarArrowTransition::~ControlBarArrowTransition( void )
+ControlBarArrowTransition::~ControlBarArrowTransition()
 {
-	m_win = NULL;
-	m_arrowImage = NULL;
+	m_win = nullptr;
+	m_arrowImage = nullptr;
 }
 
 void ControlBarArrowTransition::init( GameWindow *win )
@@ -1704,9 +1716,9 @@ void ControlBarArrowTransition::init( GameWindow *win )
 
 	m_percent = 1.0f / CONTROLBARARROWTRANSITION_BEGIN_FADE;
 	m_fadePercent = 1.0f/ (CONTROLBARARROWTRANSITION_END - CONTROLBARARROWTRANSITION_BEGIN_FADE);
-	
+
 	m_arrowImage = TheControlBar->getArrowImage();
-	GameWindow *twin = TheWindowManager->winGetWindowFromId(NULL, TheNameKeyGenerator->nameToKey("ControlBar.wnd:ButtonGeneral"));
+	GameWindow *twin = TheWindowManager->winGetWindowFromId(nullptr, TheNameKeyGenerator->nameToKey("ControlBar.wnd:ButtonGeneral"));
 	if(!twin || !m_arrowImage)
 	{
 		m_isFinished = TRUE;
@@ -1715,7 +1727,7 @@ void ControlBarArrowTransition::init( GameWindow *win )
 	ICoord2D screenPos, screenSize;
 	twin->winGetScreenPosition(&screenPos.x, &screenPos.y);
 	twin->winGetSize(&screenSize.x, &screenSize.y);
-	
+
 	m_incrementPos.x = 0;
 	m_incrementPos.y = screenPos.y * m_percent;
 
@@ -1732,7 +1744,7 @@ void ControlBarArrowTransition::update( Int frame )
 	m_drawState = -1;
 	if(frame < CONTROLBARARROWTRANSITION_START || frame > CONTROLBARARROWTRANSITION_END)
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("ControlBarArrowTransition::update - Frame is out of the range the this update can handle %d", frame));
+		DEBUG_CRASH(("ControlBarArrowTransition::update - Frame is out of the range the this update can handle %d", frame));
 		return;
 	}
 	switch (frame) {
@@ -1745,19 +1757,19 @@ void ControlBarArrowTransition::update( Int frame )
 		{
 			m_isFinished = TRUE;
 		}
-	}	
-	m_drawState = frame;	
+	}
+	m_drawState = frame;
 }
 
-void ControlBarArrowTransition::reverse( void )
+void ControlBarArrowTransition::reverse()
 {
 	m_isFinished = FALSE;
 	m_isForward = FALSE;
 }
 
-void ControlBarArrowTransition::draw( void )
+void ControlBarArrowTransition::draw()
 {
-	if(m_drawState <0)
+	if(m_drawState < CONTROLBARARROWTRANSITION_START)
 		return;
 	if(m_drawState < CONTROLBARARROWTRANSITION_BEGIN_FADE)
 	{
@@ -1774,10 +1786,10 @@ void ControlBarArrowTransition::draw( void )
 
 		TheDisplay->drawImage(m_arrowImage, m_pos.x, yPos, m_pos.x + m_size.x, yPos + m_size.y , GameMakeColor(255,255,255,alpha));
 	}
-	
+
 }
-	
-void ControlBarArrowTransition::skip( void )
+
+void ControlBarArrowTransition::skip()
 {
 	update(CONTROLBARARROWTRANSITION_END);
 }
@@ -1788,19 +1800,19 @@ void ControlBarArrowTransition::skip( void )
 
 //-----------------------------------------------------------------------------
 
-FullFadeTransition::FullFadeTransition ( void )
+FullFadeTransition::FullFadeTransition ()
 {
 	m_frameLength = FULLFADETRANSITION_END;
-	m_win = NULL;
+	m_win = nullptr;
 	m_drawState = -1;
 	m_isForward = TRUE;
-	
+
 }
 
-FullFadeTransition::~FullFadeTransition( void )
+FullFadeTransition::~FullFadeTransition()
 {
-	m_win = NULL;
-	
+	m_win = nullptr;
+
 }
 
 void FullFadeTransition::init( GameWindow *win )
@@ -1827,47 +1839,48 @@ void FullFadeTransition::update( Int frame )
 	m_drawState = -1;
 	if(frame < FULLFADETRANSITION_START || frame > FULLFADETRANSITION_END)
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("FullFadeTransition::update - Frame is out of the range the this update can handle %d", frame));
+		DEBUG_CRASH(("FullFadeTransition::update - Frame is out of the range the this update can handle %d", frame));
 		return;
 	}
 	switch (frame) {
 	case FULLFADETRANSITION_START:
 		{
-						
-			if(m_isForward || !m_win )
+			if(m_isForward)
 				break;
-
-			m_win->winHide(TRUE);
+			if(m_win)
+				m_win->winHide(TRUE);
+			// Always mark finished at the end-of-our-direction, even if
+			// m_win is null — this is a fullscreen fade rectangle and it
+			// must stop drawing once its animation window has elapsed.
 			m_isFinished = TRUE;
-
 		}
 		break;
 	case FULLFADETRANSITION_END:
 		{
-			if(!m_isForward || !m_win )
+			if(!m_isForward)
 				break;
-			m_win->winHide(FALSE);
+			if(m_win)
+				m_win->winHide(FALSE);
 			m_isFinished = TRUE;
-
 		}
-	}	
-	if(frame == FULLFADETRANSITION_END/2)
+	}
+	if(frame == FULLFADETRANSITION_END/2 && m_win)
 	{
 		if(m_isForward)
-			m_win->winHide(FALSE);	
+			m_win->winHide(FALSE);
 		else
-			m_win->winHide(TRUE);	
+			m_win->winHide(TRUE);
 	}
-	m_drawState = frame;	
+	m_drawState = frame;
 }
 
-void FullFadeTransition::reverse( void )
+void FullFadeTransition::reverse()
 {
 	m_isFinished = FALSE;
 	m_isForward = FALSE;
 }
 
-void FullFadeTransition::draw( void )
+void FullFadeTransition::draw()
 {
 	Int alpha;
 	if(m_drawState > (FULLFADETRANSITION_END/2))
@@ -1879,8 +1892,8 @@ void FullFadeTransition::draw( void )
 	TheDisplay->drawFillRect(m_pos.x, m_pos.y, m_size.x, m_size.y , GameMakeColor(0,0,0,alpha));
 	TheDisplay->drawOpenRect(m_pos.x, m_pos.y, m_size.x, m_size.y , 1.0f, GameMakeColor(60,60,180,alpha));
 }
-	
-void FullFadeTransition::skip( void )
+
+void FullFadeTransition::skip()
 {
 	update(FULLFADETRANSITION_END);
 }
@@ -1888,18 +1901,18 @@ void FullFadeTransition::skip( void )
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 
-TextOnFrameTransition::TextOnFrameTransition ( void )
+TextOnFrameTransition::TextOnFrameTransition ()
 {
 	m_frameLength = TEXTONFRAMETRANSITION_END;
-	m_win = NULL;
+	m_win = nullptr;
 	m_isForward = TRUE;
-	
+
 }
 
-TextOnFrameTransition::~TextOnFrameTransition( void )
+TextOnFrameTransition::~TextOnFrameTransition()
 {
-	m_win = NULL;
-	
+	m_win = nullptr;
+
 }
 
 void TextOnFrameTransition::init( GameWindow *win )
@@ -1928,13 +1941,13 @@ void TextOnFrameTransition::update( Int frame )
 {
 	if(frame < TEXTONFRAMETRANSITION_START || frame > TEXTONFRAMETRANSITION_END)
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("TextOnFrameTransition::update - Frame is out of the range the this update can handle %d", frame));
+		DEBUG_CRASH(("TextOnFrameTransition::update - Frame is out of the range the this update can handle %d", frame));
 		return;
 	}
 	switch (frame) {
 	case TEXTONFRAMETRANSITION_START:
 		{
-						
+
 			if(m_isForward || !m_win )
 				break;
 
@@ -1951,10 +1964,10 @@ void TextOnFrameTransition::update( Int frame )
 			m_isFinished = TRUE;
 
 		}
-	}	
+	}
 }
 
-void TextOnFrameTransition::reverse( void )
+void TextOnFrameTransition::reverse()
 {
 	m_isFinished = FALSE;
 	m_isForward = FALSE;
@@ -1965,11 +1978,11 @@ void TextOnFrameTransition::reverse( void )
 	}
 }
 
-void TextOnFrameTransition::draw( void )
+void TextOnFrameTransition::draw()
 {
 }
-	
-void TextOnFrameTransition::skip( void )
+
+void TextOnFrameTransition::skip()
 {
 	if (!m_isFinished)
 		update(TEXTONFRAMETRANSITION_END);
@@ -1978,18 +1991,18 @@ void TextOnFrameTransition::skip( void )
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 
-ReverseSoundTransition::ReverseSoundTransition ( void )
+ReverseSoundTransition::ReverseSoundTransition ()
 {
 	m_frameLength = REVERSESOUNDTRANSITION_END;
-	m_win = NULL;
+	m_win = nullptr;
 	m_isForward = TRUE;
-	
+
 }
 
-ReverseSoundTransition::~ReverseSoundTransition( void )
+ReverseSoundTransition::~ReverseSoundTransition()
 {
-	m_win = NULL;
-	
+	m_win = nullptr;
+
 }
 
 void ReverseSoundTransition::init( GameWindow *win )
@@ -2002,13 +2015,13 @@ void ReverseSoundTransition::update( Int frame )
 {
 	if(frame < REVERSESOUNDTRANSITION_START || frame > REVERSESOUNDTRANSITION_END)
 	{
-		DEBUG_ASSERTCRASH(FALSE, ("ReverseSoundTransition::update - Frame is out of the range the this update can handle %d", frame));
+		DEBUG_CRASH(("ReverseSoundTransition::update - Frame is out of the range the this update can handle %d", frame));
 		return;
 	}
 	switch (frame) {
 	case REVERSESOUNDTRANSITION_START:
 		{
-						
+
 			if(m_isForward  )
 				break;
 
@@ -2016,7 +2029,7 @@ void ReverseSoundTransition::update( Int frame )
 
 		}
 		break;
-		
+
 	case REVERSESOUNDTRANSITION_FIRESOUND:
 		{
 			AudioEventRTS buttonClick("GUITransitionFade");
@@ -2024,9 +2037,10 @@ void ReverseSoundTransition::update( Int frame )
 			if( TheAudio )
 			{
 				TheAudio->addAudioEvent( &buttonClick );
-			}  // end if		
-
+			}
 		}
+		break;
+
 	case REVERSESOUNDTRANSITION_END:
 		{
 			if(!m_isForward  )
@@ -2034,20 +2048,20 @@ void ReverseSoundTransition::update( Int frame )
 			m_isFinished = TRUE;
 
 		}
-	}	
+	}
 }
 
-void ReverseSoundTransition::reverse( void )
+void ReverseSoundTransition::reverse()
 {
 	m_isFinished = FALSE;
 	m_isForward = FALSE;
 }
 
-void ReverseSoundTransition::draw( void )
+void ReverseSoundTransition::draw()
 {
 }
-	
-void ReverseSoundTransition::skip( void )
+
+void ReverseSoundTransition::skip()
 {
 	if (!m_isFinished)
 		update(REVERSESOUNDTRANSITION_END);
@@ -2080,8 +2094,8 @@ void PushButtonImageDrawThree(GameWindow *window, Int alpha )
 	centerImage				= GadgetButtonGetMiddleEnabledImage( window );
 
 	// sanity, we need to have these images to make it look right
-	if( leftImage == NULL || rightImage == NULL || 
-			centerImage == NULL )
+	if( leftImage == nullptr || rightImage == nullptr ||
+			centerImage == nullptr )
 		return;
 
 	// get image sizes for the ends
@@ -2103,7 +2117,7 @@ void PushButtonImageDrawThree(GameWindow *window, Int alpha )
 
 	// get width we have to draw our repeating center in
 	centerWidth = rightStart.x - leftEnd.x;
-	
+
 	if( centerWidth <= 0)
 	{
 		// draw left end
@@ -2122,7 +2136,7 @@ void PushButtonImageDrawThree(GameWindow *window, Int alpha )
 	}
 	else
 	{
-		
+
 		// how many whole repeating pieces will fit in that width
 		pieces = centerWidth / centerImage->getImageWidth();
 
@@ -2134,13 +2148,13 @@ void PushButtonImageDrawThree(GameWindow *window, Int alpha )
 		{
 
 			end.x = start.x + centerImage->getImageWidth();
-			
-			TheDisplay->drawImage( centerImage, 
+
+			TheDisplay->drawImage( centerImage,
 																			start.x, start.y,
 																			end.x, end.y,color );
 			start.x += centerImage->getImageWidth();
 
-		}  // end for i
+		}
 
 		// we will draw the image but clip the parts we don't want to show
 		IRegion2D reg;
@@ -2171,7 +2185,7 @@ void PushButtonImageDrawThree(GameWindow *window, Int alpha )
 		end.y = start.y + size.y;
 		TheDisplay->drawImage(rightImage, start.x, start.y, end.x, end.y,color);
 	}
-	
+
 }
 
 static void drawTypeText( GameWindow *window, DisplayString *str)
@@ -2184,21 +2198,21 @@ static void drawTypeText( GameWindow *window, DisplayString *str)
 	ICoord2D origin, size, textPos;
 	IRegion2D clipRegion;
 	// sanity
-	if( text == NULL || text->getTextLength() == 0 )
+	if( text == nullptr || text->getTextLength() == 0 )
 		return;
 	GameFont *font = text->getFont();
-	
+
 	str->setFont(font);
 
 	// get window position and size
 	window->winGetScreenPosition( &origin.x, &origin.y );
 	window->winGetSize( &size.x, &size.y );
-	
+
 	// Set the text Wrap width
 	wordWrap = size.x - 10;
-	text->setWordWrap(wordWrap);	
+	text->setWordWrap(wordWrap);
 	str->setWordWrap(wordWrap);
-	if( BitTest(window->winGetStatus(), WIN_STATUS_WRAP_CENTERED)		)
+	if( BitIsSet(window->winGetStatus(), WIN_STATUS_WRAP_CENTERED)		)
 	{
 		str->setWordWrapCentered(TRUE);
 		text->setWordWrapCentered(TRUE);
@@ -2213,13 +2227,13 @@ static void drawTypeText( GameWindow *window, DisplayString *str)
 
 	// how much space will this text take up
 	text->getSize( &textWidth, &textHeight );
-		
+
 	//Init the clip region
 	clipRegion.lo.x = origin.x ;
 	clipRegion.lo.y = origin.y ;
 	clipRegion.hi.x = origin.x + size.x ;
 	clipRegion.hi.y = origin.y + size.y;
-	
+
 	if( tData->centered )
 	{
 
@@ -2227,7 +2241,7 @@ static void drawTypeText( GameWindow *window, DisplayString *str)
 		textPos.y = origin.y + (size.y / 2) - (textHeight / 2);
 		str->setClipRegion(&clipRegion);
 		str->draw( textPos.x, textPos.y, textColor, textDropColor );
-	}  // end if
+	}
 	else
 	{
 
@@ -2237,7 +2251,7 @@ static void drawTypeText( GameWindow *window, DisplayString *str)
 		str->setClipRegion(&clipRegion);
 		str->draw( textPos.x, textPos.y, textColor, textDropColor );
 
-	}  // end else
+	}
 
 
-}  // end drawStaticTextText
+}

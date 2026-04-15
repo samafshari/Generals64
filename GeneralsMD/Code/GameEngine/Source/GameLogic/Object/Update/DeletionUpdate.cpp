@@ -47,7 +47,7 @@ DeletionUpdate::DeletionUpdate( Thing *thing, const ModuleData* moduleData ) : U
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
-DeletionUpdate::~DeletionUpdate( void )
+DeletionUpdate::~DeletionUpdate()
 {
 }
 
@@ -58,8 +58,8 @@ DeletionUpdate::~DeletionUpdate( void )
 //-------------------------------------------------------------------------------------------------
 void DeletionUpdate::setLifetimeRange( UnsignedInt minFrames, UnsignedInt maxFrames )
 {
-	
-#if defined _DEBUG && defined CRISS_CROSS_GEOMETRY
+
+#if defined RTS_DEBUG && defined CRISS_CROSS_GEOMETRY
 	setWakeFrame(getObject(), UPDATE_SLEEP(2));
 #else
 	UnsignedInt delay = calcSleepDelay(minFrames, maxFrames);
@@ -79,10 +79,10 @@ UnsignedInt DeletionUpdate::calcSleepDelay(UnsignedInt minFrames, UnsignedInt ma
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
-UpdateSleepTime DeletionUpdate::update( void )
+UpdateSleepTime DeletionUpdate::update()
 {
 	// Destroy (NOT kill) if time is up
-#if defined _DEBUG  && defined CRISS_CROSS_GEOMETRY
+#if defined RTS_DEBUG  && defined CRISS_CROSS_GEOMETRY
 	Object *obj = getObject();
 	if (obj)
 	{
@@ -115,7 +115,7 @@ void DeletionUpdate::crc( Xfer *xfer )
 	// extend base class
 	UpdateModule::crc( xfer );
 
-}  // end crc
+}
 
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
@@ -136,15 +136,15 @@ void DeletionUpdate::xfer( Xfer *xfer )
 	// die frame
 	xfer->xferUnsignedInt( &m_dieFrame );
 
-}  // end xfer
+}
 
 // ------------------------------------------------------------------------------------------------
 /** Load post process */
 // ------------------------------------------------------------------------------------------------
-void DeletionUpdate::loadPostProcess( void )
+void DeletionUpdate::loadPostProcess()
 {
 
 	// extend base class
 	UpdateModule::loadPostProcess();
 
-}  // end loadPostProcess
+}

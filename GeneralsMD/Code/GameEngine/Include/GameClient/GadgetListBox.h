@@ -24,12 +24,12 @@
 
 // FILE: GadgetListBox.h //////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-//                                                                          
-//                       Westwood Studios Pacific.                          
-//                                                                          
-//                       Confidential Information					         
-//                Copyright (C) 2001 - All Rights Reserved                  
-//                                                                          
+//
+//                       Westwood Studios Pacific.
+//
+//                       Confidential Information
+//                Copyright (C) 2001 - All Rights Reserved
+//
 //-----------------------------------------------------------------------------
 //
 // Project:    RTS3
@@ -44,9 +44,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #pragma once
-
-#ifndef __GADGETLISTBOX_H_
-#define __GADGETLISTBOX_H_
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 
@@ -72,7 +69,8 @@ extern void GadgetListboxCreateScrollbar( GameWindow *listbox );
 extern void GadgetListBoxAddMultiSelect( GameWindow *listbox );
 extern void GadgetListBoxRemoveMultiSelect( GameWindow *listbox );
 extern void GadgetListBoxSetListLength( GameWindow *listbox, Int newLength );
-extern Int  GadgetListBoxGetListLength( GameWindow *listbox );
+extern Int  GadgetListBoxGetListLength( GameWindow *listbox ); ///< Returns the maximum possible number of list entries. Length is synonymous to rows
+extern Int  GadgetListBoxGetMaxSelectedLength( GameWindow *listbox ); ///< Returns the maximum possible number of list entries that can be selected
 extern Int  GadgetListBoxGetNumEntries( GameWindow *listbox );
 extern Int  GadgetListBoxGetNumColumns( GameWindow *listbox );
 extern Int  GadgetListBoxGetColumnWidth( GameWindow *listbox, Int column );
@@ -95,6 +93,15 @@ extern void GadgetListBoxReset( GameWindow *listbox );
 extern void GadgetListBoxSetItemData( GameWindow *listbox,  void *data, Int row, Int column = 0);
 extern void *GadgetListBoxGetItemData( GameWindow *listbox, Int row, Int column = 0);
 
+// Stash a cosmetic shader variant on a cell. 0 means "no animation"
+// (the default after ctor). Non-zero ids are consumed by the text
+// renderer in W3DListBox — the base color stored on the cell is
+// modulated per-frame before drawing so the entry appears to animate.
+// Used for chat rows so a launcher-side player shader shows up in
+// the in-game chat log. Out-of-range shader ids are silently clamped
+// to the 0..255 range the wire protocol uses.
+extern void GadgetListBoxSetEntryShader( GameWindow *listbox, Int shaderId, Int row, Int column = 0);
+
 extern bool GadgetListBoxIsFull(GameWindow *window);
 
 extern Int GadgetListBoxGetBottomVisibleEntry( GameWindow *window );
@@ -111,17 +118,17 @@ extern void GadgetListBoxSetAudioFeedback( GameWindow *listbox, Bool enable );
 // and those slider buttons and thumb
 //
 extern void GadgetListBoxSetColors( GameWindow *listbox,
-																	  Color enabledColor, 
+																	  Color enabledColor,
 																	  Color enabledBorderColor,
-																	  Color enabledSelectedItemColor, 
+																	  Color enabledSelectedItemColor,
 																	  Color enabledSelectedItemBorderColor,
-																	  Color disabledColor, 
+																	  Color disabledColor,
 																	  Color disabledBorderColor,
-																	  Color disabledSelectedItemColor, 
+																	  Color disabledSelectedItemColor,
 																	  Color disabledSelectedItemBorderColor,
-																	  Color hiliteColor, 
+																	  Color hiliteColor,
 																	  Color hiliteBorderColor,
-																	  Color hiliteSelectedItemColor, 
+																	  Color hiliteSelectedItemColor,
 																	  Color hiliteSelectedItemBorderColor );
 
 inline void GadgetListBoxSetEnabledImage( GameWindow *g, const Image *image )													{ g->winSetEnabledImage( 0, image ); }
@@ -187,7 +194,7 @@ inline GameWindow *GadgetListBoxGetSlider( GameWindow *g )
 
 	if( listData && listData->slider )
 		return listData->slider;
-	return NULL;
+	return nullptr;
 }
 inline GameWindow *GadgetListBoxGetUpButton( GameWindow *g )
 {
@@ -195,7 +202,7 @@ inline GameWindow *GadgetListBoxGetUpButton( GameWindow *g )
 
 	if( listData && listData->upButton )
 		return listData->upButton;
-	return NULL;
+	return nullptr;
 }
 inline GameWindow *GadgetListBoxGetDownButton( GameWindow *g )
 {
@@ -203,11 +210,8 @@ inline GameWindow *GadgetListBoxGetDownButton( GameWindow *g )
 
 	if( listData && listData->downButton )
 		return listData->downButton;
-	return NULL;
+	return nullptr;
 
 }
 
 // EXTERNALS //////////////////////////////////////////////////////////////////
-
-#endif // __GADGETLISTBOX_H_
-

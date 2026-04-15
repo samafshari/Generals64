@@ -29,9 +29,6 @@
 
 #pragma once
 
-#ifndef __COMMAND_BUTTON_HUNT_UPDATE_H_
-#define __COMMAND_BUTTON_HUNT_UPDATE_H_
-
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "Common/KindOf.h"
 #include "GameLogic/Module/UpdateModule.h"
@@ -52,7 +49,7 @@ public:
 	CommandButtonHuntUpdateModuleData();
 	static void buildFieldParse(MultiIniFieldParse& p);
 
-private: 
+private:
 
 };
 
@@ -76,7 +73,7 @@ public:
 	void setCommandButton(const AsciiString& buttonName);
 
 protected:
-	Object* scanClosestTarget(void);
+	Object* scanClosestTarget();
 	UpdateSleepTime huntSpecialPower(AIUpdateInterface *ai);
 	UpdateSleepTime huntWeapon(AIUpdateInterface *ai);
 	UpdateSleepTime huntEnter( AIUpdateInterface *ai );
@@ -86,7 +83,3 @@ protected:
 	AsciiString		m_commandButtonName;
 	const CommandButton *m_commandButton;
 };
-
-
-#endif
-

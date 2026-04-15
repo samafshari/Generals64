@@ -28,17 +28,14 @@
 
 #pragma once
 
-#ifndef _MISSILE_AI_UPDATE_H_
-#define _MISSILE_AI_UPDATE_H_
-
 #include "Common/GameType.h"
 #include "Common/GlobalData.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/WeaponBonusConditionFlags.h"
 #include "Common/INI.h"
-#include "WWMath/Matrix3D.h"
+#include "WWMath/matrix3d.h"
 
-enum ParticleSystemID;
+enum ParticleSystemID : Int;
 class FXList;
 
 
@@ -49,7 +46,7 @@ public:
 	Bool						m_tryToFollowTarget;	///< if true, attack object, not pos
 	UnsignedInt			m_fuelLifetime;				///< num frames till missile runs out of motive power (0 == inf)
 	UnsignedInt			m_ignitionDelay;			///< delay in frames from when missile is 'fired', to when it starts moving		15
-	Real						m_initialVel;			
+	Real						m_initialVel;
 	Real						m_initialDist;
 	Real						m_diveDistance;				///< If I get this close to my target, start ignoring my preferred height
 	const FXList*		m_ignitionFX;					///< FXList to do when missile 'ignites'
@@ -103,7 +100,7 @@ public:
 	virtual Bool processCollision(PhysicsBehavior *physics, Object *other); ///< Returns true if the physics collide should apply the force.  Normally not.  jba.
 
 	virtual UpdateSleepTime update();
-	virtual void onDelete( void );
+	virtual void onDelete();
 
 
 protected:
@@ -131,7 +128,7 @@ private:
 	Bool									m_isArmed;								///< if true, missile will explode on contact
 	Bool									m_noDamage;								///< if true, missile will not cause damage when it detonates. (Used for flares).
 	Bool									m_isJammed;								///< No target, just shooting at a scattered position
-	
+
 	void doPrelaunchState();
 	void doLaunchState();
 	void doIgnitionState();
@@ -147,6 +144,3 @@ private:
 
 
 };
-
-#endif // _MISSILE_AI_UPDATE_H_
-

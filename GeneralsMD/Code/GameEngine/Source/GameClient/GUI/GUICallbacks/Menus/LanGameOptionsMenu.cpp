@@ -27,7 +27,7 @@
 // Author: Chris Huybregts, October 2001
 // Description: Lan Game Options Menu
 ///////////////////////////////////////////////////////////////////////////////////////
-#include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+#include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 
 #include "Common/PlayerTemplate.h"
@@ -45,7 +45,7 @@
 #include "GameClient/GadgetTextEntry.h"
 #include "GameClient/GadgetStaticText.h"
 #include "GameClient/GadgetPushButton.h"
-#include "GameClient/GadgetCheckbox.h"
+#include "GameClient/GadgetCheckBox.h"
 #include "GameClient/MapUtil.h"
 #include "GameClient/Mouse.h"
 #include "GameClient/GameWindowTransitions.h"
@@ -60,11 +60,6 @@
 #include "GameClient/GameText.h"
 #include "GameNetwork/GUIUtil.h"
 
-#ifdef _INTERNAL
-// for occasional debugging...
-//#pragma optimize("", off)
-//#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
-#endif
 
 extern char *LANnextScreen;
 extern Bool LANisShuttingDown;
@@ -117,45 +112,142 @@ static NameKeyType buttonBackID = NAMEKEY_INVALID;
 static NameKeyType buttonStartID = NAMEKEY_INVALID;
 static NameKeyType buttonEmoteID = NAMEKEY_INVALID;
 static NameKeyType buttonSelectMapID = NAMEKEY_INVALID;
-static NameKeyType checkboxLimitSuperweaponsID = NAMEKEY_INVALID;
+static NameKeyType comboBoxSuperweaponLimitID = NAMEKEY_INVALID;
 static NameKeyType comboBoxStartingCashID = NAMEKEY_INVALID;
+static NameKeyType comboBoxGameSpeedID = NAMEKEY_INVALID;
 static NameKeyType windowMapID = NAMEKEY_INVALID;
 // Window Pointers ------------------------------------------------------------------------
-static GameWindow *parentLanGameOptions = NULL;
-static GameWindow *buttonBack = NULL;
-static GameWindow *buttonStart = NULL;
-static GameWindow *buttonSelectMap = NULL;
-static GameWindow *buttonEmote = NULL;
-static GameWindow *textEntryChat = NULL;
-static GameWindow *textEntryMapDisplay = NULL;
-static GameWindow *checkboxLimitSuperweapons = NULL;
-static GameWindow *comboBoxStartingCash = NULL;
-static GameWindow *windowMap = NULL;
+static GameWindow *parentLanGameOptions = nullptr;
+static GameWindow *buttonBack = nullptr;
+static GameWindow *buttonStart = nullptr;
+static GameWindow *buttonSelectMap = nullptr;
+static GameWindow *buttonEmote = nullptr;
+static GameWindow *textEntryChat = nullptr;
+static GameWindow *textEntryMapDisplay = nullptr;
+static GameWindow *comboBoxSuperweaponLimit = nullptr;
+static GameWindow *comboBoxStartingCash = nullptr;
+static GameWindow *comboBoxGameSpeed = nullptr;
+static GameWindow *windowMap = nullptr;
 
-static GameWindow *comboBoxPlayer[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
-																									 NULL,NULL,NULL,NULL };
-static GameWindow *buttonAccept[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
-																								NULL,NULL,NULL,NULL };
+// Preset values for the host's superweapon-limit combo. Counts are interpreted
+// PER TEAM, not per player — see Player::canBuildMoreOfType for the change.
+// Value 0 means "superweapons disabled" (NOT unlimited); see
+// Player::canBuildMoreOfType's DeterminedBySuperweaponRestriction branch.
+static const Int s_superweaponLimitValues[] = { 0, 1, 2, 3, 4, 5, 10, 50 };
+static const Int s_superweaponLimitCount = sizeof(s_superweaponLimitValues) / sizeof(s_superweaponLimitValues[0]);
 
-static GameWindow *comboBoxColor[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
-																								NULL,NULL,NULL,NULL };
+static void PopulateSuperweaponLimitComboBox(GameWindow *comboBox, GameInfo *myGame)
+{
+	GadgetComboBoxReset(comboBox);
+	if (!comboBox || !myGame)
+		return;
 
-static GameWindow *comboBoxPlayerTemplate[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
-																								NULL,NULL,NULL,NULL };
+	const UnsignedShort currentLimit = myGame->getSuperweaponRestriction();
+	Int currentSelectionIndex = -1;
 
-static GameWindow *comboBoxTeam[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
-																								NULL,NULL,NULL,NULL };
+	for (Int i = 0; i < s_superweaponLimitCount; ++i)
+	{
+		const Int value = s_superweaponLimitValues[i];
+		UnicodeString label;
+		if (value == 0)
+			label = L"Off";
+		else
+			label.format(L"%d", value);
+		Int newIndex = GadgetComboBoxAddEntry(comboBox, label,
+			comboBox->winGetEnabled() ? comboBox->winGetEnabledTextColor() : comboBox->winGetDisabledTextColor());
+		GadgetComboBoxSetItemData(comboBox, newIndex, reinterpret_cast<void *>(static_cast<uintptr_t>(value)));
 
-//static GameWindow *buttonStartPosition[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
-//																								NULL,NULL,NULL,NULL };
+		if (value == (Int)currentLimit)
+			currentSelectionIndex = newIndex;
+	}
+
+	if (currentSelectionIndex == -1)
+	{
+		// The current value isn't one of the presets — add it on the fly so
+		// the dropdown reflects the actual GameInfo state.
+		UnicodeString label;
+		label.format(L"%d", (Int)currentLimit);
+		currentSelectionIndex = GadgetComboBoxAddEntry(comboBox, label,
+			comboBox->winGetEnabled() ? comboBox->winGetEnabledTextColor() : comboBox->winGetDisabledTextColor());
+		GadgetComboBoxSetItemData(comboBox, currentSelectionIndex, reinterpret_cast<void *>(static_cast<uintptr_t>(currentLimit)));
+	}
+
+	GadgetComboBoxSetSelectedPos(comboBox, currentSelectionIndex);
+}
+
+// Preset values for the host's game-speed combo. The first entry (30) matches
+// LOGICFRAMES_PER_SECOND so the host can opt back into the campaign / shell
+// baseline. Anything above that is "smoother + faster" — see the network
+// run-ahead path and GameLogic::startNewGame for how this is consumed.
+static const Int s_gameSpeedFpsValues[] = { 30, 50, 60, 70, 90, 120, 150 };
+static const Int s_gameSpeedFpsCount = sizeof(s_gameSpeedFpsValues) / sizeof(s_gameSpeedFpsValues[0]);
+
+static void PopulateGameSpeedComboBox(GameWindow *comboBox, GameInfo *myGame)
+{
+	GadgetComboBoxReset(comboBox);
+	if (!comboBox || !myGame)
+		return;
+
+	const Int currentFps = myGame->getGameFps();
+	Int currentSelectionIndex = -1;
+
+	for (Int i = 0; i < s_gameSpeedFpsCount; ++i)
+	{
+		const Int fps = s_gameSpeedFpsValues[i];
+		UnicodeString label;
+		// Format as "70 hz" — short and unambiguous. No CSF lookup so we
+		// don't need to ship a new localization key for every preset.
+		label.format(L"%d hz", fps);
+		Int newIndex = GadgetComboBoxAddEntry(comboBox, label,
+			comboBox->winGetEnabled() ? comboBox->winGetEnabledTextColor() : comboBox->winGetDisabledTextColor());
+		GadgetComboBoxSetItemData(comboBox, newIndex, reinterpret_cast<void *>(static_cast<uintptr_t>(fps)));
+
+		if (fps == currentFps)
+			currentSelectionIndex = newIndex;
+	}
+
+	if (currentSelectionIndex == -1)
+	{
+		// The current value isn't one of the presets — add it on the fly so
+		// the dropdown reflects the actual GameInfo state instead of silently
+		// snapping to a different value.
+		UnicodeString label;
+		label.format(L"%d hz", currentFps);
+		currentSelectionIndex = GadgetComboBoxAddEntry(comboBox, label,
+			comboBox->winGetEnabled() ? comboBox->winGetEnabledTextColor() : comboBox->winGetDisabledTextColor());
+		GadgetComboBoxSetItemData(comboBox, currentSelectionIndex, reinterpret_cast<void *>(static_cast<uintptr_t>(currentFps)));
+	}
+
+	GadgetComboBoxSetSelectedPos(comboBox, currentSelectionIndex);
+}
+
+static GameWindow *comboBoxPlayer[MAX_SLOTS] = {0};
+static GameWindow *buttonAccept[MAX_SLOTS] = {0};
+
+static GameWindow *comboBoxColor[MAX_SLOTS] = {0};
+
+// Per-slot color swatch — a small solid-colored square that
+// REPLACES the color combo box for human players in network games.
+// Humans can't change their color from inside the game (the launcher
+// is the canonical source via -color), so we hide the dropdown and
+// show a static colored square instead. AI slots and skirmish-mode
+// slots keep the combo box. Created programmatically in
+// LanGameOptionsMenuInit; lanUpdateSlotList toggles visibility +
+// recolors each tick.
+static GameWindow *colorSwatch[MAX_SLOTS] = {0};
+
+static GameWindow *comboBoxPlayerTemplate[MAX_SLOTS] = {0};
+
+static GameWindow *comboBoxTeam[MAX_SLOTS] = {0};
+
+//static GameWindow *buttonStartPosition[MAX_SLOTS] = {0};
 //
-static GameWindow *buttonMapStartPosition[MAX_SLOTS] = {NULL,NULL,NULL,NULL,
-																								NULL,NULL,NULL,NULL };
+static GameWindow *buttonMapStartPosition[MAX_SLOTS] = {0};
 
 //external declarations of the Gadgets the callbacks can use
-GameWindow *listboxChatWindowLanGame = NULL;
+GameWindow *listboxChatWindowLanGame = nullptr;
 NameKeyType listboxChatWindowLanGameID = NAMEKEY_INVALID;
-WindowLayout *mapSelectLayout = NULL;
+WindowLayout *mapSelectLayout = nullptr;
 
 static Int getNextSelectablePlayer(Int start)
 {
@@ -178,7 +270,7 @@ static Int getNextSelectablePlayer(Int start)
 static Int getFirstSelectablePlayer(const GameInfo *game)
 {
 	const GameSlot *slot = game->getConstSlot(game->getLocalSlotNum());
-	if (!game->amIHost() || slot && slot->getPlayerTemplate() != PLAYERTEMPLATE_OBSERVER)
+	if (!game->amIHost() || (slot && slot->getPlayerTemplate() != PLAYERTEMPLATE_OBSERVER))
 		return game->getLocalSlotNum();
 
 	for (Int i=0; i<MAX_SLOTS; ++i)
@@ -193,9 +285,9 @@ static Int getFirstSelectablePlayer(const GameInfo *game)
 
 void updateMapStartSpots( GameInfo *myGame, GameWindow *buttonMapStartPositions[], Bool onLoadScreen = FALSE );
 void positionStartSpots( GameInfo *myGame, GameWindow *buttonMapStartPositions[], GameWindow *mapWindow);
-void LanPositionStartSpots( void )
+void LanPositionStartSpots()
 {
-	
+
 	positionStartSpots( TheLAN->GetMyGame(), buttonMapStartPosition, windowMap);
 }
 static void playerTooltip(GameWindow *window,
@@ -203,7 +295,8 @@ static void playerTooltip(GameWindow *window,
 													UnsignedInt mouse)
 {
 	Int idx = -1;
-	for (Int i=0; i<MAX_SLOTS; ++i)
+	Int i=0;
+	for (; i<MAX_SLOTS; ++i)
 	{
 		if (window && window == GadgetComboBoxGetEditBox(comboBoxPlayer[i]))
 		{
@@ -225,12 +318,11 @@ static void playerTooltip(GameWindow *window,
 		TheMouse->setCursorTooltip( UnicodeString::TheEmptyString );
 		return;
 	}
-	UnicodeString tooltip;
-	tooltip.format(TheGameText->fetch("TOOLTIP:LANPlayer"), player->getName().str(), player->getLogin().str(), player->getHost().str());
-	TheMouse->setCursorTooltip( tooltip );
+
+	setLANPlayerTooltip(player);
 }
 
-void StartPressed(void)
+void StartPressed()
 {
 	LANGameInfo *myGame = TheLAN->GetMyGame();
 
@@ -266,7 +358,7 @@ void StartPressed(void)
 		{
 			UnicodeString text;
 			text.format(TheGameText->fetch("LAN:TooManyPlayers"), (md)?md->m_numPlayers:0);
-			TheLAN->OnChat(UnicodeString(L"SYSTEM"), TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
+			TheLAN->OnChat(L"SYSTEM", TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
 		}
 		return;
 	}
@@ -277,7 +369,7 @@ void StartPressed(void)
 		if (TheLAN->AmIHost())
 		{
 			UnicodeString text = TheGameText->fetch("GUI:NeedHumanPlayers");
-			TheLAN->OnChat(UnicodeString(L"SYSTEM"), TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
+			TheLAN->OnChat(L"SYSTEM", TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
 		}
 		return;
 	}
@@ -289,14 +381,14 @@ void StartPressed(void)
 		{
 			UnicodeString text;
 			text.format(TheGameText->fetch("LAN:NeedMorePlayers"),numUsers);
-			TheLAN->OnChat(UnicodeString(L"SYSTEM"), TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
+			TheLAN->OnChat(L"SYSTEM", TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
 		}
 		return;
 	}
 
 	// Check for too few teams
 	int numRandom = 0;
-	std::set<Int> teams; 
+	std::set<Int> teams;
 	for (i=0; i<MAX_SLOTS; ++i)
 	{
 		GameSlot *slot = myGame->getSlot(i);
@@ -318,7 +410,7 @@ void StartPressed(void)
 		{
 			UnicodeString text;
 			text.format(TheGameText->fetch("LAN:NeedMoreTeams"));
-			TheLAN->OnChat(UnicodeString(L"SYSTEM"), TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
+			TheLAN->OnChat(L"SYSTEM", TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
 		}
 		return;
 	}
@@ -327,7 +419,7 @@ void StartPressed(void)
 	{
 		UnicodeString text;
 		text.format(TheGameText->fetch("GUI:SandboxMode"));
-			TheLAN->OnChat(UnicodeString(L"SYSTEM"), TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
+			TheLAN->OnChat(L"SYSTEM", TheLAN->GetLocalIP(), text, LANAPI::LANCHAT_SYSTEM);
 	}
 
 	// see if everyone's accepted and count the number of players in the game
@@ -393,7 +485,7 @@ void StartPressed(void)
 		}
 	}
 
-}//void StartPressed(void)
+}
 
 void LANEnableStartButton(Bool enabled)
 {
@@ -406,7 +498,7 @@ static void handleColorSelection(int index)
 	GameWindow *combo = comboBoxColor[index];
 	Int color, selIndex;
 	GadgetComboBoxGetSelectedPos(combo, &selIndex);
-	color = (Int)GadgetComboBoxGetItemData(combo, selIndex);
+	color = static_cast<Int>(reinterpret_cast<intptr_t>(GadgetComboBoxGetItemData(combo, selIndex)));
 
 	LANGameInfo *myGame = TheLAN->GetMyGame();
 
@@ -416,19 +508,24 @@ static void handleColorSelection(int index)
 		if (color == slot->getColor())
 			return;
 
-		if (color >= -1 && color < TheMultiplayerSettings->getNumColors())
+		// `color` is the combo box item data, which is now a raw
+		// 0x00RRGGBB int (or -1 = random sentinel) — the old
+		// `< getNumColors()` bounds check was a palette-index check
+		// that filters out every real RGB value, so dropdown picks
+		// were silently ignored. Just guard against the random
+		// sentinel and run the duplicate-color check across all
+		// slots — the comparison still works because both sides are
+		// raw RGB ints.
+		if (color != -1)
 		{
 			Bool colorAvailable = TRUE;
-			if(color != -1 )
+			for(Int i=0; i <MAX_SLOTS; i++)
 			{
-				for(Int i=0; i <MAX_SLOTS; i++)
+				LANGameSlot *checkSlot = myGame->getLANSlot(i);
+				if(color == checkSlot->getColor() && slot != checkSlot)
 				{
-					LANGameSlot *checkSlot = myGame->getLANSlot(i);
-					if(color == checkSlot->getColor() && slot != checkSlot)
-					{
-						colorAvailable = FALSE;
-						break;
-					}
+					colorAvailable = FALSE;
+					break;
 				}
 			}
 			if(!colorAvailable)
@@ -464,7 +561,7 @@ static void handlePlayerTemplateSelection(int index)
 	GameWindow *combo = comboBoxPlayerTemplate[index];
 	Int playerTemplate, selIndex;
 	GadgetComboBoxGetSelectedPos(combo, &selIndex);
-	playerTemplate = (Int)GadgetComboBoxGetItemData(combo, selIndex);
+	playerTemplate = static_cast<Int>(reinterpret_cast<intptr_t>(GadgetComboBoxGetItemData(combo, selIndex)));
 	LANGameInfo *myGame = TheLAN->GetMyGame();
 
 	if (myGame)
@@ -518,7 +615,7 @@ static void handlePlayerTemplateSelection(int index)
 static void handleStartPositionSelection(Int player, int startPos)
 {
 	LANGameInfo *myGame = TheLAN->GetMyGame();
-	
+
 	if (myGame)
 	{
 		LANGameSlot * slot = myGame->getLANSlot(player);
@@ -531,7 +628,7 @@ static void handleStartPositionSelection(Int player, int startPos)
 		}
 
 		if(!skip)
-		{	
+		{
 			Bool isAvailable = TRUE;
 			for(Int i = 0; i < MAX_SLOTS; ++i)
 			{
@@ -576,7 +673,7 @@ static void handleTeamSelection(int index)
 	GameWindow *combo = comboBoxTeam[index];
 	Int team, selIndex;
 	GadgetComboBoxGetSelectedPos(combo, &selIndex);
-	team = (Int)GadgetComboBoxGetItemData(combo, selIndex);
+	team = static_cast<Int>(reinterpret_cast<intptr_t>(GadgetComboBoxGetItemData(combo, selIndex)));
 	LANGameInfo *myGame = TheLAN->GetMyGame();
 
 	if (myGame)
@@ -614,14 +711,14 @@ static void handleTeamSelection(int index)
 static void handleStartingCashSelection()
 {
   LANGameInfo *myGame = TheLAN->GetMyGame();
-  
+
   if (myGame)
   {
     Int selIndex;
     GadgetComboBoxGetSelectedPos(comboBoxStartingCash, &selIndex);
 
     Money startingCash;
-    startingCash.deposit( (UnsignedInt)GadgetComboBoxGetItemData( comboBoxStartingCash, selIndex ), FALSE );
+    startingCash.deposit( static_cast<UnsignedInt>(reinterpret_cast<uintptr_t>(GadgetComboBoxGetItemData( comboBoxStartingCash, selIndex ))), FALSE, FALSE );
     myGame->setStartingCash( startingCash );
     myGame->resetAccepted();
 
@@ -637,66 +734,143 @@ static void handleStartingCashSelection()
   }
 }
 
-static void handleLimitSuperweaponsClick()
+static void handleGameSpeedSelection()
 {
-  LANGameInfo *myGame = TheLAN->GetMyGame();
-  
-  if (myGame)
-  {
-    // At the moment, 1 and 0 are the only choices supported in the GUI, though the system could
-    // support more.
-    if ( GadgetCheckBoxIsChecked( checkboxLimitSuperweapons ) )
-    {
-      myGame->setSuperweaponRestriction( 1 );
-    }
-    else
-    {
-      myGame->setSuperweaponRestriction( 0 );
-    }
-    myGame->resetAccepted();
-    
-    if (myGame->amIHost())
-    {
-      if (!s_isIniting)
-      {
-        // send around a new slotlist
-        TheLAN->RequestGameOptions(GenerateGameOptionsString(), true);
-        lanUpdateSlotList(); // Update the accepted button UI
-      }
-    }
-  }
+	LANGameInfo *myGame = TheLAN->GetMyGame();
+	if (!myGame || !comboBoxGameSpeed)
+		return;
+
+	// Only the host may change game speed; for non-hosts the combo is also
+	// disabled at init time, but a defensive check here keeps the GameInfo
+	// untouched if anything ever calls this on a client.
+	if (!myGame->amIHost())
+		return;
+
+	Int selIndex = -1;
+	GadgetComboBoxGetSelectedPos(comboBoxGameSpeed, &selIndex);
+	if (selIndex < 0)
+		return;
+
+	const Int newFps = static_cast<Int>(reinterpret_cast<uintptr_t>(
+		GadgetComboBoxGetItemData(comboBoxGameSpeed, selIndex)));
+	if (newFps <= 0)
+		return;
+
+	myGame->setGameFps(newFps);
+	myGame->resetAccepted();
+
+	if (!s_isIniting)
+	{
+		// Re-broadcast options so all joiners pick up the new GFPS=N value via
+		// ParseAsciiStringToGameInfo on their side.
+		TheLAN->RequestGameOptions(GenerateGameOptionsString(), true);
+		lanUpdateSlotList();
+	}
 }
 
-void lanUpdateSlotList( void )
+static void handleSuperweaponLimitSelection()
+{
+	LANGameInfo *myGame = TheLAN->GetMyGame();
+	if (!myGame || !comboBoxSuperweaponLimit)
+		return;
+
+	if (!myGame->amIHost())
+		return;
+
+	Int selIndex = -1;
+	GadgetComboBoxGetSelectedPos(comboBoxSuperweaponLimit, &selIndex);
+	if (selIndex < 0)
+		return;
+
+	const Int newLimit = static_cast<Int>(reinterpret_cast<uintptr_t>(
+		GadgetComboBoxGetItemData(comboBoxSuperweaponLimit, selIndex)));
+	// 0 is a legal choice: it means "superweapons disabled". Negative values
+	// can only happen from a malformed item-data payload, so still reject them.
+	if (newLimit < 0)
+		return;
+
+	myGame->setSuperweaponRestriction(static_cast<UnsignedShort>(newLimit));
+	myGame->resetAccepted();
+
+	if (!s_isIniting)
+	{
+		TheLAN->RequestGameOptions(GenerateGameOptionsString(), true);
+		lanUpdateSlotList();
+	}
+}
+
+void lanUpdateSlotList()
 {
 	if(!AreSlotListUpdatesEnabled() || s_isIniting)
 		return;
 	UpdateSlotList( TheLAN->GetMyGame(), comboBoxPlayer, comboBoxColor,
 		comboBoxPlayerTemplate, comboBoxTeam, buttonAccept, buttonStart, buttonMapStartPosition);
-	
+
 	updateMapStartSpots(TheLAN->GetMyGame(), buttonMapStartPosition);
+
+	// Swatch / combo visibility toggle. For HUMAN slots in this
+	// (network) game we hide the color combo and show a static
+	// colored swatch instead — humans set their color in the
+	// launcher via -color, the in-game dropdown is read-only for
+	// them. AI / open / closed slots keep the combo so the host
+	// can pick bot colors normally. Skirmish has its own update
+	// path and doesn't go through here, so the combo stays
+	// editable for skirmish humans (which is what we want — no
+	// launcher in skirmish).
+	{
+		LANGameInfo *game = TheLAN->GetMyGame();
+		for (Int i = 0; i < MAX_SLOTS; ++i)
+		{
+			if (!comboBoxColor[i] || !colorSwatch[i] || !game)
+				continue;
+			GameSlot *slot = game->getSlot(i);
+			Bool isHumanSlot = slot && slot->isHuman();
+			if (isHumanSlot)
+			{
+				comboBoxColor[i]->winHide(TRUE);
+				colorSwatch[i]->winHide(FALSE);
+				// Recolor the swatch from the slot's current
+				// color. resolveSlotColor pads the alpha so the
+				// gadget renderer gets a fully-opaque ARGB.
+				// Random sentinel (-1) shows as a white square
+				// until the host actually starts the game and
+				// populateRandomSideAndColor picks a real RGB.
+				Color swatchColor = (slot->getColor() >= 0)
+					? MultiplayerSettings::resolveSlotColor(slot->getColor())
+					: (Color)0xFFFFFFFFu;
+				GadgetButtonSetEnabledColor(colorSwatch[i], swatchColor);
+				GadgetButtonSetEnabledSelectedColor(colorSwatch[i], swatchColor);
+			}
+			else
+			{
+				colorSwatch[i]->winHide(TRUE);
+				comboBoxColor[i]->winHide(FALSE);
+			}
+		}
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
 /** Initialize the Gadgets Options Menu */
 //-------------------------------------------------------------------------------------------------
-void InitLanGameGadgets( void )
+void InitLanGameGadgets()
 {
 	//Initialize the gadget IDs
-	parentLanGameOptionsID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:LanGameOptionsMenuParent" ) );
-	buttonBackID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:ButtonBack" ) );
-	buttonStartID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:ButtonStart" ) );
-	textEntryChatID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:TextEntryChat" ) );
-	textEntryMapDisplayID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:TextEntryMapDisplay" ) );
-	listboxChatWindowLanGameID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:ListboxChatWindowLanGame" ) );
-	buttonEmoteID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:ButtonEmote" ) );
-	buttonSelectMapID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:ButtonSelectMap" ) );
-  checkboxLimitSuperweaponsID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:CheckboxLimitSuperweapons" ) );
-  comboBoxStartingCashID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:ComboBoxStartingCash" ) );
-	windowMapID = TheNameKeyGenerator->nameToKey( AsciiString( "LanGameOptionsMenu.wnd:MapWindow" ) );
+	parentLanGameOptionsID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:LanGameOptionsMenuParent" );
+	buttonBackID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:ButtonBack" );
+	buttonStartID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:ButtonStart" );
+	textEntryChatID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:TextEntryChat" );
+	textEntryMapDisplayID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:TextEntryMapDisplay" );
+	listboxChatWindowLanGameID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:ListboxChatWindowLanGame" );
+	buttonEmoteID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:ButtonEmote" );
+	buttonSelectMapID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:ButtonSelectMap" );
+  comboBoxSuperweaponLimitID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:ComboBoxSuperweaponLimit" );
+  comboBoxStartingCashID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:ComboBoxStartingCash" );
+  comboBoxGameSpeedID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:ComboBoxGameSpeed" );
+	windowMapID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:MapWindow" );
 
 	// Initialize the pointers to our gadgets
-	parentLanGameOptions = TheWindowManager->winGetWindowFromId( NULL, parentLanGameOptionsID );
+	parentLanGameOptions = TheWindowManager->winGetWindowFromId( nullptr, parentLanGameOptionsID );
 	DEBUG_ASSERTCRASH(parentLanGameOptions, ("Could not find the parentLanGameOptions"));
 	buttonEmote = TheWindowManager->winGetWindowFromId( parentLanGameOptions,buttonEmoteID  );
 	DEBUG_ASSERTCRASH(buttonEmote, ("Could not find the buttonEmote"));
@@ -712,11 +886,15 @@ void InitLanGameGadgets( void )
 	DEBUG_ASSERTCRASH(textEntryChat, ("Could not find the textEntryChat"));
 	textEntryMapDisplay = TheWindowManager->winGetWindowFromId( parentLanGameOptions, textEntryMapDisplayID );
 	DEBUG_ASSERTCRASH(textEntryMapDisplay, ("Could not find the textEntryMapDisplay"));
-  checkboxLimitSuperweapons = TheWindowManager->winGetWindowFromId( parentLanGameOptions, checkboxLimitSuperweaponsID );
-  DEBUG_ASSERTCRASH(checkboxLimitSuperweapons, ("Could not find the checkboxLimitSuperweapons"));
+  comboBoxSuperweaponLimit = TheWindowManager->winGetWindowFromId( parentLanGameOptions, comboBoxSuperweaponLimitID );
+  DEBUG_ASSERTCRASH(comboBoxSuperweaponLimit, ("Could not find the comboBoxSuperweaponLimit"));
+  PopulateSuperweaponLimitComboBox(comboBoxSuperweaponLimit, TheLAN->GetMyGame());
   comboBoxStartingCash = TheWindowManager->winGetWindowFromId( parentLanGameOptions, comboBoxStartingCashID );
   DEBUG_ASSERTCRASH(comboBoxStartingCash, ("Could not find the comboBoxStartingCash"));
 	PopulateStartingCashComboBox(comboBoxStartingCash, TheLAN->GetMyGame());
+  comboBoxGameSpeed = TheWindowManager->winGetWindowFromId( parentLanGameOptions, comboBoxGameSpeedID );
+  DEBUG_ASSERTCRASH(comboBoxGameSpeed, ("Could not find the comboBoxGameSpeed"));
+	PopulateGameSpeedComboBox(comboBoxGameSpeed, TheLAN->GetMyGame());
 
 	windowMap = TheWindowManager->winGetWindowFromId( parentLanGameOptions,windowMapID  );
 	DEBUG_ASSERTCRASH(windowMap, ("Could not find the LanGameOptionsMenu.wnd:MapWindow" ));
@@ -724,11 +902,8 @@ void InitLanGameGadgets( void )
 	Int localSlotNum = TheLAN->GetMyGame()->getLocalSlotNum();
 	DEBUG_ASSERTCRASH(localSlotNum >= 0, ("Bad slot number!"));
 
-	//Added By Sadullah Nader
 	//Tooltip function is being set for techBuildings, and supplyDocks
-
 	windowMap->winSetTooltipFunc(MapSelectorTooltip);
-	//End Add
 
 	for (Int i = 0; i < MAX_SLOTS; i++)
 	{
@@ -739,11 +914,7 @@ void InitLanGameGadgets( void )
 		GadgetComboBoxReset(comboBoxPlayer[i]);
 		GadgetComboBoxGetEditBox(comboBoxPlayer[i])->winSetTooltipFunc(playerTooltip);
 
-		if(localSlotNum == i)
-		{
-			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheLAN->GetMyName(),white);
-		}
-		else
+		if(localSlotNum != i)
 		{
 			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:Open"),white);
 			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:Closed"),white);
@@ -765,7 +936,69 @@ void InitLanGameGadgets( void )
 		DEBUG_ASSERTCRASH(comboBoxColor[i], ("Could not find the comboBoxColor[%d]",i ));
 		PopulateColorComboBox(i, comboBoxColor, TheLAN->GetMyGame());
 		GadgetComboBoxSetSelectedPos(comboBoxColor[i], 0);
-		
+
+		// Programmatically create a per-slot color SWATCH that
+		// REPLACES the dropdown for human players in network
+		// games. The swatch is a solid-colored RECTANGLE the
+		// exact size of the combo box it covers, with a thin
+		// game-blue border so it visually matches the rest of
+		// the UI (text entries, panel frames, etc.). It's hidden
+		// at init; lanUpdateSlotList toggles its visibility +
+		// recolors it from the slot's color each tick.
+		if (comboBoxColor[i])
+		{
+			// Use the combo's PARENT as the swatch's parent, and
+			// the combo's RELATIVE position (winGetPosition is
+			// relative to the parent) so the two widgets share
+			// the same coordinate origin and the swatch lands
+			// directly over the combo regardless of how the
+			// .wnd nests the chat panel inside the layout root.
+			GameWindow *cbParent = comboBoxColor[i]->winGetParent();
+			Int cbX = 0, cbY = 0, cbW = 0, cbH = 0;
+			comboBoxColor[i]->winGetPosition(&cbX, &cbY);
+			comboBoxColor[i]->winGetSize(&cbW, &cbH);
+
+			WinInstanceData swInst;
+			swInst.init();
+			BitSet(swInst.m_style, GWS_PUSH_BUTTON);
+			// Status flags: ENABLED so the gadget uses the enabled
+			// draw data (where our color setter writes); NO_INPUT
+			// so it can't be clicked / hovered (purely a display).
+			// We deliberately do NOT set WIN_STATUS_IMAGE — that
+			// flag tells gogoGadgetPushButton to install the
+			// image-based draw func, which renders nothing when no
+			// image is assigned. The plain push-button draw func
+			// honors winSetEnabledColor and gives us a solid fill.
+			colorSwatch[i] = TheWindowManager->gogoGadgetPushButton(
+				cbParent ? cbParent : parentLanGameOptions,
+				WIN_STATUS_ENABLED | WIN_STATUS_NO_INPUT,
+				cbX, cbY,
+				cbW, cbH,
+				&swInst, nullptr, TRUE);
+
+			if (colorSwatch[i])
+			{
+				// Default white fill until lanUpdateSlotList runs.
+				// Set both Enabled[0] (background) and Enabled[1]
+				// (selected/highlight overlay) so the swatch reads
+				// solid regardless of which sub-state the gadget
+				// renderer happens to use this frame.
+				//
+				// The border color is the engine's UI accent blue
+				// (matches the chat panel frame, the LAN-game card
+				// hairlines, etc.) so the swatch reads as part of
+				// the same visual system as the other slot row
+				// widgets — a colored rectangle with a thin blue
+				// frame, exactly like the in-game text entries.
+				const Color SwatchBorder = GameMakeColor(60, 100, 180, 255);
+				GadgetButtonSetEnabledColor(colorSwatch[i], 0xFFFFFFFFu);
+				GadgetButtonSetEnabledSelectedColor(colorSwatch[i], 0xFFFFFFFFu);
+				GadgetButtonSetEnabledBorderColor(colorSwatch[i], SwatchBorder);
+				GadgetButtonSetEnabledSelectedBorderColor(colorSwatch[i], SwatchBorder);
+				colorSwatch[i]->winHide(TRUE);
+			}
+		}
+
 		tmpString.format("LanGameOptionsMenu.wnd:ComboBoxPlayerTemplate%d", i);
 		comboBoxPlayerTemplateID[i] = TheNameKeyGenerator->nameToKey( tmpString );
 		comboBoxPlayerTemplate[i] = TheWindowManager->winGetWindowFromId( parentLanGameOptions, comboBoxPlayerTemplateID[i] );
@@ -783,13 +1016,12 @@ void InitLanGameGadgets( void )
 		PopulateTeamComboBox(i, comboBoxTeam, TheLAN->GetMyGame());
 
 		tmpString.clear();
-		tmpString.format("LanGameOptionsMenu.wnd:ButtonAccept%d", i); 
+		tmpString.format("LanGameOptionsMenu.wnd:ButtonAccept%d", i);
 		buttonAcceptID[i] = TheNameKeyGenerator->nameToKey( tmpString );
 		buttonAccept[i] = TheWindowManager->winGetWindowFromId( parentLanGameOptions, buttonAcceptID[i] );
 		DEBUG_ASSERTCRASH(buttonAccept[i], ("Could not find the buttonAccept[%d]",i ));
-		//Added by Saad for the tooltips on the MultiPlayer icons
 		buttonAccept[i]->winSetTooltipFunc(gameAcceptTooltip);
-//		
+//
 //		tmpString.format("LanGameOptionsMenu.wnd:ButtonStartPosition%d", i);
 //		buttonStartPositionID[i] = TheNameKeyGenerator->nameToKey( tmpString );
 //		buttonStartPosition[i] = TheWindowManager->winGetWindowFromId( parentLanGameOptions, buttonStartPositionID[i] );
@@ -805,31 +1037,37 @@ void InitLanGameGadgets( void )
 	}
 	if( buttonAccept[0] )
 		GadgetButtonSetEnabledColor(buttonAccept[0], acceptTrueColor );
-	
+
 }
 
-void DeinitLanGameGadgets( void )
+void DeinitLanGameGadgets()
 {
-	parentLanGameOptions = NULL;
-	buttonEmote = NULL;
-	buttonSelectMap = NULL;
-	buttonStart = NULL;
-	buttonBack = NULL;
-	listboxChatWindowLanGame = NULL;
-	textEntryChat = NULL;
-	textEntryMapDisplay = NULL;
-  checkboxLimitSuperweapons = NULL;
-  comboBoxStartingCash = NULL;
-	windowMap = NULL;
+	parentLanGameOptions = nullptr;
+	buttonEmote = nullptr;
+	buttonSelectMap = nullptr;
+	buttonStart = nullptr;
+	buttonBack = nullptr;
+	listboxChatWindowLanGame = nullptr;
+	textEntryChat = nullptr;
+	textEntryMapDisplay = nullptr;
+  comboBoxSuperweaponLimit = nullptr;
+  comboBoxStartingCash = nullptr;
+  comboBoxGameSpeed = nullptr;
+	if (windowMap)
+	{
+		windowMap->winSetUserData(nullptr);
+		windowMap = nullptr;
+	}
 	for (Int i = 0; i < MAX_SLOTS; i++)
 	{
-		comboBoxPlayer[i] = NULL;
-		comboBoxColor[i] = NULL;
-		comboBoxPlayerTemplate[i] = NULL;
-		comboBoxTeam[i] = NULL;
-		buttonAccept[i] = NULL;
-//		buttonStartPosition[i] = NULL;
-		buttonMapStartPosition[i] = NULL;
+		comboBoxPlayer[i] = nullptr;
+		comboBoxColor[i] = nullptr;
+		colorSwatch[i] = nullptr;
+		comboBoxPlayerTemplate[i] = nullptr;
+		comboBoxTeam[i] = nullptr;
+		buttonAccept[i] = nullptr;
+//		buttonStartPosition[i] = nullptr;
+		buttonMapStartPosition[i] = nullptr;
 	}
 }
 
@@ -842,7 +1080,7 @@ void LanGameOptionsMenuInit( WindowLayout *layout, void *userData )
 	{
 		// If we init while the game is in progress, we are really returning to the menu
 		// after the game.  So, we pop the menu and go back to the lobby.  Whee!
-		DEBUG_LOG(("Popping to lobby after a game!\n"));
+		DEBUG_LOG(("Popping to lobby after a game!"));
 		TheShell->popImmediate();
 		return;
 	}
@@ -859,7 +1097,7 @@ void LanGameOptionsMenuInit( WindowLayout *layout, void *userData )
 
 	// Make sure the text fields are clear
 	GadgetListBoxReset( listboxChatWindowLanGame );
-	GadgetTextEntrySetText(textEntryChat, UnicodeString::TheEmptyString);	
+	GadgetTextEntrySetText(textEntryChat, UnicodeString::TheEmptyString);
 
 	//The dialog needs to react differently depending on whether it's the host or not.
 	TheMapCache->updateCache();
@@ -869,12 +1107,31 @@ void LanGameOptionsMenuInit( WindowLayout *layout, void *userData )
 		LANGameInfo *game = TheLAN->GetMyGame();
 		LANGameSlot *slot = game->getLANSlot(0);
 		LANPreferences pref;
-		slot->setColor( pref.getPreferredColor() );
+
+		// Discombobulator: launcher-supplied house color takes
+		// precedence over the LANPreferences saved value. Slot color
+		// is now a raw 24-bit RGB int (-1 = random); the value flows
+		// through the standard slot wire encoding to remote peers
+		// unchanged. Same path for the cosmetic shader id.
+		extern Bool g_launcherPlayerColorSet;
+		extern UnsignedInt g_launcherPlayerColor;
+		extern Int g_launcherPlayerShaderId;
+		if (g_launcherPlayerColorSet)
+			slot->setColor( MultiplayerSettings::packSlotColor(g_launcherPlayerColor) );
+		else
+			slot->setColor( pref.getPreferredColor() );
+
+		slot->setShaderId( g_launcherPlayerShaderId );
+
 		slot->setPlayerTemplate( pref.getPreferredFaction() );
 		slot->setNATBehavior(FirewallHelperClass::FIREWALL_TYPE_SIMPLE);
 		game->setMap( pref.getPreferredMap() );
     game->setStartingCash( pref.getStartingCash() );
-    game->setSuperweaponRestriction( pref.getSuperweaponRestricted() ? 1 : 0 );
+    // The old pref was a Bool ("limit / don't limit"). With the new
+    // per-team combo model the value is a count, so default to 3
+    // (the GameInfo::reset baseline) and let the host change it via the
+    // ComboBoxSuperweaponLimit dropdown.
+    game->setSuperweaponRestriction( 3 );
 		AsciiString lowerMap = pref.getPreferredMap();
 		lowerMap.toLower();
 		std::map<AsciiString, MapMetaData>::iterator it = TheMapCache->find(lowerMap);
@@ -891,20 +1148,47 @@ void LanGameOptionsMenuInit( WindowLayout *layout, void *userData )
 		lanUpdateSlotList();
 		updateGameOptions();
 		start = 1; // leave my combo boxes usable
+
+		comboBoxPlayer[0]->winEnable(FALSE);
 	}
 	else
 	{
 
-		//DEBUG_LOG(("LanGameOptionsMenuInit(): map is %s\n", TheLAN->GetMyGame()->getMap().str()));
+		//DEBUG_LOG(("LanGameOptionsMenuInit(): map is %s", TheLAN->GetMyGame()->getMap().str()));
 		buttonStart->winSetText(TheGameText->fetch("GUI:Accept"));
 		buttonSelectMap->winEnable( FALSE );
-    checkboxLimitSuperweapons->winEnable( FALSE ); // Can look but only host can touch
-    comboBoxStartingCash->winEnable( FALSE );      // Ditto
+    comboBoxSuperweaponLimit->winEnable( FALSE ); // Can look but only host can touch
+    comboBoxStartingCash->winEnable( FALSE );     // Ditto
+    comboBoxGameSpeed->winEnable( FALSE );        // Host-only, see handleGameSpeedSelection
 		TheLAN->GetMyGame()->setMapCRC( TheLAN->GetMyGame()->getMapCRC() );		// force a recheck
 		TheLAN->GetMyGame()->setMapSize( TheLAN->GetMyGame()->getMapSize() ); // of if we have the map
 		TheLAN->RequestHasMap();
 		lanUpdateSlotList();
 		updateGameOptions();
+
+		// Discombobulator: launcher-supplied house color for joiners.
+		// Joiners can't write directly to their slot — the host owns
+		// authoritative slot state and broadcasts updates. So we ask
+		// the host to apply the change via the standard "Color=" key
+		// over RequestGameOptions; the host's LANAPICallbacks handler
+		// accepts any 24-bit RGB int and rebroadcasts the new slot
+		// list to every peer.
+		extern Bool g_launcherPlayerColorSet;
+		extern UnsignedInt g_launcherPlayerColor;
+		if (g_launcherPlayerColorSet)
+		{
+			AsciiString options;
+			options.format("Color=%d",
+				MultiplayerSettings::packSlotColor(g_launcherPlayerColor));
+			TheLAN->RequestGameOptions(options, true);
+		}
+		// Shader id propagation TODO: there's no "Shader=" key in
+		// the host's options handler yet, so for now joiner shader
+		// ids only round-trip through the slot list once the host
+		// itself reads them from a future broadcast or the joiner
+		// gets promoted to host. Wire format already carries the
+		// field; the missing piece is a host-side handler analogous
+		// to the "Color=" path. Tracked as a follow-up.
 	}
 	for (Int i = start; i < MAX_SLOTS; ++i)
 	{
@@ -926,7 +1210,7 @@ void LanGameOptionsMenuInit( WindowLayout *layout, void *userData )
 //
 	// Show the Menu
 	layout->hide( FALSE );
-	
+
 	// Set Keyboard to Main Parent
 	TheWindowManager->winSetFocus( parentLanGameOptions );
 
@@ -943,13 +1227,13 @@ void LanGameOptionsMenuInit( WindowLayout *layout, void *userData )
 
 	// animate controls
 	//TheShell->registerWithAnimateManager(buttonBack, WIN_ANIMATION_SLIDE_RIGHT, TRUE, 1);
-	
-}// void LanGameOptionsMenuInit( WindowLayout *layout, void *userData )
+
+}
 
 //-------------------------------------------------------------------------------------------------
 /** Update options on screen */
 //-------------------------------------------------------------------------------------------------
-void updateGameOptions( void )
+void updateGameOptions()
 {
 	LANGameInfo *theGame = TheLAN->GetMyGame();
 	UnicodeString mapDisplayName;
@@ -975,11 +1259,34 @@ void updateGameOptions( void )
 			LanPositionStartSpots();
 		GadgetStaticTextSetText(textEntryMapDisplay, mapDisplayName);
 
-    GadgetCheckBoxSetChecked( checkboxLimitSuperweapons, theGame->getSuperweaponRestriction() != 0 );
-		Int itemCount = GadgetComboBoxGetLength(comboBoxStartingCash);
-    for ( Int index = 0; index < itemCount; index++ )
+    // Mirror the host's superweapon limit into the combo. If the host picked a
+    // value not in our preset list, repopulate so the dropdown shows it.
+    if (comboBoxSuperweaponLimit)
     {
-      Int value  = (Int)GadgetComboBoxGetItemData(comboBoxStartingCash, index);
+      Int swItemCount = GadgetComboBoxGetLength(comboBoxSuperweaponLimit);
+      Int swIndex = 0;
+      Bool swFound = FALSE;
+      for ( ; swIndex < swItemCount; ++swIndex )
+      {
+        Int value = static_cast<Int>(reinterpret_cast<intptr_t>(GadgetComboBoxGetItemData(comboBoxSuperweaponLimit, swIndex)));
+        if (value == (Int)theGame->getSuperweaponRestriction())
+        {
+          GadgetComboBoxSetSelectedPos(comboBoxSuperweaponLimit, swIndex, TRUE);
+          swFound = TRUE;
+          break;
+        }
+      }
+      if (!swFound)
+      {
+        PopulateSuperweaponLimitComboBox(comboBoxSuperweaponLimit, theGame);
+      }
+    }
+
+		Int itemCount = GadgetComboBoxGetLength(comboBoxStartingCash);
+    Int index = 0;
+    for ( ; index < itemCount; index++ )
+    {
+      Int value  = static_cast<Int>(reinterpret_cast<intptr_t>(GadgetComboBoxGetItemData(comboBoxStartingCash, index)));
       if ( value == theGame->getStartingCash().countMoney() )
       {
         GadgetComboBoxSetSelectedPos(comboBoxStartingCash, index, TRUE);
@@ -988,9 +1295,56 @@ void updateGameOptions( void )
     }
 
     DEBUG_ASSERTCRASH( index < itemCount, ("Could not find new starting cash amount %d in list", theGame->getStartingCash().countMoney() ) );
+
+    // Mirror the host's chosen game speed into the combo. If the host picked a
+    // value not in our preset list (manual override on their end), repopulate
+    // so the dropdown shows the actual value instead of silently snapping.
+    if (comboBoxGameSpeed)
+    {
+      Int speedItemCount = GadgetComboBoxGetLength(comboBoxGameSpeed);
+      Int speedIndex = 0;
+      Bool found = FALSE;
+      for ( ; speedIndex < speedItemCount; ++speedIndex )
+      {
+        Int value = static_cast<Int>(reinterpret_cast<intptr_t>(GadgetComboBoxGetItemData(comboBoxGameSpeed, speedIndex)));
+        if (value == theGame->getGameFps())
+        {
+          GadgetComboBoxSetSelectedPos(comboBoxGameSpeed, speedIndex, TRUE);
+          found = TRUE;
+          break;
+        }
+      }
+      if (!found)
+      {
+        PopulateGameSpeedComboBox(comboBoxGameSpeed, theGame);
+      }
+    }
 	}
 }
 
+
+//-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+void setLANPlayerTooltip(LANPlayer* player)
+{
+	UnicodeString tooltip;
+
+	if (!player->getLogin().isEmpty() || !player->getHost().isEmpty())
+	{
+		tooltip.format(TheGameText->fetch("TOOLTIP:LANPlayer"), player->getLogin().str(), player->getHost().str());
+	}
+
+#if defined(RTS_DEBUG)
+	UnicodeString ip;
+	ip.format(L" - %d.%d.%d.%d", PRINTF_IP_AS_4_INTS(player->getIP()));
+	tooltip.concat(ip);
+#endif
+
+	if (!tooltip.isEmpty())
+	{
+		TheMouse->setCursorTooltip( tooltip );
+	}
+}
 
 
 //-------------------------------------------------------------------------------------------------
@@ -999,23 +1353,23 @@ void updateGameOptions( void )
 static void shutdownComplete( WindowLayout *layout )
 {
 	DeinitLanGameGadgets();
-	textEntryMapDisplay = NULL;
+	textEntryMapDisplay = nullptr;
 	LANisShuttingDown = false;
 
 	// hide the layout
 	layout->hide( TRUE );
 
 	// our shutdown is complete
-	TheShell->shutdownComplete( layout, (LANnextScreen != NULL) );
+	TheShell->shutdownComplete( layout, (LANnextScreen != nullptr) );
 
-	if (LANnextScreen != NULL)
+	if (LANnextScreen != nullptr)
 	{
 		TheShell->push(LANnextScreen);
 	}
 
-	LANnextScreen = NULL;
+	LANnextScreen = nullptr;
 
-}  // end if
+}
 
 //-------------------------------------------------------------------------------------------------
 /** Lan Game Options menu shutdown method */
@@ -1023,7 +1377,7 @@ static void shutdownComplete( WindowLayout *layout )
 void LanGameOptionsMenuShutdown( WindowLayout *layout, void *userData )
 {
 	TheMouse->setCursor(Mouse::ARROW);
-	TheMouse->setMouseText(UnicodeString::TheEmptyString,NULL,NULL);
+	TheMouse->setMouseText(UnicodeString::TheEmptyString,nullptr,nullptr);
 	EnableSlotListUpdates(FALSE);
 	LANisShuttingDown = true;
 
@@ -1035,7 +1389,7 @@ void LanGameOptionsMenuShutdown( WindowLayout *layout, void *userData )
 		shutdownComplete( layout );
 		return;
 
-	}  //end if
+	}
 
 	TheShell->reverseAnimatewindow();
 	TheTransitionHandler->reverse("LanGameOptionsFade");
@@ -1052,7 +1406,7 @@ void LanGameOptionsMenuShutdown( WindowLayout *layout, void *userData )
 	// our shutdown is complete
 	TheShell->shutdownComplete( layout );
 	*/
-}  // void LanGameOptionsMenuShutdown( WindowLayout *layout, void *userData )
+}
 
 //-------------------------------------------------------------------------------------------------
 /** Lan Game Options menu update method */
@@ -1062,7 +1416,37 @@ void LanGameOptionsMenuUpdate( WindowLayout * layout, void *userData)
 	if(LANisShuttingDown && TheShell->isAnimFinished() && TheTransitionHandler->isFinished())
 		shutdownComplete(layout);
 	//TheLAN->update(); // this is handled in the lobby
-}// void LanGameOptionsMenuUpdate( WindowLayout * layout, void *userData)
+
+	// Animate per-slot color swatches for any human player whose
+	// profile shader effect is non-stock. lanUpdateSlotList sets the
+	// stock RGB on slot events; this tick overlays the time-driven
+	// modulation so the swatch reads the same as the launcher's
+	// animated preview tile (and similar in spirit to what the HLSL
+	// renders on units in-world).
+	LANGameInfo *game = TheLAN ? TheLAN->GetMyGame() : nullptr;
+	if (game)
+	{
+		UnsignedInt now = timeGetTime();
+		for (Int i = 0; i < MAX_SLOTS; ++i)
+		{
+			GameWindow *swatch = colorSwatch[i];
+			if (!swatch || swatch->winIsHidden())
+				continue;
+			GameSlot *slot = game->getSlot(i);
+			if (!slot || !slot->isHuman())
+				continue;
+			Int shaderId = slot->getShaderId();
+			if (shaderId == 0)
+				continue;
+			Int slotColor = slot->getColor();
+			if (slotColor < 0)
+				continue;
+			Color animated = MultiplayerSettings::resolveSlotColorWithEffect(slotColor, shaderId, now);
+			GadgetButtonSetEnabledColor(swatch, animated);
+			GadgetButtonSetEnabledSelectedColor(swatch, animated);
+		}
+	}
+}
 
 //-------------------------------------------------------------------------------------------------
 /** Lan Game Options menu input callback */
@@ -1070,7 +1454,7 @@ void LanGameOptionsMenuUpdate( WindowLayout * layout, void *userData)
 WindowMsgHandledType LanGameOptionsMenuInput( GameWindow *window, UnsignedInt msg,
 																			 WindowMsgData mData1, WindowMsgData mData2 )
 {
-	switch( msg ) 
+	switch( msg )
 	{
 
 		// --------------------------------------------------------------------------------------------
@@ -1090,49 +1474,52 @@ WindowMsgHandledType LanGameOptionsMenuInput( GameWindow *window, UnsignedInt ms
 					// send a simulated selected event to the parent window of the
 					// back/exit button
 					//
-					if( BitTest( state, KEY_STATE_UP ) )
+					if( BitIsSet( state, KEY_STATE_UP ) )
 					{
-						TheWindowManager->winSendSystemMsg( window, GBM_SELECTED, 
+						TheWindowManager->winSendSystemMsg( window, GBM_SELECTED,
 																							(WindowMsgData)buttonBack, buttonBackID );
-					}  // end if
+					}
 					// don't let key fall through anywhere else
 					return MSG_HANDLED;
-				}  // end escape
-			}  // end switch( key )
-		}  // end char
-	}  // end switch( msg )
+				}
+			}
+		}
+	}
 	return MSG_IGNORED;
-}//WindowMsgHandledType LanGameOptionsMenuInput( GameWindow *window, UnsignedInt msg,
+}
 
 
 //-------------------------------------------------------------------------------------------------
 /** Lan Game Options menu window system callback */
 //-------------------------------------------------------------------------------------------------
-WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt msg, 
+WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 														 WindowMsgData mData1, WindowMsgData mData2 )
 {
 	UnicodeString txtInput;
 	switch( msg )
 	{
-		//-------------------------------------------------------------------------------------------------	
+		//-------------------------------------------------------------------------------------------------
 		case GWM_CREATE:
 			{
 				break;
-			} // case GWM_DESTROY:
+			}
 		//-------------------------------------------------------------------------------------------------
 		case GWM_DESTROY:
 			{
+				if (windowMap)
+					windowMap->winSetUserData(nullptr);
+
 				break;
-			} // case GWM_DESTROY:
+			}
 		//-------------------------------------------------------------------------------------------------
 		case GWM_INPUT_FOCUS:
-			{	
+			{
 				// if we're givin the opportunity to take the keyboard focus we must say we want it
 				if( mData1 == TRUE )
 					*(Bool *)mData2 = TRUE;
 
 				return MSG_HANDLED;
-			}//case GWM_INPUT_FOCUS:
+			}
 		//-------------------------------------------------------------------------------------------------
 		case GCM_SELECTED:
 			{
@@ -1145,6 +1532,14 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
         if ( controlID == comboBoxStartingCashID )
         {
           handleStartingCashSelection();
+        }
+        else if ( controlID == comboBoxGameSpeedID )
+        {
+          handleGameSpeedSelection();
+        }
+        else if ( controlID == comboBoxSuperweaponLimitID )
+        {
+          handleSuperweaponLimitSelection();
         }
         else
         {
@@ -1200,7 +1595,7 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
           }
 				}
         break;
-			}// case GCM_SELECTED:
+			}
 		//-------------------------------------------------------------------------------------------------
 		case GBM_SELECTED:
 			{
@@ -1214,13 +1609,13 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
 					if( mapSelectLayout )
 						{
 							mapSelectLayout->destroyWindows();
-							mapSelectLayout->deleteInstance();
-							mapSelectLayout = NULL;
+							deleteInstance(mapSelectLayout);
+							mapSelectLayout = nullptr;
 						}
 					TheLAN->RequestGameLeave();
 					//TheShell->pop();
 
-				} //if ( controlID == buttonBack )				
+				}
 				else if ( controlID == buttonEmoteID )
 				{
 					// read the user's input
@@ -1232,12 +1627,12 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
 					// Echo the user's input to the chat window
 					if (!txtInput.isEmpty())
 						TheLAN->RequestChat(txtInput, LANAPIInterface::LANCHAT_EMOTE);
-				} //if ( controlID == buttonEmote )
+				}
 				else if ( controlID == buttonSelectMapID )
 				{
 					//buttonBack->winEnable( false );
-				
-					mapSelectLayout = TheWindowManager->winCreateLayout( AsciiString( "Menus/LanMapSelectMenu.wnd" ) );
+
+					mapSelectLayout = TheWindowManager->winCreateLayout( "Menus/LanMapSelectMenu.wnd" );
 					mapSelectLayout->runInit();
 					mapSelectLayout->hide( FALSE );
 					mapSelectLayout->bringForward();
@@ -1258,13 +1653,9 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
 						// Disable the accept button
 						EnableAcceptControls(TRUE, TheLAN->GetMyGame(), comboBoxPlayer, comboBoxColor, comboBoxPlayerTemplate,
 							comboBoxTeam, buttonAccept, buttonStart, buttonMapStartPosition);
-						
+
 					}
 				}
-        else if ( controlID == checkboxLimitSuperweaponsID )
-        {
-          handleLimitSuperweaponsClick();
-        }
 				else
 				{
 					for (Int i = 0; i < MAX_SLOTS; i++)
@@ -1309,7 +1700,7 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
 				}
 
 				break;
-			}// case GBM_SELECTED:
+			}
 		//-------------------------------------------------------------------------------------------------
 		case GBM_SELECTED_RIGHT:
 		{
@@ -1343,7 +1734,7 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
 						}
 					}
 				}
-			}					
+			}
 			break;
 		}
 		//-------------------------------------------------------------------------------------------------
@@ -1358,7 +1749,7 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
 				// send it to the other clients on the lan
 				if ( controlID == textEntryChatID )
 				{
-					
+
 					// read the user's input
 					txtInput.set(GadgetTextEntryGetText( textEntryChat ));
 					// Clear the text entry line
@@ -1369,15 +1760,15 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
 					if (!txtInput.isEmpty())
 						TheLAN->RequestChat(txtInput, LANAPIInterface::LANCHAT_NORMAL);
 
-				}// if ( controlID == textEntryChatID )
+				}
 				break;
 			}
 		//-------------------------------------------------------------------------------------------------
 		default:
 			return MSG_IGNORED;
-	}//Switch
+	}
 	return MSG_HANDLED;
-}//WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt msg, 
+}
 
 //-------------------------------------------------------------------------------------------------
 /** Utility FUnction used as a bridge from other windows to this one */
@@ -1393,12 +1784,12 @@ void PostToLanGameOptions( PostToLanGameType post )
 		case SEND_GAME_OPTS:
 		{
 			LANGameInfo *game = TheLAN->GetMyGame();
-			game->resetAccepted();			
-			updateGameOptions();		
+			game->resetAccepted();
+			updateGameOptions();
 			lanUpdateSlotList();
-			
+
 			//buttonBack->winEnable( true );
-			
+
 			for(Int i = 0; i < MAX_SLOTS; ++i)
 			{
 				game->getSlot(i)->setStartPos(-1);
@@ -1406,7 +1797,7 @@ void PostToLanGameOptions( PostToLanGameType post )
 
 			TheLAN->RequestGameOptions(GenerateGameOptionsString(), true);
 			break;
-		}		//-------------------------------------------------------------------------------------------------
+		}
 		case MAP_BACK:
 		{
 				//buttonBack->winEnable( true );

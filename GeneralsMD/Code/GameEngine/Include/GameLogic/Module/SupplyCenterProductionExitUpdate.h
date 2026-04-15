@@ -30,9 +30,6 @@
 
 #pragma once
 
-#ifndef _SUPPLY_CENTER_PRODUCTION_EXIT_UPDATE_H
-#define _SUPPLY_CENTER_PRODUCTION_EXIT_UPDATE_H
-
 #include "GameLogic/Module/UpdateModule.h"
 
 class Object;
@@ -51,14 +48,14 @@ public:
 		m_naturalRallyPoint.zero();
 	}
 
-	static void buildFieldParse(MultiIniFieldParse& p) 
+	static void buildFieldParse(MultiIniFieldParse& p)
 	{
     UpdateModuleData::buildFieldParse(p);
-		static const FieldParse dataFieldParse[] = 
+		static const FieldParse dataFieldParse[] =
 		{
-			{ "UnitCreatePoint",		INI::parseCoord3D,		NULL, offsetof( SupplyCenterProductionExitUpdateModuleData, m_unitCreatePoint ) },
-			{ "NaturalRallyPoint",  INI::parseCoord3D,		NULL, offsetof( SupplyCenterProductionExitUpdateModuleData, m_naturalRallyPoint ) },
-			{ "GrantTemporaryStealth",INI::parseDurationUnsignedInt,  NULL, offsetof( SupplyCenterProductionExitUpdateModuleData, m_grantTemporaryStealthFrames ) },
+			{ "UnitCreatePoint",		INI::parseCoord3D,		nullptr, offsetof( SupplyCenterProductionExitUpdateModuleData, m_unitCreatePoint ) },
+			{ "NaturalRallyPoint",  INI::parseCoord3D,		nullptr, offsetof( SupplyCenterProductionExitUpdateModuleData, m_naturalRallyPoint ) },
+			{ "GrantTemporaryStealth",INI::parseDurationUnsignedInt,  nullptr, offsetof( SupplyCenterProductionExitUpdateModuleData, m_grantTemporaryStealthFrames ) },
 			{ 0, 0, 0, 0 }
 		};
     p.add(dataFieldParse);
@@ -79,7 +76,7 @@ public:
 	SupplyCenterProductionExitUpdate( Thing *thing, const ModuleData* moduleData );
 	// virtual destructor prototype provided by memory pool declaration
 
-	// Required funcs to fufill interface requirements
+	// Required funcs to fulfill interface requirements
 	virtual Bool isExitBusy() const {return FALSE;}	///< Contain style exiters are getting the ability to space out exits, so ask this before reserveDoor as a kind of no-commitment check.
 	virtual ExitDoorType reserveDoorForExit( const ThingTemplate* objType, Object *specificObject ) { return DOOR_1; }
 	virtual void exitObjectViaDoor( Object *newObj, ExitDoorType exitDoor );
@@ -87,7 +84,7 @@ public:
 	virtual void exitObjectByBudding( Object *newObj, Object *budHost ) { return; }
 
 	virtual void setRallyPoint( const Coord3D *pos );			///< define a "rally point" for units to move towards
-	virtual const Coord3D *getRallyPoint( void ) const;			///< define a "rally point" for units to move towards
+	virtual const Coord3D *getRallyPoint() const;			///< define a "rally point" for units to move towards
 	virtual Bool getExitPosition( Coord3D& exitPosition ) const;					///< access to the "Door" position of the production object
 	virtual Bool getNaturalRallyPoint( Coord3D& rallyPoint, Bool offset = TRUE ) const;			///< get the natural "rally point" for units to move towards
 
@@ -98,7 +95,7 @@ protected:
 	Coord3D m_rallyPoint;						///< Where units should move to after they have reached the "natural" rally point
 	Bool m_rallyPointExists;				///< Only move to the rally point if this is true
 
-	// Required func to fufill Module requirement
+	// Required func to fulfill Module requirement
 };
 
 inline void SupplyCenterProductionExitUpdate::setRallyPoint( const Coord3D *pos )
@@ -107,13 +104,10 @@ inline void SupplyCenterProductionExitUpdate::setRallyPoint( const Coord3D *pos 
 	m_rallyPointExists = true;
 }
 
-inline const Coord3D *SupplyCenterProductionExitUpdate::getRallyPoint( void ) const
+inline const Coord3D *SupplyCenterProductionExitUpdate::getRallyPoint() const
 {
 	if (m_rallyPointExists)
 		return &m_rallyPoint;
 
-	return NULL;
+	return nullptr;
 }
-
-
-#endif

@@ -4,9 +4,9 @@
 
 # Build output folders
 [Rr]elease*
-[Pp]rofile*
+#[Pp]rofile*
 [Ii]nternal*
-[Dd]ebug*
+#[Dd]ebug*
 [Hh]ybrid*
 [Ee]nglish
 [Ff]rench
@@ -91,7 +91,6 @@ Max4Hybrid
 BrowserDispatch_i.c
 BrowserDispatch.h
 BrowserDispatch.tlb
-generatedVersion.h
 
 # Generated shader headers
 *.vsh_code.h

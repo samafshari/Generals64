@@ -24,12 +24,12 @@
 
 // FILE: Thing.h //////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
-//                                                                          
-//                       Westwood Studios Pacific.                          
-//                                                                          
-//                       Confidential Information					         
-//                Copyright (C) 2001 - All Rights Reserved                  
-//                                                                          
+//
+//                       Westwood Studios Pacific.
+//
+//                       Confidential Information
+//                Copyright (C) 2001 - All Rights Reserved
+//
 //-----------------------------------------------------------------------------
 //
 // Project:    RTS3
@@ -48,18 +48,15 @@
 
 #pragma once
 
-#ifndef __THING_H_
-#define __THING_H_
-
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-//           Includes                                                      
+//           Includes
 //-----------------------------------------------------------------------------
 #include "Common/GameMemory.h"
 #include "Common/KindOf.h"
-#include "Common/OVERRIDE.h"
-#include "WWMath/Matrix3D.h"							///< @todo Decide if we're keeping the WWMath libs (MSB)
+#include "Common/Override.h"
+#include "WWMath/matrix3d.h"							///< @todo Decide if we're keeping the WWMath libs (MSB)
 
 //-----------------------------------------------------------------------------
 //           Forward References
@@ -87,10 +84,10 @@ class Thing : public MemoryPoolObject
 {
 	// note, it is explicitly OK to pass null for 'thing' here;
 	// they will check for null and return null in these cases.
-	friend inline Object *AsObject(Thing *thing) { return thing ? thing->asObjectMeth() : NULL; }
-	friend inline Drawable *AsDrawable(Thing *thing) { return thing ? thing->asDrawableMeth() : NULL; }
-	friend inline const Object *AsObject(const Thing *thing) { return thing ? thing->asObjectMeth() : NULL; }
-	friend inline const Drawable *AsDrawable(const Thing *thing) { return thing ? thing->asDrawableMeth() : NULL; }
+	friend Object *AsObject(Thing *thing) { return thing ? thing->asObjectMeth() : nullptr; }
+	friend Drawable *AsDrawable(Thing *thing) { return thing ? thing->asDrawableMeth() : nullptr; }
+	friend const Object *AsObject(const Thing *thing) { return thing ? thing->asObjectMeth() : nullptr; }
+	friend const Drawable *AsDrawable(const Thing *thing) { return thing ? thing->asDrawableMeth() : nullptr; }
 
 	MEMORY_POOL_GLUE_ABC(Thing)
 
@@ -98,7 +95,7 @@ public:
 
 	Thing( const ThingTemplate *thingTemplate );
 
-	/** 
+	/**
 		return the thing template for this thing.
 	*/
 	const ThingTemplate *getTemplate() const;
@@ -119,8 +116,11 @@ public:
 	// don't want this behavior? then call setTransformMatrix instead.
 	void setOrientation( Real angle );
 
-	inline const Coord3D *getPosition() const { return &m_cachedPos; }
-	inline Real getOrientation() const { return m_cachedAngle; }
+	const Coord3D *getPosition() const { return &m_cachedPos; }
+	Real getOrientation() const { return m_cachedAngle; }
+
+	Bool isPositioned() const;
+
 	const Coord3D *getUnitDirectionVector2D() const;
 	void getUnitDirectionVector2D(Coord3D& dir) const;
 	void getUnitDirectionVector3D(Coord3D& dir) const;
@@ -141,19 +141,25 @@ public:
 	void setTransformMatrix( const Matrix3D *mx );												///< set the world transformation matrix
 	const Matrix3D* getTransformMatrix() const { return &m_transform; }		///< return the world transformation matrix
 
+	const Matrix3D* getPrevTransformMatrix() const { return &m_prevTransform; }	///< return previous logic frame's transform (for visual interpolation)
+	Bool hasPrevTransform() const { return m_prevTransformValid; }	///< true once a capture crossed a logic-frame boundary (not just same-frame placement setters)
+	UnsignedInt getPrevTransformFrame() const { return m_prevTransformFrame; }	///< logic frame when m_prevTransform was captured (sentinel 0xFFFFFFFF = never)
+
 	void transformPoint( const Coord3D *in, Coord3D *out );								///< transform this point using the m_transform matrix of this thing
 
 protected:
 
-	// Virtual method since objects can be on bridges and need to calculate heigh above terrain differently.
-	virtual Real calculateHeightAboveTerrain(void) const;		// Calculates the actual height above terrain.  Doesn't use cache.
+	// Virtual method since objects can be on bridges and need to calculate height above terrain differently.
+	virtual Real calculateHeightAboveTerrain() const;		// Calculates the actual height above terrain.  Doesn't use cache.
 
-	virtual Object *asObjectMeth() { return NULL; }
-	virtual Drawable *asDrawableMeth() { return NULL; }
-	virtual const Object *asObjectMeth() const { return NULL; }
-	virtual const Drawable *asDrawableMeth() const { return NULL; }
+	virtual Object *asObjectMeth() { return nullptr; }
+	virtual Drawable *asDrawableMeth() { return nullptr; }
+	virtual const Object *asObjectMeth() const { return nullptr; }
+	virtual const Drawable *asDrawableMeth() const { return nullptr; }
 
 	virtual void reactToTransformChange(const Matrix3D* oldMtx, const Coord3D* oldPos, Real oldAngle) = 0;
+
+	void capturePrevTransform();	///< snapshot current transform as "previous" on first change per logic frame
 
 private:
 
@@ -161,7 +167,7 @@ private:
 	// since ThingTemplates are shared between many, many Things, the Thing
 	// should never be able to change it.
 	OVERRIDE<ThingTemplate> m_template;	///< reference back to template database
-#if defined(_DEBUG) || defined(_INTERNAL)
+#if defined(RTS_DEBUG)
 	AsciiString m_templateName;
 #endif
 	/*
@@ -188,12 +194,13 @@ private:
 	mutable Real			m_cachedAltitudeAboveTerrainOrWater;
 	mutable Int				m_cacheFlags;
 
-}; 
+	Matrix3D m_prevTransform;									///< transform from before the last logic tick (for visual interpolation)
+	UnsignedInt m_prevTransformFrame;					///< logic frame when m_prevTransform was captured (0xFFFFFFFF = never)
+	Bool m_prevTransformValid;								///< TRUE only once capture has seen a logic-frame boundary; keeps static-placement multi-setter sequences from producing a phantom non-zero lerp delta
+
+};
 
 
 //-----------------------------------------------------------------------------
-//           Externals                                                     
+//           Externals
 //-----------------------------------------------------------------------------
-
-#endif // $label
-

@@ -29,15 +29,12 @@
 
 #pragma once
 
-#ifndef __MAX_HEALTH_UPGRADE_H_
-#define __MAX_HEALTH_UPGRADE_H_
-
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "GameLogic/Module/UpgradeModule.h"
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
 class Thing;
-enum MaxHealthChangeType;
+enum MaxHealthChangeType : Int;
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
@@ -46,7 +43,7 @@ class MaxHealthUpgradeModuleData: public UpgradeModuleData
 
 public:
 
-	MaxHealthUpgradeModuleData( void );
+	MaxHealthUpgradeModuleData();
 
 	static void buildFieldParse(MultiIniFieldParse& p);
 
@@ -70,11 +67,7 @@ public:
 
 protected:
 
-	virtual void upgradeImplementation( ); ///< Here's the actual work of Upgrading
+	virtual void upgradeImplementation(); ///< Here's the actual work of Upgrading
 	virtual Bool isSubObjectsUpgrade() { return false; }
 
 };
-
-
-#endif // __DEFAULTDIE_H_
-

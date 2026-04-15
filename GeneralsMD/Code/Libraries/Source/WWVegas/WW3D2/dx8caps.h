@@ -26,8 +26,8 @@
  *                                                                                             *
  *              Original Author:: Hector Yee                                                   *
  *                                                                                             *
- *                       Author : Kenny Mitchell                                               * 
- *                                                                                             * 
+ *                       Author : Kenny Mitchell                                               *
+ *                                                                                             *
  *                     $Modtime:: 06/27/02 1:27p                                              $*
  *                                                                                             *
  *                    $Revision:: 24                                                          $*
@@ -37,16 +37,52 @@
  * Functions:                                                                                  *
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-#if _MSC_VER >= 1000
 #pragma once
-#endif // _MSC_VER >= 1000
-
-#ifndef DX8CAPS_H
-#define DX8CAPS_H
 
 #include "always.h"
 #include "ww3dformat.h"
 #include <d3d8.h>
+
+#ifndef D3DTSS_TCI_PASSTHRU
+#define D3DTSS_TCI_PASSTHRU 0x00000000UL
+#endif
+
+#ifndef D3DTEXOPCAPS_SELECTARG1
+#define D3DTEXOPCAPS_SELECTARG1 0x00000002L
+#endif
+#ifndef D3DTEXOPCAPS_MODULATE
+#define D3DTEXOPCAPS_MODULATE 0x00000008L
+#endif
+#ifndef D3DTEXOPCAPS_MODULATE2X
+#define D3DTEXOPCAPS_MODULATE2X 0x00000010L
+#endif
+#ifndef D3DTEXOPCAPS_ADD
+#define D3DTEXOPCAPS_ADD 0x00000040L
+#endif
+#ifndef D3DTEXOPCAPS_ADDSIGNED
+#define D3DTEXOPCAPS_ADDSIGNED 0x00000080L
+#endif
+#ifndef D3DTEXOPCAPS_ADDSIGNED2X
+#define D3DTEXOPCAPS_ADDSIGNED2X 0x00000100L
+#endif
+#ifndef D3DTEXOPCAPS_SUBTRACT
+#define D3DTEXOPCAPS_SUBTRACT 0x00000200L
+#endif
+#ifndef D3DTEXOPCAPS_ADDSMOOTH
+#define D3DTEXOPCAPS_ADDSMOOTH 0x00000400L
+#endif
+#ifndef D3DTEXOPCAPS_BLENDTEXTUREALPHA
+#define D3DTEXOPCAPS_BLENDTEXTUREALPHA 0x00001000L
+#endif
+#ifndef D3DTEXOPCAPS_BLENDCURRENTALPHA
+#define D3DTEXOPCAPS_BLENDCURRENTALPHA 0x00008000L
+#endif
+#ifndef D3DTEXOPCAPS_BUMPENVMAP
+#define D3DTEXOPCAPS_BUMPENVMAP 0x00200000L
+#endif
+#ifndef D3DTEXOPCAPS_BUMPENVMAPLUMINANCE
+#define D3DTEXOPCAPS_BUMPENVMAPLUMINANCE 0x00400000L
+#endif
 
 class DX8Caps
 {
@@ -69,7 +105,10 @@ public:
 		VENDOR_3DFX,
 		VENDOR_3DLABS,
 		VENDOR_CIRRUSLOGIC,
-		VENDOR_RENDITION
+		VENDOR_RENDITION,
+		VENDOR_VMWARE,
+
+		VENDOR_COUNT
 	};
 
 	enum DeviceTypeATI {
@@ -209,10 +248,10 @@ public:
 
 	DX8Caps(IDirect3D8* direct3d, const D3DCAPS8& caps,WW3DFormat display_format, const D3DADAPTER_IDENTIFIER8& adapter_id);
 	DX8Caps(IDirect3D8* direct3d, IDirect3DDevice8* D3DDevice,WW3DFormat display_format, const D3DADAPTER_IDENTIFIER8& adapter_id);
-	static void Shutdown(void);
+	static void Shutdown();
 
 	void Compute_Caps(WW3DFormat display_format, const D3DADAPTER_IDENTIFIER8& adapter_id);
-	bool Support_TnL() const { return SupportTnL; };	
+	bool Support_TnL() const { return SupportTnL; };
 	bool Support_DXTC() const { return SupportDXTC; }
 	bool Support_Gamma() const { return supportGamma; }
 	bool Support_NPatches() const { return SupportNPatches; }
@@ -287,7 +326,7 @@ private:
 	int MaxDisplayHeight;
 
 	D3DCAPS8 Caps;
-	bool SupportTnL;	
+	bool SupportTnL;
 	bool SupportDXTC;
 	bool supportGamma;
 	bool SupportNPatches;
@@ -317,6 +356,3 @@ private:
 	StringClass CapsLog;
 	StringClass CompactLog;
 };
-
-
-#endif

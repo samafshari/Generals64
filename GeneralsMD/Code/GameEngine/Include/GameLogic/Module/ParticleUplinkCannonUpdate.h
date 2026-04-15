@@ -29,12 +29,10 @@
 
 #pragma once
 
-#ifndef __PARTICLE_UPLINK_CANNON_UPDATE_H_
-#define __PARTICLE_UPLINK_CANNON_UPDATE_H_
-
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "Common/KindOf.h"
 #include "Common/Science.h"
+#include "GameLogic/Module/LaserUpdate.h"
 #include "GameLogic/Module/SpecialPowerUpdateModule.h"
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
@@ -42,7 +40,7 @@ class SpecialPowerModule;
 class ParticleSystem;
 class FXList;
 class AudioEventRTS;
-enum ParticleSystemID;
+enum ParticleSystemID : Int;
 
 #define MAX_OUTER_NODES 16
 
@@ -74,7 +72,7 @@ public:
 	AsciiString			m_laserBaseLightFlareParticleSystemName;
 	AsciiString			m_laserBaseMediumFlareParticleSystemName;
 	AsciiString			m_laserBaseIntenseFlareParticleSystemName;
-	
+
 	AsciiString			m_fireBoneName;
 	AsciiString			m_particleBeamLaserName;
 
@@ -109,11 +107,11 @@ public:
 	ParticleUplinkCannonUpdateModuleData();
 	static void buildFieldParse(MultiIniFieldParse& p);
 
-private: 
+private:
 
 };
 
-enum PUCStatus
+enum PUCStatus : Int
 {
 	STATUS_IDLE,
 	STATUS_CHARGING,
@@ -126,7 +124,7 @@ enum PUCStatus
 	STATUS_PACKING,
 };
 
-enum LaserStatus
+enum LaserStatus : Int
 {
 	LASERSTATUS_NONE,
 	LASERSTATUS_BORN,
@@ -134,7 +132,7 @@ enum LaserStatus
 	LASERSTATUS_DEAD,
 };
 
-enum IntensityTypes
+enum IntensityTypes : Int
 {
 	IT_LIGHT,
 	IT_MEDIUM,
@@ -163,7 +161,7 @@ public:
 	virtual Bool isActive() const {return m_status != STATUS_IDLE;}
 	virtual SpecialPowerUpdateInterface* getSpecialPowerUpdateInterface() { return this; }
 	virtual CommandOption getCommandOption() const { return (CommandOption)0; }
-	virtual Bool isPowerCurrentlyInUse( const CommandButton *command = NULL ) const;
+	virtual Bool isPowerCurrentlyInUse( const CommandButton *command = nullptr ) const;
 	virtual ScienceType getExtraRequiredScience() const { return SCIENCE_INVALID; } //Does this object have more than one special power module with the same spTemplate?
 
 	virtual void onObjectCreated();
@@ -218,6 +216,7 @@ protected:
 	DrawableID				m_laserBeamIDs[ MAX_OUTER_NODES ];
 	DrawableID				m_groundToOrbitBeamID;
 	DrawableID				m_orbitToTargetBeamID;
+	LaserRadiusUpdate	m_orbitToTargetLaserRadius;
 	ParticleSystemID	m_connectorSystemID;
 	ParticleSystemID	m_laserBaseSystemID;
 
@@ -232,6 +231,8 @@ protected:
 	UnsignedInt			m_2ndLastDrivingClickFrame;
 	UnsignedInt			m_nextDestWaypointID;
 
+	XferVersion			m_xferVersion;
+
 	Bool						m_upBonesCached;
 	Bool						m_defaultInfoCached;
 	Bool						m_invalidSettings;
@@ -239,7 +240,3 @@ protected:
 	Bool						m_scriptedWaypointMode;
 	Bool						m_clientShroudedLastFrame;
 };
-
-
-#endif
-

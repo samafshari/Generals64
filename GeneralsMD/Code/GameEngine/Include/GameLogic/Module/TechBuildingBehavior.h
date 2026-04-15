@@ -29,9 +29,6 @@
 
 #pragma once
 
-#ifndef __TECH_BUILDING_BEHAVIOR_H_
-#define __TECH_BUILDING_BEHAVIOR_H_
-
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "GameLogic/Module/DieModule.h"
 #include "GameLogic/Module/UpdateModule.h"
@@ -43,7 +40,7 @@ class TechBuildingBehaviorModuleData : public UpdateModuleData
 
 public:
 
-	TechBuildingBehaviorModuleData( void );
+	TechBuildingBehaviorModuleData();
 
 	static void buildFieldParse( MultiIniFieldParse &p );
 
@@ -71,14 +68,12 @@ public:
 	static Int getInterfaceMask() { return UpdateModule::getInterfaceMask() | (MODULEINTERFACE_DIE); }
 
 	// update methods
-	virtual UpdateSleepTime update( void );
+	virtual UpdateSleepTime update();
 
 	// die methods
-	virtual DieModuleInterface *getDie( void ) { return this; }
+	virtual DieModuleInterface *getDie() { return this; }
 	virtual void onDie( const DamageInfo *damageInfo );
 
 protected:
 
 };
-
-#endif  // end __TECH_BUILDING_BEHAVIOR_H_

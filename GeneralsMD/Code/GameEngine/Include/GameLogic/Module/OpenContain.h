@@ -25,15 +25,12 @@
 // FILE: OpenContain.h ////////////////////////////////////////////////////////////////////////////
 // Author: Colin Day, November 2001
 // Desc:   The OpenContainer ContainModule allows objects to be contained inside of other
-//				 objects.  There is a set of functionality that will be common to 
+//				 objects.  There is a set of functionality that will be common to
 //				 all container modules that provides the actual containment
 //				 implementations, those implementations are found here
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #pragma once
-
-#ifndef __OPENCONTAIN_H_
-#define __OPENCONTAIN_H_
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "GameLogic/Module/BehaviorModule.h"
@@ -73,24 +70,24 @@ public:
  	Bool m_allowEnemiesInside;			///< allow enemies inside us
  	Bool m_allowNeutralInside;			///< allow neutral inside us
 
-	OpenContainModuleData( void );
+	OpenContainModuleData();
 	static void buildFieldParse(MultiIniFieldParse& p);
 };
 
 //-------------------------------------------------------------------------------------------------
 /** An open container can actually contain other objects */
 //-------------------------------------------------------------------------------------------------
-class OpenContain : public UpdateModule, 
-										public ContainModuleInterface, 
-										public CollideModuleInterface, 
-										public DieModuleInterface, 
+class OpenContain : public UpdateModule,
+										public ContainModuleInterface,
+										public CollideModuleInterface,
+										public DieModuleInterface,
 										public DamageModuleInterface,
 										public ExitInterface
 {
 
 	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE( OpenContain, "OpenContain" )
 	MAKE_STANDARD_MODULE_MACRO_WITH_MODULE_DATA( OpenContain, OpenContainModuleData )
-	
+
 public:
 
 	OpenContain( Thing *thing, const ModuleData* moduleData );
@@ -103,7 +100,7 @@ public:
 	static Int getInterfaceMask() { return UpdateModule::getInterfaceMask() | (MODULEINTERFACE_CONTAIN) | (MODULEINTERFACE_COLLIDE) | (MODULEINTERFACE_DIE) | (MODULEINTERFACE_DAMAGE); }
 
 	virtual void onDie( const DamageInfo *damageInfo );  ///< the die callback
-	virtual void onDelete( void );	///< Last possible moment cleanup
+	virtual void onDelete();	///< Last possible moment cleanup
 	virtual void onCapture( Player *oldOwner, Player *newOwner ){}
 
 	// CollideModuleInterface
@@ -124,10 +121,10 @@ public:
 	// DamageModuleInterface
 	virtual void onDamage( DamageInfo *damageInfo ){};	///< damage callback
 	virtual void onHealing( DamageInfo *damageInfo ){};	///< healing callback
-	virtual void onBodyDamageStateChange( const DamageInfo* damageInfo, 
-																				BodyDamageType oldState, 
+	virtual void onBodyDamageStateChange( const DamageInfo* damageInfo,
+																				BodyDamageType oldState,
 																				BodyDamageType newState){};  ///< state change callback
- 
+
 
 	// our object changed position... react as appropriate.
 	virtual void containReactToTransformChange();
@@ -135,18 +132,18 @@ public:
 	virtual Bool calcBestGarrisonPosition( Coord3D *sourcePos, const Coord3D *targetPos ) { return FALSE; }
 	virtual Bool attemptBestFirePointPosition( Object *source, Weapon *weapon, Object *victim ) { return FALSE; }
 	virtual Bool attemptBestFirePointPosition( Object *source, Weapon *weapon, const Coord3D *targetPos ) { return FALSE; }
-	
+
 	///< if my object gets selected, then my visible passengers should, too
 	///< this gets called from
-	virtual void clientVisibleContainedFlashAsSelected() {}; 
- 
-	virtual const Player* getApparentControllingPlayer(const Player* observingPlayer) const { return NULL; }
+	virtual void clientVisibleContainedFlashAsSelected() {};
+
+	virtual const Player* getApparentControllingPlayer(const Player* observingPlayer) const { return nullptr; }
 	virtual void recalcApparentControllingPlayer() { }
-		
+
 	virtual void onContaining( Object *obj, Bool wasSelected );		///< object now contains 'obj'
 	virtual void onRemoving( Object *obj );			///< object no longer contains 'obj'
 	virtual void onSelling();///< Container is being sold.  Open responds by kicking people out
- 
+
 	virtual void orderAllPassengersToExit( CommandSourceType commandSource, Bool instantly ); ///< All of the smarts of exiting are in the passenger's AIExit. removeAllFrommContain is a last ditch system call, this is the game Evacuate
 	virtual void orderAllPassengersToIdle( CommandSourceType commandSource ); ///< Just like it sounds
 	virtual void orderAllPassengersToHackInternet( CommandSourceType ); ///< Just like it sounds
@@ -158,8 +155,8 @@ public:
 	virtual void addToContainList( Object *obj );		///< The part of AddToContain that inheritors can override (Can't do whole thing because of all the private stuff involved)
 	virtual void removeFromContain( Object *obj, Bool exposeStealthUnits = FALSE );	///< remove 'obj' from contain list
 	virtual void removeAllContained( Bool exposeStealthUnits = FALSE );				///< remove all objects on contain list
-	virtual void killAllContained( void );				///< kill all objects on contain list
-  virtual void harmAndForceExitAllContained( DamageInfo *info ); // apply canned damage against those containes 
+	virtual void killAllContained();				///< kill all objects on contain list
+  virtual void harmAndForceExitAllContained( DamageInfo *info ); // apply canned damage against those contains
 	virtual Bool isEnclosingContainerFor( const Object *obj ) const;	///< Does this type of Contain Visibly enclose its contents?
 	virtual Bool isPassengerAllowedToFire( ObjectID id = INVALID_ID ) const;	///< Hey, can I shoot out of this container?
 
@@ -167,18 +164,19 @@ public:
 
   virtual void setOverrideDestination( const Coord3D * ){} ///< Instead of falling peacefully towards a clear spot, I will now aim here
 	virtual Bool isDisplayedOnControlBar() const {return FALSE;}///< Does this container display its contents on the ControlBar?
-	virtual Int getExtraSlotsInUse( void ) { return 0; }
+	virtual Int getExtraSlotsInUse() { return 0; }
 	virtual Bool isKickOutOnCapture(){ return TRUE; }///< By default, yes, all contain modules kick passengers out on capture
 
 	// contain list access
 	virtual void iterateContained( ContainIterateFunc func, void *userData, Bool reverse );
 	virtual UnsignedInt getContainCount() const { return m_containListSize; }
-	virtual const ContainedItemsList* getContainedItemsList() const { return &m_containList; }	
-	virtual const Object *friend_getRider() const{return NULL;} ///< Damn.  The draw order dependency bug for riders means that our draw module needs to cheat to get around it.
+	virtual const ContainedItemsList* getContainedItemsList() const { return &m_containList; }
+	virtual const Object *friend_getRider() const{return nullptr;} ///< Damn.  The draw order dependency bug for riders means that our draw module needs to cheat to get around it.
 	virtual Real getContainedItemsMass() const;
 	virtual UnsignedInt getStealthUnitsContained() const { return m_stealthUnitsContained; }
+	virtual UnsignedInt getHeroUnitsContained() const { return m_heroUnitsContained; }
 
-	virtual PlayerMaskType getPlayerWhoEntered(void) const { return m_playerEnteredMask; }
+	virtual PlayerMaskType getPlayerWhoEntered() const { return m_playerEnteredMask; }
 
 	virtual Int getContainMax() const;
 
@@ -188,12 +186,12 @@ public:
 	virtual void exitObjectViaDoor( Object *newObj, ExitDoorType exitDoor );
 	virtual void exitObjectInAHurry( Object *newObj );
 
-	
+
 	virtual void unreserveDoorForExit( ExitDoorType exitDoor ) { /*nothing*/ }
 	virtual void exitObjectByBudding( Object *newObj, Object *budHost ) { return; };
 
 	virtual void setRallyPoint( const Coord3D *pos );				///< define a "rally point" for units to move towards
-	virtual const Coord3D *getRallyPoint( void ) const;			///< define a "rally point" for units to move towards
+	virtual const Coord3D *getRallyPoint() const;			///< define a "rally point" for units to move towards
 	virtual Bool getExitPosition(Coord3D& exitPosition ) const { return FALSE; };					///< access to the "Door" position of the production object
 	virtual Bool getNaturalRallyPoint( Coord3D& rallyPoint, Bool offset = TRUE ) const;			///< get the natural "rally point" for units to move towards
 
@@ -207,7 +205,7 @@ public:
 	virtual Bool isSpecialZeroSlotContainer() const { return false; }
 	virtual Bool isImmuneToClearBuildingAttacks() const { return true; }
   virtual Bool isSpecialOverlordStyleContainer() const { return false; }
-  virtual Bool isAnyRiderAttacking( void ) const;
+  virtual Bool isAnyRiderAttacking() const;
 
 	/**
 		this is used for containers that must do something to allow people to enter or exit...
@@ -227,24 +225,25 @@ public:
 
 	virtual void enableLoadSounds( Bool enable ) { m_loadSoundsEnabled = enable; }
 
-  Real getDamagePercentageToUnits( void );
+  Real getDamagePercentageToUnits();
   virtual Object* getClosestRider ( const Coord3D *pos );
 
   virtual void setEvacDisposition( EvacDisposition disp ) {};
 protected:
 
-	virtual void monitorConditionChanges( void );				///< check to see if we need to update our occupant postions from a model change or anything else
+	virtual void monitorConditionChanges();				///< check to see if we need to update our occupant positions from a model change or anything else
 	virtual void putObjAtNextFirePoint( Object *obj );	///< place object at position of the next fire point to use
-	virtual void redeployOccupants( void );							///< redeploy any objects at firepoints due to a model condition change
+	virtual void redeployOccupants();							///< redeploy any objects at firepoints due to a model condition change
+	void repositionOccupantsFromCache();					///< reposition occupants using cached fire points (no bone re-lookup)
 
 	const ContainedItemsList& getContainList() const { return m_containList; }
 
 	void scatterToNearbyPosition(Object* obj);
 	void removeFromContainViaIterator( ContainedItemsList::iterator it, Bool exposeStealthUnits = FALSE );  ///< remove item from contain list
 	void removeFromPassengerViaIterator( ContainedItemsList::iterator it );///< remove item from passenger list
-	
-	virtual void doLoadSound();	
-	virtual void doUnloadSound();	
+
+	virtual void doLoadSound();
+	virtual void doUnloadSound();
 	virtual void positionContainedObjectsRelativeToContainer(){}
 
 	virtual void addOrRemoveObjFromWorld(Object* obj, Bool add);
@@ -262,6 +261,7 @@ private:
 
 	ObjectEnterExitMap	m_objectEnterExitInfo;
 	UnsignedInt					m_stealthUnitsContained;				///< number of stealth units that can't be seen by enemy players.
+	UnsignedInt					m_heroUnitsContained;						///< cached hero count
 	Int									m_whichExitPath; ///< Cycles from 1 to n and is used only in modules whose data has numberOfExitPaths > 1.
 	UnsignedInt					m_doorCloseCountdown;						///< When should I shut my door.
 
@@ -272,7 +272,7 @@ private:
 
 /// @todo srj -- move this to a lazily-allocated subobject
 	enum { MAX_FIRE_POINTS = 32 };
-	ModelConditionFlags	m_conditionState;				///< The Drawables current behavior state	
+	ModelConditionFlags	m_conditionState;				///< The Drawables current behavior state
 	Matrix3D						m_firePoints[ MAX_FIRE_POINTS ];
 	Int									m_firePointStart;												///< start firepoint index to use when building becomes occupied
 	Int									m_firePointNext;												///< next index to place objects at
@@ -284,5 +284,3 @@ private:
 	Bool								m_loadSoundsEnabled;								///< Don't serialize -- used for disabling sounds during payload creation.
   Bool                m_passengerAllowedToFire;      ///< Newly promoted from the template data to the module for upgrade overriding access
 };
-
-#endif  // end __OPENCONTAIN_H_

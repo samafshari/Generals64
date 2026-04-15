@@ -30,9 +30,6 @@
 
 #pragma once
 
-#ifndef __COUNTERMEASURES_BEHAVIOR_H
-#define __COUNTERMEASURES_BEHAVIOR_H
-
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "GameClient/ParticleSys.h"
 #include "GameLogic/Module/BehaviorModule.h"
@@ -75,22 +72,22 @@ public:
 		m_volleyVelocityFactor  = 1.0f;
 	}
 
-	static void buildFieldParse(MultiIniFieldParse& p) 
+	static void buildFieldParse(MultiIniFieldParse& p)
 	{
-		static const FieldParse dataFieldParse[] = 
+		static const FieldParse dataFieldParse[] =
 		{
-			{ "FlareTemplateName",			INI::parseAsciiString,					NULL, offsetof( CountermeasuresBehaviorModuleData, m_flareTemplateName ) },
-			{ "FlareBoneBaseName",			INI::parseAsciiString,					NULL, offsetof( CountermeasuresBehaviorModuleData, m_flareBoneBaseName ) },
-			{ "VolleySize",							INI::parseUnsignedInt,					NULL, offsetof( CountermeasuresBehaviorModuleData, m_volleySize ) },
-			{ "VolleyArcAngle",					INI::parseAngleReal,						NULL, offsetof( CountermeasuresBehaviorModuleData, m_volleyArcAngle ) },
-			{ "VolleyVelocityFactor",		INI::parseReal,						NULL, offsetof( CountermeasuresBehaviorModuleData, m_volleyVelocityFactor ) },
-			{ "DelayBetweenVolleys",		INI::parseDurationUnsignedInt,  NULL, offsetof( CountermeasuresBehaviorModuleData, m_framesBetweenVolleys ) },
-			{ "NumberOfVolleys",				INI::parseUnsignedInt,					NULL, offsetof( CountermeasuresBehaviorModuleData, m_numberOfVolleys ) },
-			{ "ReloadTime",							INI::parseDurationUnsignedInt,  NULL, offsetof( CountermeasuresBehaviorModuleData, m_reloadFrames ) },
-			{ "EvasionRate",						INI::parsePercentToReal,				NULL, offsetof( CountermeasuresBehaviorModuleData, m_evasionRate ) },
-			{ "MustReloadAtAirfield",		INI::parseBool,									NULL, offsetof( CountermeasuresBehaviorModuleData, m_mustReloadAtAirfield ) },
-			{ "MissileDecoyDelay",			INI::parseDurationUnsignedInt,	NULL, offsetof( CountermeasuresBehaviorModuleData, m_missileDecoyFrames ) },
-			{ "ReactionLaunchLatency",	INI::parseDurationUnsignedInt,	NULL, offsetof( CountermeasuresBehaviorModuleData, m_countermeasureReactionFrames ) },
+			{ "FlareTemplateName",			INI::parseAsciiString,					nullptr, offsetof( CountermeasuresBehaviorModuleData, m_flareTemplateName ) },
+			{ "FlareBoneBaseName",			INI::parseAsciiString,					nullptr, offsetof( CountermeasuresBehaviorModuleData, m_flareBoneBaseName ) },
+			{ "VolleySize",							INI::parseUnsignedInt,					nullptr, offsetof( CountermeasuresBehaviorModuleData, m_volleySize ) },
+			{ "VolleyArcAngle",					INI::parseAngleReal,						nullptr, offsetof( CountermeasuresBehaviorModuleData, m_volleyArcAngle ) },
+			{ "VolleyVelocityFactor",		INI::parseReal,						nullptr, offsetof( CountermeasuresBehaviorModuleData, m_volleyVelocityFactor ) },
+			{ "DelayBetweenVolleys",		INI::parseDurationUnsignedInt,  nullptr, offsetof( CountermeasuresBehaviorModuleData, m_framesBetweenVolleys ) },
+			{ "NumberOfVolleys",				INI::parseUnsignedInt,					nullptr, offsetof( CountermeasuresBehaviorModuleData, m_numberOfVolleys ) },
+			{ "ReloadTime",							INI::parseDurationUnsignedInt,  nullptr, offsetof( CountermeasuresBehaviorModuleData, m_reloadFrames ) },
+			{ "EvasionRate",						INI::parsePercentToReal,				nullptr, offsetof( CountermeasuresBehaviorModuleData, m_evasionRate ) },
+			{ "MustReloadAtAirfield",		INI::parseBool,									nullptr, offsetof( CountermeasuresBehaviorModuleData, m_mustReloadAtAirfield ) },
+			{ "MissileDecoyDelay",			INI::parseDurationUnsignedInt,	nullptr, offsetof( CountermeasuresBehaviorModuleData, m_missileDecoyFrames ) },
+			{ "ReactionLaunchLatency",	INI::parseDurationUnsignedInt,	nullptr, offsetof( CountermeasuresBehaviorModuleData, m_countermeasureReactionFrames ) },
 			{ 0, 0, 0, 0 }
 		};
 
@@ -146,12 +143,12 @@ public:
 	virtual ObjectID calculateCountermeasureToDivertTo( const Object& victim );
 	virtual void reloadCountermeasures();
 	virtual Bool isActive() const;
-	
+
 
 protected:
 
-	virtual void upgradeImplementation() 
-	{ 
+	virtual void upgradeImplementation()
+	{
 		setWakeFrame(getObject(), UPDATE_SLEEP_NONE);
 	}
 
@@ -167,7 +164,7 @@ protected:
 
 	virtual void processUpgradeRemoval()
 	{
-		// I can't take it any more.  Let the record show that I think the UpgradeMux multiple inheritence is CRAP.
+		// I can't take it any more.  Let the record show that I think the UpgradeMux multiple inheritance is CRAP.
 		getCountermeasuresBehaviorModuleData()->m_upgradeMuxData.muxDataProcessUpgradeRemoval(getObject());
 	}
 
@@ -176,8 +173,8 @@ protected:
 		return getCountermeasuresBehaviorModuleData()->m_upgradeMuxData.m_requiresAllTriggers;
 	}
 
-	inline Bool isUpgradeActive() const { return isAlreadyUpgraded(); }
-	
+	Bool isUpgradeActive() const { return isAlreadyUpgraded(); }
+
 	virtual Bool isSubObjectsUpgrade() { return false; }
 
 	void launchVolley();
@@ -192,6 +189,3 @@ private:
 	UnsignedInt m_nextVolleyFrame;					//Frame the next volley is fired.
 	UnsignedInt m_reloadFrame;							//The frame countermeasures will be ready to use again.
 };
-
-#endif // __COUNTERMEASURES_BEHAVIOR_H
-
