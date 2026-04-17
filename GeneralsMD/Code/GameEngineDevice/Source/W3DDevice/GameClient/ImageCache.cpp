@@ -66,12 +66,16 @@ ImageCache& ImageCache::Instance()
     return s_instance;
 }
 
-Texture* ImageCache::GetTexture(Device& device, const char* filename)
+Texture* ImageCache::GetTexture(Device& device, const char* filename, bool generateMips)
 {
     if (!filename || !*filename)
         return nullptr;
 
-    auto it = m_cache.find(filename);
+    std::string cacheKey(filename);
+    if (!generateMips)
+        cacheKey += "|nomips";
+
+    auto it = m_cache.find(cacheKey);
     if (it != m_cache.end())
         return it->second.get();
 
@@ -87,7 +91,7 @@ Texture* ImageCache::GetTexture(Device& device, const char* filename)
         if (_stricmp(ext, ".dds") == 0)
             loaded = LoadDDS(device, filename, *tex);
         else if (_stricmp(ext, ".tga") == 0)
-            loaded = LoadTGA(device, filename, *tex);
+            loaded = LoadTGA(device, filename, *tex, generateMips);
     }
 
     // Try common texture directories
@@ -102,7 +106,7 @@ Texture* ImageCache::GetTexture(Device& device, const char* filename)
         while (pos != std::string::npos && !loaded)
         {
             converted[pos] = '/';
-            loaded = LoadTGA(device, converted.c_str(), *tex);
+            loaded = LoadTGA(device, converted.c_str(), *tex, generateMips);
             if (!loaded)
                 loaded = LoadDDS(device, converted.c_str(), *tex);
             pos = converted.find('_', pos + 1);
@@ -124,7 +128,7 @@ Texture* ImageCache::GetTexture(Device& device, const char* filename)
             if (tgaName.size() > 4)
             {
                 tgaName.replace(tgaName.size() - 4, 4, ".tga");
-                loaded = LoadTGA(device, tgaName.c_str(), *tex);
+                loaded = LoadTGA(device, tgaName.c_str(), *tex, generateMips);
             }
         }
     }
@@ -132,12 +136,12 @@ Texture* ImageCache::GetTexture(Device& device, const char* filename)
     if (!loaded)
     {
         // Debug texture_miss.log writing removed
-        m_cache[filename] = nullptr;
+        m_cache[cacheKey] = nullptr;
         return nullptr;
     }
 
     Texture* result = tex.get();
-    m_cache[filename] = std::move(tex);
+    m_cache[cacheKey] = std::move(tex);
     return result;
 }
 
@@ -165,7 +169,7 @@ struct TGAHeader
 };
 #pragma pack(pop)
 
-bool ImageCache::LoadTGA(Device& device, const char* filename, Texture& tex)
+bool ImageCache::LoadTGA(Device& device, const char* filename, Texture& tex, bool generateMips)
 {
     File* file = OpenTextureFile(filename);
     if (!file)
@@ -264,7 +268,7 @@ bool ImageCache::LoadTGA(Device& device, const char* filename, Texture& tex)
         }
     }
 
-    return tex.CreateFromRGBA(device, rgba.data(), width, height, true);
+    return tex.CreateFromRGBA(device, rgba.data(), width, height, generateMips);
 }
 
 bool ImageCache::LoadDDS(Device& device, const char* filename, Texture& tex)

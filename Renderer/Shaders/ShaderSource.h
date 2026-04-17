@@ -26,6 +26,14 @@ cbuffer FrameConstants : register(b0)
     float4 atmosphereParams; // x = fog density, y = scatter power, z = specular intensity, w = unused
     row_major float4x4 shadowMapMatrix; // world -> shadow UV + depth
     float4 shadowParams;                // x = enabled (0/1), y = texel size, z = bias, w = unused
+
+    // Building shadows — per-caster rotated rectangles darken terrain
+    // fragments whose XY lands inside. buildingShadowCount.x = live count.
+    // Each rect: xy = world center, z = halfWidth, w = halfHeight.
+    // Each rot:  xy = (cos(yaw), sin(yaw)).
+    float4 buildingShadowCount;
+    float4 buildingShadowRect[256];
+    float4 buildingShadowRot[256];
 };
 
 cbuffer ObjectConstants : register(b1)
@@ -185,6 +193,68 @@ float3 ApplyCloudShadow(float3 color, float3 worldPos)
     return color * shadow;
 }
 
+// DEBUG: loud visualization so we can see whether the cbuffer array
+// is actually populated. Toggle behavior via buildingShadowCount.y:
+//   0 = normal soft shadow
+//   1 = CYAN flood-fill if count > 0 (proves cbuffer upload works)
+//   2 = MAGENTA ring around each rect center (proves per-rect data)
+//   3 = RED fill inside each rect (rects visible but full-brightness)
+float3 ApplyBuildingShadow(float3 color, float3 worldPos)
+{
+    int count = (int)buildingShadowCount.x;
+    int dbg = (int)buildingShadowCount.y;
+
+    if (dbg == 1)
+    {
+        // Paint the entire terrain cyan if ANY building shadow was
+        // registered. If the scene stays normal, the cbuffer .x is 0.
+        if (count > 0) return float3(0.0, 1.0, 1.0);
+        return color;
+    }
+
+    if (count <= 0) return color;
+
+    if (dbg == 2)
+    {
+        // Magenta band at |d| ≈ 50 from each rect center. If the user
+        // sees a magenta ring under each building, the xy values reached
+        // the shader correctly.
+        for (int i = 0; i < count; ++i)
+        {
+            float2 d = worldPos.xy - buildingShadowRect[i].xy;
+            float dist = length(d);
+            if (dist > 45.0 && dist < 55.0)
+                return float3(1.0, 0.0, 1.0);
+        }
+        return color;
+    }
+
+    // Only darken ground-level fragments so walls of buildings don't
+    // get painted by other buildings' shadows at wall height.
+    if (worldPos.z > 8.0) return color;
+    float accum = 1.0;
+    [loop]
+    for (int i = 0; i < count; ++i)
+    {
+        float4 rect = buildingShadowRect[i];
+        float4 rot  = buildingShadowRot[i];
+        float2 d = worldPos.xy - rect.xy;
+        float2 local = float2(
+             d.x * rot.x + d.y * rot.y,
+            -d.x * rot.y + d.y * rot.x);
+        if (dbg == 3)
+        {
+            if (abs(local.x) < rect.z && abs(local.y) < rect.w)
+                return float3(1.0, 0.2, 0.2);
+        }
+        float fx = 1.0 - smoothstep(rect.z - 0.75, rect.z + 0.75, abs(local.x));
+        float fy = 1.0 - smoothstep(rect.w - 0.75, rect.w + 0.75, abs(local.y));
+        float inside = fx * fy;
+        accum *= lerp(1.0, 0.45, inside);
+    }
+    return color * accum;
+}
+
 // Per-pixel fog of war: samples shroud grid texture from world position.
 // shroudParams.xy = inverse world dimensions, shroudParams.zw = world offset
 float3 ApplyShroud(float3 color, float3 worldPos)
@@ -270,12 +340,18 @@ float ComputeShadow(float3 worldPos)
 
     float depth = shadowUV.z - shadowParams.z;
     float ts = shadowParams.y;
+    // 2x2 PCF: 4 taps at half-texel offsets for a slightly softened but
+    // still crisp edge. 3x3 was too blurry at the current shadow-map
+    // density. Dropping to 1-tap produces visible jaggies on slopes.
     float shadow = 0;
-    [unroll] for (int y = -1; y <= 1; ++y)
-        [unroll] for (int x = -1; x <= 1; ++x)
-            shadow += shadowMapTexture.SampleCmpLevelZero(shadowSampler, shadowUV.xy + float2(x, y) * ts, depth);
-    shadow /= 9.0;
-    return lerp(0.25, 1.0, shadow);
+    shadow += shadowMapTexture.SampleCmpLevelZero(shadowSampler, shadowUV.xy + float2(-0.5, -0.5) * ts, depth);
+    shadow += shadowMapTexture.SampleCmpLevelZero(shadowSampler, shadowUV.xy + float2( 0.5, -0.5) * ts, depth);
+    shadow += shadowMapTexture.SampleCmpLevelZero(shadowSampler, shadowUV.xy + float2(-0.5,  0.5) * ts, depth);
+    shadow += shadowMapTexture.SampleCmpLevelZero(shadowSampler, shadowUV.xy + float2( 0.5,  0.5) * ts, depth);
+    shadow *= 0.25;
+    // Floor of 0.15 so shadows on terrain read as clearly dark (not a
+    // faint tint). Tune toward 0 for pitch-black, toward 0.3 for softer.
+    return lerp(0.15, 1.0, shadow);
 }
 
 // --- Vertex shaders ---
@@ -494,6 +570,7 @@ float4 PSMain(PSInput input) : SV_TARGET
     finalColor.rgb *= ComputeShadow(input.worldPos);
     finalColor.rgb = ApplySurfaceSpecular(finalColor.rgb, input.worldPos, N);
     finalColor.rgb = ApplyCloudShadow(finalColor.rgb, input.worldPos);
+    finalColor.rgb = ApplyBuildingShadow(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyUnderwaterFade(finalColor.rgb, input.worldPos.z);
     finalColor.rgb = ApplyShroud(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyAtmosphere(finalColor.rgb, input.worldPos);
@@ -594,6 +671,7 @@ float4 PSMainAlphaTest(PSInput input) : SV_TARGET
     finalColor.rgb *= ComputeShadow(input.worldPos);
     finalColor.rgb = ApplySurfaceSpecular(finalColor.rgb, input.worldPos, N);
     finalColor.rgb = ApplyCloudShadow(finalColor.rgb, input.worldPos);
+    finalColor.rgb = ApplyBuildingShadow(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyShroud(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyAtmosphere(finalColor.rgb, input.worldPos);
 
@@ -694,6 +772,7 @@ float4 PSMainAlphaTestEdge(PSInput input) : SV_TARGET
     finalColor.rgb *= ComputeShadow(input.worldPos);
     finalColor.rgb = ApplySurfaceSpecular(finalColor.rgb, input.worldPos, N);
     finalColor.rgb = ApplyCloudShadow(finalColor.rgb, input.worldPos);
+    finalColor.rgb = ApplyBuildingShadow(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyShroud(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyAtmosphere(finalColor.rgb, input.worldPos);
 
@@ -718,6 +797,7 @@ float4 PSMainTerrainMaskBase(PSInput2Tex input) : SV_TARGET
     finalColor.rgb *= ComputeShadow(input.worldPos);
     finalColor.rgb = ApplySurfaceSpecular(finalColor.rgb, input.worldPos, N);
     finalColor.rgb = ApplyCloudShadow(finalColor.rgb, input.worldPos);
+    finalColor.rgb = ApplyBuildingShadow(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyUnderwaterFade(finalColor.rgb, input.worldPos.z);
     finalColor.rgb = ApplyShroud(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyAtmosphere(finalColor.rgb, input.worldPos);
@@ -2128,6 +2208,16 @@ float4 VSShadowDepth(VSInput input) : SV_POSITION
 
 // Empty PS — depth-only rendering, no color output needed
 void PSShadowDepth() { }
+
+// Flat-alpha PS for silhouette baking: writes black with full alpha
+// wherever geometry rasterizes. The target texture is cleared to
+// (0,0,0,0) beforehand, so the result is a 2D mask of the model's
+// projected silhouette — exactly what the decal shader needs as a
+// shadow texture. Reused with the same VSShadowDepth entry point.
+float4 PSShadowSilhouette() : SV_TARGET
+{
+    return float4(0, 0, 0, 1);
+}
 
 )HLSL";
 

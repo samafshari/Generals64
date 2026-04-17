@@ -69,6 +69,7 @@
 #include "GameClient/GameClient.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/GameText.h"
+#include "GameClient/Mouse.h"
 #include "GameClient/GadgetPushButton.h"
 #include "GameClient/GadgetProgressBar.h"
 #include "GameClient/GadgetStaticText.h"
@@ -126,7 +127,62 @@ static void commandButtonTooltip(GameWindow *window,
 													WinInstanceData *instData,
 													UnsignedInt mouse)
 {
-	TheControlBar->showBuildTooltipLayout(window);
+	// Route command-bar item tooltips through the Mouse::setCursorTooltip
+	// path (which is rendered as a top-most ImGui overlay by Inspector::Render).
+	// The legacy WindowLayout-based popup (m_buildToolTipLayout) never surfaces
+	// in the D3D11 port, so build a compact multi-line description instead:
+	//   Line 1:  <localized name>
+	//   Line 2:  "Cost: N"   (only for buildable units/structures with a cost)
+	//   Line 3+: localized description / cancel text
+	if (!window || !TheMouse)
+		return;
+	if (TheInGameUI && TheInGameUI->areTooltipsDisabled())
+	{
+		TheMouse->setCursorTooltip(UnicodeString::TheEmptyString);
+		return;
+	}
+	if (!BitIsSet(window->winGetStyle(), GWS_PUSH_BUTTON))
+		return;
+
+	const CommandButton *cb = (const CommandButton *)GadgetButtonGetData(window);
+	if (!cb)
+	{
+		TheMouse->setCursorTooltip(UnicodeString::TheEmptyString);
+		return;
+	}
+
+	UnicodeString tip;
+	if (cb->getTextLabel().isNotEmpty())
+		tip = TheGameText->fetch(cb->getTextLabel().str());
+
+	if (cb->getCommandType() != GUI_COMMAND_PURCHASE_SCIENCE)
+	{
+		const ThingTemplate *tt = cb->getThingTemplate();
+		if (tt)
+		{
+			const Player *lp = ThePlayerList ? ThePlayerList->getLocalPlayer() : nullptr;
+			UnsignedInt cost = lp ? tt->calcCostToBuild(const_cast<Player *>(lp)) : 0;
+			if (cost > 0)
+			{
+				UnicodeString costLine;
+				costLine.format(TheGameText->fetch("TOOLTIP:Cost"), cost);
+				if (!tip.isEmpty()) tip.concat(L"\n");
+				tip.concat(costLine);
+			}
+		}
+	}
+
+	if (cb->getDescriptionLabel().isNotEmpty())
+	{
+		UnicodeString descrip = TheGameText->fetch(cb->getDescriptionLabel());
+		if (!descrip.isEmpty())
+		{
+			if (!tip.isEmpty()) tip.concat(L"\n");
+			tip.concat(descrip);
+		}
+	}
+
+	TheMouse->setCursorTooltip(tip, -1);
 }
 
 /// mark the UI as dirty so the context of everything is re-evaluated

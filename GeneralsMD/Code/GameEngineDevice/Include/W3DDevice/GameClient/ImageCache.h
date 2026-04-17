@@ -18,7 +18,7 @@ public:
 
     // Get or load a texture by filename (e.g. "SCShellBG.tga")
     // Returns nullptr if the file can't be loaded
-    Texture* GetTexture(Device& device, const char* filename);
+    Texture* GetTexture(Device& device, const char* filename, bool generateMips = true);
 
     // Clear all cached textures
     void Clear();
@@ -26,7 +26,7 @@ public:
 private:
     ImageCache() = default;
 
-    bool LoadTGA(Device& device, const char* filename, Texture& tex);
+    bool LoadTGA(Device& device, const char* filename, Texture& tex, bool generateMips);
     bool LoadDDS(Device& device, const char* filename, Texture& tex);
 
     std::unordered_map<std::string, std::unique_ptr<Texture>> m_cache;

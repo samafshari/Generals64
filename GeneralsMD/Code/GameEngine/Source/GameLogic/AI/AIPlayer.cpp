@@ -2729,6 +2729,22 @@ void AIPlayer::queueUnits()
 
 	queueSupplyTruck();
 
+	// Build a once-per-call candidate list of this player's owned objects.
+	// Team::tryToRecruit's inner loop otherwise re-walks TheGameLogic's
+	// engine-wide chain on every invocation; with several teams × several
+	// work orders × several recruit attempts per order, on a 1500-object
+	// late-game map that pattern produced the 154 ms AIPlayer::doTeamBuilding
+	// spike captured in session 11 telemetry. Building the list once makes
+	// the inner iteration scale with the player's own unit count (~100-300)
+	// instead of the entire map. Deterministic — same objects, same order.
+	std::vector<Object*> recruitCandidates;
+	recruitCandidates.reserve(512);
+	for (Object* obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject())
+	{
+		if (obj->getControllingPlayer() == m_player)
+			recruitCandidates.push_back(obj);
+	}
+
 	// For each member of the current team to build, try to find a faction building to build it.
 	//
 	for ( DLINK_ITERATOR<TeamInQueue> iter = iterate_TeamBuildQueue(); !iter.done(); iter.advance())
@@ -2748,7 +2764,9 @@ void AIPlayer::queueUnits()
 			}
 			while (order->isWaitingToBuild()) {
 
-				Object *unit = team->m_team->tryToRecruit(order->m_thing, &home, TheAI->getAiData()->m_maxRecruitDistance);
+				Object *unit = team->m_team->tryToRecruitFromCandidates(
+					order->m_thing, &home, TheAI->getAiData()->m_maxRecruitDistance,
+					recruitCandidates);
 				if (unit)
 				{
 					order->m_numCompleted++;
@@ -3097,7 +3115,15 @@ void AIPlayer::update()
 	USE_PERF_TIMER(AIPlayer_update)
 	LIVE_PERF_SCOPE("AIPlayer::update");
 
-	doBaseBuilding();		// See if it's time to build another building. (self-throttled via m_buildDelay, 2s)
+	// Sub-phase instrumentation. The outer AIPlayer::update scope observed a
+	// 629 ms single-frame spike in session 6 (mean 1.19 ms, 528x outlier).
+	// These six scopes line up with the six work items below so the next
+	// session's shutdown report shows exactly which branch is responsible.
+	// Kept at phase-level only per LIVE_PERF budgeting — no per-unit scopes.
+	{
+		LIVE_PERF_SCOPE("AIPlayer::doBaseBuilding");
+		doBaseBuilding();		// See if it's time to build another building. (self-throttled via m_buildDelay, 2s)
+	}
 
 	// checkReadyTeams() and checkQueuedTeams() walk the per-player team queues
 	// every frame and have no internal throttling (unlike their siblings:
@@ -3113,16 +3139,36 @@ void AIPlayer::update()
 	const Int playerIdx = m_player ? m_player->getPlayerIndex() : 0;
 	if (((TheGameLogic->getFrame() + (UnsignedInt)playerIdx) % 5) == 0)
 	{
-		checkReadyTeams(); // See if any teams are ready to start.
+		{
+			LIVE_PERF_SCOPE("AIPlayer::checkReadyTeams");
+			checkReadyTeams(); // See if any teams are ready to start.
+		}
 
-		checkQueuedTeams(); // See if any teams are complete.
+		{
+			LIVE_PERF_SCOPE("AIPlayer::checkQueuedTeams");
+			checkQueuedTeams(); // See if any teams are complete.
+		}
 	}
 
-	doTeamBuilding(); // See if it's time to start another team. (self-throttled via m_teamDelay, 5s)
+	{
+		// Suspected spike site: processTeamBuilding -> queueUnits calls
+		// Team::tryToRecruit which walks the entire GameLogic object list once
+		// per WorkOrder per TeamInQueue, with an inner while-loop that pulls
+		// every matching unit. On a fully populated late-game map this is
+		// O(N_teams * N_workOrders * N_recruited * N_allObjects).
+		LIVE_PERF_SCOPE("AIPlayer::doTeamBuilding");
+		doTeamBuilding(); // See if it's time to start another team. (self-throttled via m_teamDelay, 5s)
+	}
 
-	doUpgradesAndSkills(); // See if it's time to build an upgrade or buy a skill.
+	{
+		LIVE_PERF_SCOPE("AIPlayer::doUpgradesAndSkills");
+		doUpgradesAndSkills(); // See if it's time to build an upgrade or buy a skill.
+	}
 
-	updateBridgeRepair(); // Handle any bridge repairs. (self-throttled via m_bridgeTimer, 1s)
+	{
+		LIVE_PERF_SCOPE("AIPlayer::updateBridgeRepair");
+		updateBridgeRepair(); // Handle any bridge repairs. (self-throttled via m_bridgeTimer, 1s)
+	}
 
 }
 

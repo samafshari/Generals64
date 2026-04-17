@@ -44,6 +44,8 @@
 #include "GameClient/InGameUI.h"
 #include "GameClient/Keyboard.h"
 #include "GameClient/Mouse.h"
+
+#include "Inspector/Inspector.h"
 #include "GameClient/GlobalLanguage.h"
 
 #include "GameLogic/GameLogic.h"
@@ -1138,64 +1140,57 @@ void Mouse::resetTooltipDelay()
 //-------------------------------------------------------------------------------------------------
 void Mouse::drawTooltip()
 {
-	if (TheScriptEngine->getFade()!=ScriptEngine::FADE_NONE) {
-		return;
-	}
+	// Legacy path is a no-op — tooltips now render as an ImGui overlay.
+	// Inspector::Render polls getActiveTooltipForOverlay() directly each
+	// frame via the C bridge below, so we don't need to push state from
+	// here (which only runs while the 2D mouse is being drawn and depends
+	// on m_visible / redraw mode).
+}
 
-	/// @todo: Still need to put in display logic so it puts the tool tips in a visible position on the edge of the screen
-	if( m_displayTooltip && TheDisplay && m_tooltipDisplayString && (m_tooltipDisplayString->getTextLength() > 0) && !m_isTooltipEmpty)
+Bool Mouse::getActiveTooltipForOverlay(char* outUtf8, int bufSize, int* outX, int* outY) const
+{
+	if (!outUtf8 || bufSize <= 1)
+		return FALSE;
+	outUtf8[0] = '\0';
+
+	if (TheScriptEngine && TheScriptEngine->getFade() != ScriptEngine::FADE_NONE)
+		return FALSE;
+	if (!m_displayTooltip || m_isTooltipEmpty || !m_tooltipDisplayString)
+		return FALSE;
+	if (m_tooltipDisplayString->getTextLength() <= 0)
+		return FALSE;
+
+	// DisplayString::getText returns by value; safe to bind to a temporary.
+	const UnicodeString text = const_cast<DisplayString*>(m_tooltipDisplayString)->getText();
+	const WideChar* wide = text.str();
+	if (!wide || wide[0] == L'\0')
+		return FALSE;
+
+	const int written = ::WideCharToMultiByte(
+		CP_UTF8, 0, wide, -1,
+		outUtf8, bufSize - 1,
+		nullptr, nullptr);
+	if (written <= 0)
 	{
-		Int width, xPos;
-		Int height, yPos;
-		m_tooltipDisplayString->getSize(&width,&height);
-		xPos = m_currMouse.pos.x + 20;
-		yPos = m_currMouse.pos.y;// + 20;
-
-		if( xPos + width + 4 > m_maxX ) // +4 for spill
-		{
-			//xPos = m_maxX - width;
-			xPos -= 20 + width;
-		}
-		if( yPos + height + 4 > m_maxY ) // +4 for spill
-		{
-			//yPos = m_maxY - height;
-			yPos -= /*40 +*/ height;
-		}
-
-		Int boxWidth = (m_tooltipAnimateBackground)?(min(width, m_highlightPos)):width;
-
-#define GMC(x) GameMakeColor(x.red, x.green, x.blue, x.alpha)
-#define COLOR(x) GMC(m_tooltipColor##x)
-		TheDisplay->drawFillRect(xPos, yPos, boxWidth + 2,height + 2, GMC(m_tooltipBackColor));//GameMakeColor(0,0,0,125));
-		TheDisplay->drawOpenRect(xPos, yPos, boxWidth + 2,height + 2, 1.0, COLOR(Border));//GameMakeColor(20,20,20,255));
-
-		// build clip rect
-		IRegion2D clipRegion;
-		clipRegion.lo.x = xPos+2;
-		clipRegion.lo.y = yPos+1;
-		clipRegion.hi.x = xPos+2+m_highlightPos;
-		clipRegion.hi.y = yPos+1+height;
-		m_tooltipDisplayString->setClipRegion(&clipRegion);
-		m_tooltipDisplayString->draw(xPos +2, yPos +1, GMC(m_tooltipTextColor), COLOR(Shadow));//GameMakeColor(220,220,220,255),GameMakeColor(20,20,20,125));
-
-		// highlight section
-		const Int HIGHLIGHT_WIDTH = 15;
-		clipRegion.lo.x = xPos+2+m_highlightPos-HIGHLIGHT_WIDTH;
-		clipRegion.lo.y = yPos+1;
-		clipRegion.hi.x = xPos+2+m_highlightPos;
-		clipRegion.hi.y = yPos+1+height;
-		m_tooltipDisplayString->setClipRegion(&clipRegion);
-		m_tooltipDisplayString->draw(xPos +2, yPos +1, COLOR(Highlight), COLOR(Shadow));//GameMakeColor(255,255,0,255),GameMakeColor(20,20,20,125));
-
-		// get ready for the next part of the anim
-		if (m_highlightPos < width + HIGHLIGHT_WIDTH)
-		{
-			UnsignedInt now = timeGetTime();
-			m_highlightPos = (width*(now-m_highlightUpdateStart))/m_tooltipFillTime;
-		}
+		outUtf8[0] = '\0';
+		return FALSE;
 	}
+	outUtf8[written] = '\0';
 
+	if (outX) *outX = m_currMouse.pos.x;
+	if (outY) *outY = m_currMouse.pos.y;
+	return TRUE;
+}
 
+// C bridge exposed to Inspector (which doesn't include Mouse.h / TheMouse).
+// Returns TRUE with the tooltip text + anchor filled in, FALSE when nothing
+// should be drawn this frame. Any context that can reach TheMouse can define
+// this symbol — we put it in the same TU as Mouse so it can stay private to
+// the engine and doesn't need a header rev.
+extern "C" int InspectorQueryGameTooltip(char* outUtf8, int bufSize, int* outX, int* outY)
+{
+	if (!TheMouse) return 0;
+	return TheMouse->getActiveTooltipForOverlay(outUtf8, bufSize, outX, outY) ? 1 : 0;
 }
 
 // ------------------------------------------------------------------------------------------------

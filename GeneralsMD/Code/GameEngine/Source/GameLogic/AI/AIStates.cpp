@@ -850,8 +850,10 @@ AsciiString AIStateMachine::getCurrentStateName() const
  */
 StateReturnType AIStateMachine::updateStateMachine()
 {
+	// LivePerf gives per-frame aggregate (HUD + SQLite). The explicit
+	// per-sample TELEMETRY_SCOPE was removed: ~115 calls/frame × 30 Hz =
+	// 3,450 writes/sec was measurably costing AI frame time.
 	LIVE_PERF_SCOPE("AIStateMachine::update");
-	TELEMETRY_SCOPE("AI", "AIStateMachine::update");
 	//-extraLogging
 	#if defined(RTS_DEBUG)
 		Bool idle = getOwner()->getAI()->isIdle();

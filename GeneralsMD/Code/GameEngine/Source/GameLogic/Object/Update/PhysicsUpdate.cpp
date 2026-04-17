@@ -621,8 +621,10 @@ DECLARE_PERF_TIMER(PhysicsBehavior)
 UpdateSleepTime PhysicsBehavior::update()
 {
 	USE_PERF_TIMER(PhysicsBehavior)
+	// LivePerf covers this site (HUD + per-frame SQLite aggregate). The
+	// per-sample TELEMETRY_SCOPE was removed: 3.7µs mean was below telemetry
+	// overhead itself and it generated ~400k rows/session with zero signal.
 	LIVE_PERF_SCOPE("PhysicsBehavior::update");
-	TELEMETRY_SCOPE("Update", "PhysicsBehavior::update");
 
 	Object*														obj = getObject();
 	const PhysicsBehaviorModuleData*	d = getPhysicsBehaviorModuleData();

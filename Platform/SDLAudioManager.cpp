@@ -715,6 +715,25 @@ void SDLAudioManager::killAudioEventImmediately(AudioHandle audioEvent)
     }
 }
 
+void SDLAudioManager::killVoiceOnObject(UnsignedInt objectID)
+{
+    if (objectID == 0)
+        return;
+    for (auto it = m_playing.begin(); it != m_playing.end(); /**/)
+    {
+        if (it->isVoice && it->objectID == objectID)
+        {
+            if (it->stream)
+                SDL_DestroyAudioStream(it->stream);
+            it = m_playing.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
 // --- Music ---
 
 void SDLAudioManager::nextMusicTrack()

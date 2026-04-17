@@ -322,7 +322,7 @@ void W3DLaserDraw::doDrawModule(const Matrix3D* transformMtx)
 	float dy = endPos->y - startPos->y;
 	float dz = endPos->z - startPos->z;
 	float beamLen = sqrtf(dx*dx + dy*dy + dz*dz);
-	if (beamLen < 0.5f) return;
+	if (beamLen <= 0.001f) return;
 
 	auto& renderer = Render::Renderer::Instance();
 	const auto& frameData = renderer.GetFrameData();

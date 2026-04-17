@@ -87,9 +87,8 @@ float4 PSDecal(PSInput input) : SV_TARGET
     float4 result = tex * input.color;
     // hmParams.y = blend mode: 1+ = alpha/additive (faction logos, selection circles).
     // Some decal textures lack an alpha channel (24-bit TGA / DXT1), so all pixels
-    // have alpha == 1 and the black background becomes opaque.  For those textures,
+    // have alpha == 1 and the black background becomes opaque. For those textures,
     // derive alpha from brightness so black = transparent, colored = opaque.
-    // Only apply when the raw texture alpha is ~1.0 (no real alpha data).
     if (hmParams.y > 0.5 && tex.a > 0.99)
         result.a = max(result.r, max(result.g, result.b));
     return result;

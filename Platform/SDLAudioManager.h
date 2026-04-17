@@ -38,6 +38,7 @@ public:
     void resumeAudio(AudioAffect which) override;
     void pauseAmbient(Bool shouldPause) override;
     void killAudioEventImmediately(AudioHandle audioEvent) override;
+    void killVoiceOnObject(UnsignedInt objectID) override;
 
     void nextMusicTrack() override;
     void prevMusicTrack() override;

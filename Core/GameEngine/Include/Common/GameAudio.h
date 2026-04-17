@@ -168,6 +168,13 @@ class AudioManager : public SubsystemInterface
 		virtual void removeAudioEvent( AudioHandle audioEvent );	///< Remove an audio event, stop for instance.
 		virtual void killAudioEventImmediately( AudioHandle audioEvent ) = 0;
 
+		// Preempt any voice currently playing for the given object so the next
+		// voice event (move/attack/guard) replaces it instead of being gated by
+		// SoundManager::canPlayNow's one-voice-per-object rule. Default is a
+		// no-op; the SDL backend walks its playing list and destroys matching
+		// streams. Miles already handles interrupt+kill via handleToKill.
+		virtual void killVoiceOnObject( UnsignedInt /*objectID*/ ) {}
+
 		virtual Bool isValidAudioEvent( const AudioEventRTS *eventToCheck ) const;	///< validate that this piece of audio exists
 		virtual Bool isValidAudioEvent( AudioEventRTS *eventToCheck ) const;	///< validate that this piece of audio exists
 

@@ -91,7 +91,8 @@ extern bool g_debugDisableParticles;
 extern bool g_debugDisableSnow;
 extern bool g_debugDisableShadowDecals;
 extern bool g_debugDisableShadowMap;
-extern int  g_debugShadowMapViz;
+extern bool g_debugShadowGizmos;
+extern int  g_debugBuildingShadowViz;
 extern bool g_debugDisableWater;
 extern bool g_debugDisableReflection;
 extern bool g_debugDisableUI;
@@ -105,7 +106,6 @@ extern bool g_debugDisableTracerStreak;
 extern bool g_debugDisableVolumetric;
 extern bool g_debugDisableModernAOE;
 extern bool g_useEnhancedWater;
-extern bool g_useEnhancedShadows;
 extern bool g_useEnhancedParticles;
 extern bool g_useEnhancedSmudges;
 extern bool g_debugDisableColorAwareFX;
@@ -2550,7 +2550,6 @@ void DrawRenderTogglesPanel()
         {
             static const Item enhancements[] = {
                 {"Enhanced Water (dual normals + fresnel + foam + reflection terrain)", &g_useEnhancedWater},
-                {"Enhanced Shadows (bbox size + sun rotation + terrain self-shadow + mesh casters)", &g_useEnhancedShadows},
                 {"Enhanced Particles (4-way blend + unlit shader)", &g_useEnhancedParticles},
                 {"Enhanced Smudges (heat-haze refraction on explosions)", &g_useEnhancedSmudges},
             };
@@ -2621,13 +2620,21 @@ void DrawRenderTogglesPanel()
                 {"FSR video upscale",   &g_debugDisableFSRVideo},
             };
             for (const Item& it : passes) DrawItem(it, s_filter);
-
-            // Shadow map visualization mode. Lives with the passes it debugs.
             ImGui::Separator();
-            ImGui::TextDisabled("Shadow map debug viz:");
-            ImGui::RadioButton("Normal",        &g_debugShadowMapViz, 0); ImGui::SameLine();
-            ImGui::RadioButton("Viz depth",     &g_debugShadowMapViz, 1); ImGui::SameLine();
-            ImGui::RadioButton("Force darken",  &g_debugShadowMapViz, 2);
+            ImGui::Checkbox("Shadow decal gizmos (green=with robj, yellow=scripted)",
+                            &g_debugShadowGizmos);
+            ImGui::TextDisabled("Draws a ground rectangle + X at each caster's shadow stamp site.");
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Building-shadow shader debug:");
+            ImGui::RadioButton("Normal",    &g_debugBuildingShadowViz, 0); ImGui::SameLine();
+            ImGui::RadioButton("Cyan fill", &g_debugBuildingShadowViz, 1); ImGui::SameLine();
+            ImGui::RadioButton("Magenta rings", &g_debugBuildingShadowViz, 2); ImGui::SameLine();
+            ImGui::RadioButton("Red rects", &g_debugBuildingShadowViz, 3);
+            ImGui::TextDisabled(
+                "Cyan fill: if entire terrain turns cyan, cbuffer upload works.\n"
+                "Magenta rings: each rect center gets a 50-unit circle.\n"
+                "Red rects: fills each rotated rect bright red.");
             ImGui::EndTabItem();
         }
 

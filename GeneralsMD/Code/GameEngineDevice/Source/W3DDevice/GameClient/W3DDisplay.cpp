@@ -167,6 +167,25 @@ bool g_debugDisableShadowMap = true;         // GPU shadow mapping — OFF by de
 //   1 = visualize raw shadow map depth (red gradient on terrain = casters wrote depth)
 //   2 = force-darken inside light frustum (proves matrix chain covers receivers)
 int  g_debugShadowMapViz    = 0;
+// When true, BuildCameraFitLightVP also emits world-space gizmos through
+// Render::Debug: yellow sun arrow, orange cross at light eye, green
+// crosses at the 8 camera frustum corners, magenta wireframe of the
+// orthographic shadow volume. Flip this from Inspector to see whether
+// the shadow frustum actually encloses your buildings.
+bool g_debugShadowGizmos    = false;
+// Debug viz mode for ApplyBuildingShadow in the shader:
+//   0 = normal soft rect shadow
+//   1 = CYAN flood-fill if any rect registered
+//   2 = MAGENTA ring at radius ~50 around each rect center
+//   3 = RED fill inside each rect (ignores height guard)
+int  g_debugBuildingShadowViz = 0;
+// When non-zero, overrides the game's time-of-day sun direction for the
+// shadow pass ONLY (scene lighting is unchanged). Expressed as an
+// elevation angle above the horizon in degrees. 90 = sun straight up
+// (tiny shadows), 20 = low evening sun (long dramatic shadows). 0 keeps
+// the game's actual time-of-day sun. Useful for testing shadow quality
+// without waiting for a sunset in-game.
+float g_debugShadowSunElevDeg = 0.0f;
 bool g_debugDisableLensFlare = false;         // Procedural lens flare — ON by default
 bool g_debugDisableSmoothParticleFade = false; // Smooth lifetime-based particle alpha — ON by default
 bool g_debugDisableVolumetricTrails = false;  // GPU volumetric smoke trails — ON by default
@@ -184,7 +203,6 @@ bool g_debugDisableBloom = false;             // Bloom — ON by default
 // scale 0.45→0.15, fresnel mix 0.35→0.15, spec pow96*0.55→pow48*0.25,
 // foam threshold 1/2000→1/3500, foam uses smoothstep instead of pow.
 bool g_useEnhancedWater = false;
-bool g_useEnhancedShadows = true;    // Enhanced shadow decals (bbox sizing + sun rotation + silhouette textures)
 bool g_useEnhancedParticles = true;  // Enhanced particles (4-way blend mode preservation + unlit shader)
 bool g_useEnhancedSmudges = true;    // Enhanced smudges (heat-haze refraction on explosions)
 bool g_useDepthBasedFoam = false;            // Implied by g_useEnhancedWater
@@ -745,104 +763,11 @@ void W3DDisplay::draw()
 			// Set time for shader animations (water bump, cloud scroll)
 			renderer.SetTime(static_cast<float>(WW3D::Get_Sync_Time()));
 
-			// --- GPU SHADOW MAP PASS ---
-			// Renders selected casters from the sun's POV into a depth-only
-			// RT, then the regular PSMain ComputeShadow() samples it to
-			// darken pixels in shadow. Default ON; toggle with
-			// g_debugDisableShadowMap.
-			//
-			// Prior attempts regressed on three fronts, all fixed here:
-			//   1. "Skybox occludes shadows" — we walked m_3DScene, which
-			//      contains the skybox mesh. It wrote dome-wide depth and
-			//      shadowed everything below. FIX: do NOT walk m_3DScene.
-			//      Only walk TheGameClient->getDrawableList().
-			//   2. "Terrain shadows wrong" — AABB swam with the camera and
-			//      the shadow map shimmered. FIX: BuildCameraFitLightVP
-			//      now snaps the light-space AABB to shadow-texel grid.
-			//   3. "Things that shouldn't cast cast" — drawable list had
-			//      projectiles, props, decoration, UI helpers. FIX: tight
-			//      KINDOF allowlist (structures, infantry, vehicles,
-			//      aircraft, immobile walls, trees, shrubbery only).
-			//
-			// Terrain is a RECEIVER but never a caster — no self-shadow
-			// acne, matches original DX8 shadow-projector behavior.
-			if (!g_debugDisableShadowMap)
-			{
-				LIVE_PERF_SCOPE("W3DDisplay::shadowMap");
-
-				// ModelRenderer needs m_camera set; RenderRenderObject
-				// no-ops without it. Use the regular camera — shadow pass
-				// overrides cbuffer viewProjection with the light VP, and
-				// caster-mode skips frustum culling so the camera frustum
-				// not matching the light frustum is fine.
-				Render::ModelRenderer::Instance().BeginFrame(camera);
-
-				renderer.SetShadowEnabled(true);
-
-				Render::Float3 frustumCorners[8] = {};
-				const Vector3* w3dCorners = camera ? camera->Get_Frustum_Corners() : nullptr;
-				if (w3dCorners)
-				{
-					for (int i = 0; i < 8; ++i)
-						frustumCorners[i] = { w3dCorners[i].X, w3dCorners[i].Y, w3dCorners[i].Z };
-				}
-				renderer.BeginShadowPass(w3dCorners ? frustumCorners : nullptr);
-
-				Render::ModelRenderer::Instance().SetShadowCasterMode(true);
-
-				// DEBUG: submit every visible drawable regardless of filter
-				// to rule out the allowlist. Also logs submission count so
-				// we can see in DbgView whether casters are reaching the
-				// submit path at all.
-				int submittedCount = 0;
-				if (TheGameClient)
-				{
-					Drawable* draw = TheGameClient->getDrawableList();
-					while (draw)
-					{
-						if (draw->isDrawableEffectivelyHidden())
-						{
-							draw = draw->getNextDrawable();
-							continue;
-						}
-						for (DrawModule** dm = draw->getDrawModules(); *dm; ++dm)
-						{
-							ObjectDrawInterface* odi = (*dm)->getObjectDrawInterface();
-							if (!odi)
-								continue;
-							W3DModelDraw* w3dDraw = static_cast<W3DModelDraw*>(odi);
-							RenderObjClass* renderObject = w3dDraw->getRenderObject();
-							if (renderObject && !renderObject->Is_Hidden())
-							{
-								Render::ModelRenderer::Instance().RenderRenderObject(renderObject);
-								++submittedCount;
-							}
-						}
-
-						draw = draw->getNextDrawable();
-					}
-				}
-
-				Render::ModelRenderer::Instance().SetShadowCasterMode(false);
-
-				static int s_shadowDiagFrames = 0;
-				if (s_shadowDiagFrames < 12)
-				{
-					char b[160];
-					snprintf(b, sizeof(b),
-						"[SHADOW] frame=%d submitted=%d shadowReady_implicit=yes\n",
-						s_shadowDiagFrames, submittedCount);
-					OutputDebugStringA(b);
-					++s_shadowDiagFrames;
-				}
-
-				renderer.EndShadowPass();
-				renderer.BindShadowMap();
-			}
-			else
-			{
-				renderer.SetShadowEnabled(false);
-			}
+			// GPU shadow map retired in favor of per-caster baked silhouettes
+			// (the original game's approach, see D3D11Shims SilhouetteBaker).
+			// The Renderer-side infrastructure stays in place for A/B testing
+			// via Inspector but runs as a no-op here by default.
+			renderer.SetShadowEnabled(false);
 
 			// depth is cleared in BeginFrame — no extra clear needed
 			{
@@ -1497,6 +1422,96 @@ void W3DDisplay::drawRemainingRectClock(Int startX, Int startY, Int width, Int h
 			renderer.DrawTri(cx, sy, cx, cy, cx - hw * pct, sy, color);
 		}
 	}
+}
+
+static void computeClippedImageDraw(
+	Int startX, Int startY, Int endX, Int endY,
+	const Region2D* imageUV, Region2D& outUV,
+	Int& outClippedStartX, Int& outClippedStartY,
+	Int& outClippedEndX, Int& outClippedEndY,
+	bool clipEnabled, const IRegion2D& clipRegion,
+	bool& outDiscard)
+{
+	outUV = imageUV ? *imageUV : Region2D{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
+	outClippedStartX = startX;
+	outClippedStartY = startY;
+	outClippedEndX = endX;
+	outClippedEndY = endY;
+	outDiscard = false;
+
+	if (!clipEnabled)
+		return;
+
+	if (outClippedEndX <= clipRegion.lo.x || outClippedEndY <= clipRegion.lo.y ||
+		outClippedStartX >= clipRegion.hi.x || outClippedStartY >= clipRegion.hi.y)
+	{
+		outDiscard = true;
+		return;
+	}
+
+	const Int originalWidth = endX - startX;
+	const Int originalHeight = endY - startY;
+	if (originalWidth <= 0 || originalHeight <= 0)
+	{
+		outDiscard = true;
+		return;
+	}
+
+	outClippedStartX = outClippedStartX > clipRegion.lo.x ? outClippedStartX : clipRegion.lo.x;
+	outClippedStartY = outClippedStartY > clipRegion.lo.y ? outClippedStartY : clipRegion.lo.y;
+	outClippedEndX   = outClippedEndX   < clipRegion.hi.x ? outClippedEndX   : clipRegion.hi.x;
+	outClippedEndY   = outClippedEndY   < clipRegion.hi.y ? outClippedEndY   : clipRegion.hi.y;
+
+	const float uWidth = outUV.hi.x - outUV.lo.x;
+	const float vHeight = outUV.hi.y - outUV.lo.y;
+	const float leftPercent = float(outClippedStartX - startX) / float(originalWidth);
+	const float rightPercent = float(outClippedEndX - startX) / float(originalWidth);
+	const float topPercent = float(outClippedStartY - startY) / float(originalHeight);
+	const float bottomPercent = float(outClippedEndY - startY) / float(originalHeight);
+
+	outUV.lo.x = outUV.lo.x + (uWidth * leftPercent);
+	outUV.hi.x = outUV.lo.x + (uWidth * (rightPercent - leftPercent));
+	outUV.lo.y = outUV.lo.y + (vHeight * topPercent);
+	outUV.hi.y = outUV.lo.y + (vHeight * (bottomPercent - topPercent));
+}
+
+void W3DDisplay::drawImageRotatedCCW90(const Image *image, Int startX, Int startY,
+	Int endX, Int endY, Color color, DrawImageMode mode)
+{
+	if (!image)
+		return;
+
+	auto& renderer = Render::Renderer::Instance();
+	AsciiString filename = image->getFilename();
+	if (filename.isEmpty())
+		return;
+
+	Region2D clippedUV;
+	Int clippedStartX, clippedStartY, clippedEndX, clippedEndY;
+	bool discard = false;
+	computeClippedImageDraw(startX, startY, endX, endY,
+		image->getUV(), clippedUV,
+		clippedStartX, clippedStartY, clippedEndX, clippedEndY,
+		m_isClippedEnabled != 0, m_clipRegion, discard);
+	if (discard)
+		return;
+
+	Render::Texture* tex = Render::ImageCache::Instance().GetTexture(
+		renderer.GetDevice(), filename.str());
+	if (!tex)
+		return;
+
+	if (mode == DRAW_IMAGE_GRAYSCALE)
+		renderer.Set2DGrayscale(true);
+
+	renderer.DrawImageUVRotatedCCW90(*tex,
+		(float)clippedStartX, (float)clippedStartY,
+		(float)(clippedEndX - clippedStartX), (float)(clippedEndY - clippedStartY),
+		clippedUV.lo.x, clippedUV.lo.y, clippedUV.hi.x, clippedUV.hi.y,
+		color);
+
+	if (mode == DRAW_IMAGE_GRAYSCALE)
+		renderer.Set2DGrayscale(false);
 }
 
 void W3DDisplay::drawImage(const Image *image, Int startX, Int startY,

@@ -151,6 +151,13 @@ bool createSchema(sqlite3* db)
     if (!exec(db, "PRAGMA journal_mode=WAL;"))       return false;
     if (!exec(db, "PRAGMA synchronous=NORMAL;"))     return false;
     if (!exec(db, "PRAGMA temp_store=MEMORY;"))      return false;
+    // 64 MB page cache — writer INSERTs cheap by keeping indexes hot;
+    // shutdown report queries scan ~1-2 M rows and also benefit.
+    if (!exec(db, "PRAGMA cache_size=-65536;"))      return false;
+    // Keep WAL bounded. Without this the WAL file can grow to hundreds of
+    // megabytes before autocheckpoint, then a single checkpoint stalls the
+    // game for seconds.
+    if (!exec(db, "PRAGMA wal_autocheckpoint=2000;"))return false;
 
     static const char* schema =
         "CREATE TABLE IF NOT EXISTS sessions ("
@@ -269,8 +276,128 @@ bool openDb()
         return false;
     }
 
-    DEBUG_LOG(("Telemetry: session=%lld file=%s", (long long)g_sessionId, path));
+    DEBUG_LOG(("Telemetry: session=%lld file=%s", (long long)g_sessionId, g_dbPath));
+    std::fprintf(stderr, "[Telemetry] session=%lld file=%s\n",
+                 (long long)g_sessionId, g_dbPath);
     return true;
+}
+
+// Write a human-readable bottleneck report beside the sqlite file at shutdown.
+// Runs a single SQL pass to enumerate (category, name) groups ordered by the
+// weight heuristic (n * mean), then for each one pulls sorted durations to
+// compute p50/p95/p99. Matches the logic in DumpBottlenecks but targets a
+// file handle the user can open without running a separate sqlite3 binary.
+void writeShutdownReport()
+{
+    if (!g_db || g_dbPath[0] == '\0') return;
+
+    // Fold the WAL into the main file before we start querying — otherwise
+    // each shutdown-report query has to read from both the main file AND
+    // the WAL, doubling the scan cost on the critical path where Windows is
+    // already counting down our WM_CLOSE grace period (~5 s). TRUNCATE mode
+    // also caps the WAL file size so the repo isn't littered with huge
+    // -wal files after abnormal exits.
+    exec(g_db, "PRAGMA wal_checkpoint(TRUNCATE);");
+
+    // report_<session>.txt beside the DB so repeated runs don't clobber
+    // each other and the user can compare.
+    char reportPath[1100];
+    std::snprintf(reportPath, sizeof(reportPath),
+                  "%s.report_%lld.txt", g_dbPath, (long long)g_sessionId);
+    FILE* fp = std::fopen(reportPath, "w");
+    if (!fp)
+    {
+        DEBUG_LOG(("Telemetry: could not open report file %s", reportPath));
+        return;
+    }
+    // Unbuffered: on abnormal shutdown we still get partial output on disk,
+    // which is the whole point of writing a report at shutdown. A previous
+    // run produced a 0-byte file because the default 4KB userland buffer
+    // never flushed.
+    std::setvbuf(fp, nullptr, _IONBF, 0);
+
+    std::fprintf(fp,
+        "Generals Telemetry Report\n"
+        "  session   : %lld\n"
+        "  database  : %s\n"
+        "  generated : shutdown\n"
+        "  events dropped (ring full): %lld\n\n",
+        (long long)g_sessionId, g_dbPath, (long long)g_dropped.load());
+
+    // Top bottlenecks using only v_rollup aggregates. We do NOT fetch sorted
+    // per-group durations for percentiles — with 624k-row groups in real
+    // gameplay that consumes ~5 MB per group, runs for seconds, and in the
+    // previous implementation crashed the report writer before any fprintf
+    // flushed. Percentiles are available on-demand via the richer offline
+    // query in tools/telemetry_report.sql (NTILE-based, runs in one pass).
+    std::fprintf(fp, "=== Top 40 bottlenecks (ranked by total_ms = n * mean) ===\n");
+    std::fprintf(fp, "%-10s %-44s %10s %12s %12s %12s\n",
+        "category", "name", "count", "mean_us", "max_us", "total_ms");
+
+    sqlite3_stmt* s = nullptr;
+    const char* kSql =
+        "SELECT category, name, n, mean_us, max_us, (n * mean_us) / 1000.0 AS total_ms"
+        "  FROM v_rollup"
+        " WHERE session_id=? ORDER BY n*mean_us DESC LIMIT 40;";
+    if (sqlite3_prepare_v2(g_db, kSql, -1, &s, nullptr) == SQLITE_OK)
+    {
+        sqlite3_bind_int64(s, 1, g_sessionId);
+        while (sqlite3_step(s) == SQLITE_ROW)
+        {
+            std::fprintf(fp, "%-10s %-44s %10lld %12.1f %12lld %12.1f\n",
+                reinterpret_cast<const char*>(sqlite3_column_text(s, 0)),
+                reinterpret_cast<const char*>(sqlite3_column_text(s, 1)),
+                (long long)sqlite3_column_int64(s, 2),
+                sqlite3_column_double(s, 3),
+                (long long)sqlite3_column_int64(s, 4),
+                sqlite3_column_double(s, 5));
+        }
+        sqlite3_finalize(s);
+    }
+
+    // Per-category totals.
+    std::fprintf(fp, "\n=== Per-category totals ===\n");
+    std::fprintf(fp, "%-12s %10s %14s %12s\n", "category", "count", "total_ms", "mean_us");
+    if (sqlite3_prepare_v2(g_db,
+            "SELECT category, COUNT(*), SUM(duration_us)/1000.0, AVG(duration_us)"
+            "   FROM events WHERE session_id=?"
+            "  GROUP BY category ORDER BY SUM(duration_us) DESC;",
+            -1, &s, nullptr) == SQLITE_OK)
+    {
+        sqlite3_bind_int64(s, 1, g_sessionId);
+        while (sqlite3_step(s) == SQLITE_ROW)
+        {
+            std::fprintf(fp, "%-12s %10lld %14.1f %12.1f\n",
+                reinterpret_cast<const char*>(sqlite3_column_text(s, 0)),
+                (long long)sqlite3_column_int64(s, 1),
+                sqlite3_column_double(s, 2),
+                sqlite3_column_double(s, 3));
+        }
+        sqlite3_finalize(s);
+    }
+
+    // Worst frames.
+    std::fprintf(fp, "\n=== Worst 20 frames (by total event duration) ===\n");
+    std::fprintf(fp, "%12s %12s %14s\n", "frame_no", "events", "frame_total_ms");
+    if (sqlite3_prepare_v2(g_db,
+            "SELECT frame_no, COUNT(*), SUM(duration_us)/1000.0"
+            "   FROM events WHERE session_id=?"
+            "  GROUP BY frame_no ORDER BY SUM(duration_us) DESC LIMIT 20;",
+            -1, &s, nullptr) == SQLITE_OK)
+    {
+        sqlite3_bind_int64(s, 1, g_sessionId);
+        while (sqlite3_step(s) == SQLITE_ROW)
+        {
+            std::fprintf(fp, "%12d %12lld %14.1f\n",
+                sqlite3_column_int(s, 0),
+                (long long)sqlite3_column_int64(s, 1),
+                sqlite3_column_double(s, 2));
+        }
+        sqlite3_finalize(s);
+    }
+
+    std::fclose(fp);
+    std::fprintf(stderr, "[Telemetry] wrote %s\n", reportPath);
 }
 
 // --- Writer thread -------------------------------------------------------
@@ -391,6 +518,9 @@ void Shutdown()
         {
             DEBUG_LOG(("Telemetry: %lld events dropped (ring full)", (long long)dropped));
         }
+        // Write a human-readable text report beside the DB so the user
+        // doesn't need sqlite3.exe to see the session's hotspots.
+        writeShutdownReport();
         sqlite3_close(g_db);
         g_db = nullptr;
     }

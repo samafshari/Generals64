@@ -39,6 +39,12 @@
 #include "Core/Device.h"
 
 #include <cmath>
+#include <cstdarg>
+#include <cstdio>
+#include <cstring>
+#include <mutex>
+#include <string>
+#include <vector>
 
 // C-bridges in D3D11Shims.cpp — keeps Inspector.cpp free of W3D /
 // CameraClass / Matrix3D headers (and the DX8-era includes they
@@ -53,6 +59,11 @@ extern "C" bool InspectorReadGameCamera(
 extern "C" void InspectorApplyCameraOverride(
     float posX, float posY, float posZ,
     float yaw, float pitch);
+
+// Pulls the active cursor tooltip from the engine's Mouse singleton. Defined
+// in Core/.../Mouse.cpp (same TU as TheMouse). Returns 1 if a tooltip should
+// be drawn this frame (and fills `outBuf`, `outX`, `outY`), 0 otherwise.
+extern "C" int InspectorQueryGameTooltip(char* outBuf, int bufSize, int* outX, int* outY);
 
 namespace Inspector
 {
@@ -71,6 +82,14 @@ namespace
     // doesn't accidentally freeze gameplay on first run.
     bool s_paused = false;
     int  s_pendingStepFrames = 0;
+
+    // Frame-scoped tooltip — populated by SetFrameTooltip (from Mouse::
+    // drawTooltip) and consumed+cleared by Render(). One tooltip per
+    // frame is plenty since the game only ever shows one at a time.
+    std::string s_tooltipText;
+    int         s_tooltipX = 0;
+    int         s_tooltipY = 0;
+    bool        s_tooltipPending = false;
 }
 
 bool Init(SDL_Window* window, ID3D11Device* device, ID3D11DeviceContext* context)
@@ -821,17 +840,105 @@ void BeginFrame()
         ImGui::ShowDemoWindow(&s_showDemo);
 }
 
+void SetFrameTooltip(const char* utf8Text, int anchorX, int anchorY)
+{
+    if (!utf8Text || utf8Text[0] == '\0')
+    {
+        s_tooltipPending = false;
+        s_tooltipText.clear();
+        return;
+    }
+    s_tooltipText.assign(utf8Text);
+    s_tooltipX = anchorX;
+    s_tooltipY = anchorY;
+    s_tooltipPending = true;
+}
+
 void Render()
 {
     if (!s_initialized)
         return;
+
+    // Game tooltip overlay: render regardless of s_enabled so the
+    // in-game tooltip behaviour doesn't depend on the inspector being
+    // visible. Offset the anchor so the tooltip sits to the lower-right
+    // of the cursor (matching the original Mouse::drawTooltip layout),
+    // and clamp against the display so it never spills off-screen.
+    //
+    // Poll the engine's Mouse state directly each frame. This bypasses
+    // the legacy drawTooltip push-path (which only ran while the 2D mouse
+    // was being drawn and silently lost updates across redraw modes) and
+    // gives the ImGui overlay a single authoritative source: whatever the
+    // engine thinks the cursor tooltip is right now.
+    {
+        char pollBuf[1024] = {0};
+        int  pollX = 0, pollY = 0;
+        if (InspectorQueryGameTooltip(pollBuf, (int)sizeof(pollBuf), &pollX, &pollY))
+        {
+            s_tooltipText.assign(pollBuf);
+            s_tooltipX = pollX;
+            s_tooltipY = pollY;
+            s_tooltipPending = true;
+        }
+        else
+        {
+            s_tooltipPending = false;
+            s_tooltipText.clear();
+        }
+    }
+
+    const bool hadTooltip = s_tooltipPending && !s_tooltipText.empty();
+    if (hadTooltip)
+    {
+        const ImGuiViewport* vp = ImGui::GetMainViewport();
+        ImVec2 pos(
+            static_cast<float>(s_tooltipX) + 20.0f,
+            static_cast<float>(s_tooltipY));
+
+        ImGui::SetNextWindowBgAlpha(0.85f);
+        ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+        const ImGuiWindowFlags flags =
+            ImGuiWindowFlags_NoDecoration |
+            ImGuiWindowFlags_NoInputs |
+            ImGuiWindowFlags_NoSavedSettings |
+            ImGuiWindowFlags_NoNav |
+            ImGuiWindowFlags_NoFocusOnAppearing |
+            ImGuiWindowFlags_AlwaysAutoResize;
+
+        if (ImGui::Begin("##GameTooltip", nullptr, flags))
+        {
+            // Use the platform viewport width as the wrap budget. A long
+            // tooltip that would otherwise disappear off the right edge
+            // wraps onto another line instead of being clipped.
+            const float wrap = vp->Size.x * 0.35f;
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrap);
+            ImGui::TextUnformatted(s_tooltipText.c_str());
+            ImGui::PopTextWrapPos();
+
+            // After the window measures itself, nudge it back on-screen
+            // if the auto-resize pushed it past the right/bottom edges.
+            const ImVec2 winSize = ImGui::GetWindowSize();
+            const ImVec2 winPos  = ImGui::GetWindowPos();
+            float clampedX = winPos.x;
+            float clampedY = winPos.y;
+            if (winPos.x + winSize.x + 4.0f > vp->Size.x)
+                clampedX = static_cast<float>(s_tooltipX) - winSize.x - 4.0f;
+            if (winPos.y + winSize.y + 4.0f > vp->Size.y)
+                clampedY = static_cast<float>(s_tooltipY) - winSize.y;
+            if (clampedX != winPos.x || clampedY != winPos.y)
+                ImGui::SetWindowPos(ImVec2(clampedX, clampedY));
+        }
+        ImGui::End();
+
+        s_tooltipPending = false;
+    }
 
     // Always end the frame and submit draw data — even when the
     // inspector is hidden — because BeginFrame already called NewFrame
     // and ImGui requires a balanced Render() call.
     ImGui::Render();
 
-    if (!s_enabled)
+    if (!s_enabled && !hadTooltip)
     {
         // No visible windows means no draw calls, but ImGui still
         // expects EndFrame bookkeeping via Render(). Skip the actual
@@ -868,6 +975,8 @@ void RequestStep(int) {}
 bool TryConsumeStep() { return false; }
 void BeginFrame() {}
 void Render() {}
+void SetFrameTooltip(const char*, int, int) {}
+void Log(const char*, ...) {}
 
 namespace Camera {
     static float s_dummySpeed = 250.0f;

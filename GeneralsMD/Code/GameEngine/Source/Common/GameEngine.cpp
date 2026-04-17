@@ -194,81 +194,73 @@ extern CComModule _Module;
 static void updateTGAtoDDS();
 
 //-------------------------------------------------------------------------------------------------
+// Format: "Generals64 - <BuildDate> <BuildTime> <DX11|VK> <RELEASE|DEBUG> - <map> - h:mm"
+// The map + timer suffix only appears while a playable/interactive game is running;
+// the shell game suppresses it because "map" and "elapsed time" aren't meaningful there.
 static void updateWindowTitle()
 {
-
-	DEBUG_ASSERTCRASH(TheVersion != nullptr, ("TheVersion is null"));
-	DEBUG_ASSERTCRASH(TheGameText != nullptr, ("TheGameText is null"));
-
-	UnicodeString title;
+	AsciiString title;
 
 	if (rts::ClientInstance::getInstanceId() > 1u)
 	{
-		UnicodeString str;
-		str.format(L"Instance:%.2u", rts::ClientInstance::getInstanceId());
-		title.concat(str);
+		char instBuf[16];
+		snprintf(instBuf, sizeof(instBuf), "Instance:%.2u ", rts::ClientInstance::getInstanceId());
+		title.concat(instBuf);
 	}
 
-	UnicodeString productString = TheVersion->getUnicodeProductString();
+	title.concat("Generals64 - ");
+	title.concat(__DATE__);
+	title.concat(" ");
+	title.concat(__TIME__);
 
-	if (!productString.isEmpty())
-	{
-		if (!title.isEmpty())
-			title.concat(L" ");
-		title.concat(productString);
-	}
-
-#if RTS_GENERALS
-	const WideChar* defaultGameTitle = L"Command and Conquer Generals1";
-#elif RTS_ZEROHOUR
-	const WideChar* defaultGameTitle = L"Command and Conquer Generals Zero Hour1";
-#endif
-	UnicodeString gameTitle = TheGameText->FETCH_OR_SUBSTITUTE("GUI:Command&ConquerGenerals", defaultGameTitle);
-
-	if (!gameTitle.isEmpty())
-	{
-		UnicodeString gameTitleFinal;
-		UnicodeString gameVersion = TheVersion->getUnicodeVersion();
-
-		if (productString.isEmpty())
-		{
-			gameTitleFinal = gameTitle;
-		}
-		else
-		{
-			UnicodeString gameTitleFormat = TheGameText->FETCH_OR_SUBSTITUTE("Version:GameTitle", L"for %ls");
-			gameTitleFinal.format(gameTitleFormat.str(), gameTitle.str());
-		}
-
-		if (!title.isEmpty())
-			title.concat(L" ");
-		title.concat(gameTitleFinal.str());
-		title.concat(L" ");
-		title.concat(gameVersion.str());
-	}
-
-	if (!title.isEmpty())
-	{
-		AsciiString titleA;
-		titleA.translate(title);	//get ASCII version for Win 9x
-
-		extern HWND ApplicationHWnd;  ///< our application window handle
-#ifdef USE_SDL
-		// Append backend identifier to window title
-		AsciiString fullTitle = titleA;
 #ifdef BUILD_WITH_VULKAN
-		fullTitle.concat(" [Vulkan]");
+	title.concat(" VK");
 #else
-		fullTitle.concat(" [D3D11]");
+	title.concat(" DX11");
 #endif
-		SDL_SetWindowTitle(Platform::SDLPlatform::Instance().GetWindow(), fullTitle.str());
+
+#if defined(_DEBUG) || defined(DEBUG)
+	title.concat(" DEBUG");
 #else
-		if (ApplicationHWnd) {
-			::SetWindowText(ApplicationHWnd, titleA.str());
-			::SetWindowTextW(ApplicationHWnd, title.str());
+	title.concat(" RELEASE");
+#endif
+
+	if (TheGameLogic != nullptr && TheGameLogic->isInGame() && !TheGameLogic->isInShellGame())
+	{
+		AsciiString mapName = TheGlobalData ? TheGlobalData->m_mapName : AsciiString::TheEmptyString;
+		if (!mapName.isEmpty())
+		{
+			// Strip the directory and extension so the title stays short.
+			// Typical value: "Maps\Alpine Assault\Alpine Assault.map" -> "Alpine Assault".
+			const char* raw = mapName.str();
+			const char* bs = strrchr(raw, '\\');
+			const char* fs = strrchr(raw, '/');
+			const char* leaf = bs ? bs + 1 : (fs ? fs + 1 : raw);
+			char leafBuf[256];
+			strncpy(leafBuf, leaf, sizeof(leafBuf) - 1);
+			leafBuf[sizeof(leafBuf) - 1] = 0;
+			char* extDot = strrchr(leafBuf, '.');
+			if (extDot) *extDot = 0;
+
+			title.concat(" - ");
+			title.concat(leafBuf);
+
+			const UnsignedInt totalSeconds = TheGameLogic->getFrame() / LOGICFRAMES_PER_SECOND;
+			const UnsignedInt hours = totalSeconds / 3600;
+			const UnsignedInt mins  = (totalSeconds / 60) % 60;
+			char timerBuf[32];
+			snprintf(timerBuf, sizeof(timerBuf), " - %u:%02u", hours, mins);
+			title.concat(timerBuf);
 		}
-#endif
 	}
+
+#ifdef USE_SDL
+	SDL_SetWindowTitle(Platform::SDLPlatform::Instance().GetWindow(), title.str());
+#else
+	extern HWND ApplicationHWnd;
+	if (ApplicationHWnd)
+		::SetWindowTextA(ApplicationHWnd, title.str());
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1130,6 +1122,20 @@ void GameEngine::update()
 		// "Perf HUD" panel. Cost is ~1 microsec for ~64 slots.
 		::LivePerf::EndFrame();
 		::Telemetry::OnFrameBoundary();
+
+		// Refresh window title ~1 Hz so the map timer (h:mm) ticks live.
+		// Using logic frame count keeps the cadence tied to sim time; when the
+		// logic clock is halted the title naturally freezes too.
+		static UnsignedInt s_lastTitleFrame = 0;
+		if (TheGameLogic != nullptr)
+		{
+			const UnsignedInt frame = TheGameLogic->getFrame();
+			if (frame / LOGICFRAMES_PER_SECOND != s_lastTitleFrame / LOGICFRAMES_PER_SECOND)
+			{
+				s_lastTitleFrame = frame;
+				updateWindowTitle();
+			}
+		}
 	}
 }
 

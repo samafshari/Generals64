@@ -22,7 +22,6 @@
 #include <thread>
 #include <vector>
 
-#include "Common/LivePerf.h"
 #include "GameLogic/AIPathfind.h"
 
 //-----------------------------------------------------------------------------
@@ -671,27 +670,30 @@ void PathfindPrecomputed::buildClass( PFLocoClass cls )
 }
 
 //-----------------------------------------------------------------------------
+// Kick the initial map-load build. Delegates to the same non-blocking dispatch
+// as mid-game rebuilds: workers publish READY when done, and pathfind queries
+// in the meantime fall back to classic A* (they already check isReady()
+// before consuming jump tables). The first `waitForAsync()` at a cell-mutation
+// site (or at map teardown) will join them.
+//
+// Why not synchronous join here, given that map load is already a big freeze?
+// Because the legacy synchronous path carried a LIVE_PERF_SCOPE("Pathfinder::
+// precomputeBuild"). LivePerf accumulates into the current frame bucket, but
+// EndFrame() does not run during map load — so the ~600 ms spent building got
+// deferred into whatever frame EndFrame ran for next (typically the first
+// post-load logic tick), producing the reported 1.8 s "mystery hitch" on
+// frame 251 with W3DDisplay::draw appearing to stall for 1 s. Making the
+// build non-blocking removes that mislabel (workers run off-thread with no
+// LIVE_PERF scope), and the actual stall — the GPU/driver catch-up that the
+// original synchronous join hid — is accounted to map-load startup, which is
+// where it belongs.
+//-----------------------------------------------------------------------------
 void PathfindPrecomputed::buildAll()
 {
-	LIVE_PERF_SCOPE( "Pathfinder::precomputeBuild" );
 	if ( !m_owner || m_width <= 0 || m_height <= 0 )
 		return;
 
-	// Fan out: one worker per class for jump tables, one for the zone-distance
-	// table. All write disjoint memory; read-only access to the pathfind grid
-	// is safe during map-load. Determinism: thread scheduling only affects
-	// completion order, never output values.
-	const Int classCount = static_cast<Int>( PFLocoClass::PF_LOCO_CLASS_COUNT );
-	std::vector<std::thread> workers;
-	workers.reserve( classCount + 1 );
-	for ( Int i = 0; i < classCount; ++i )
-	{
-		const PFLocoClass cls = static_cast<PFLocoClass>( i );
-		workers.emplace_back( [this, cls]() { this->buildClass( cls ); } );
-	}
-	workers.emplace_back( [this]() { this->buildZoneDistanceTable(); } );
-	for ( std::thread& t : workers )
-		t.join();
+	rebuildAsync();
 }
 
 //-----------------------------------------------------------------------------

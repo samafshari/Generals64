@@ -1565,9 +1565,12 @@ void TerrainRenderer::Render(CameraClass* camera, WorldHeightMap* heightMap)
         m_atlasHeight = 2;
     }
     // Cloud shadows are now procedural in the shader — no texture needed.
-    // Just set the enabled flag based on user setting and time of day.
+    // Honor the Inspector's "Cloud shadows" toggle too; the shader checks
+    // cloudParams.w so this actually turns them off.
+    extern bool g_debugDisableCloudShadows;
     bool cloudEnabled = TheGlobalData && TheGlobalData->m_useCloudMap
-                     && TheGlobalData->m_timeOfDay != TIME_OF_DAY_NIGHT;
+                     && TheGlobalData->m_timeOfDay != TIME_OF_DAY_NIGHT
+                     && !g_debugDisableCloudShadows;
     renderer.SetCloudShadowEnabled(cloudEnabled);
 
     // Bind shroud texture for per-pixel fog of war (sampled in PSMain via ApplyShroud)

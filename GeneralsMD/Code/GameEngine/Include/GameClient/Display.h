@@ -141,6 +141,17 @@ public:
 	virtual void drawImage( const Image *image, Int startX, Int startY,
 													Int endX, Int endY, Color color = 0xFFFFFFFF, DrawImageMode mode=DRAW_IMAGE_ALPHA) = 0;
 
+	/// draw an image rotated 90° counter-clockwise (matches a `-90°` image
+	/// rotation as seen by the user). Destination rect stays axis-aligned;
+	/// only the sampled texels rotate. Fallback implementations can forward
+	/// to the upright drawImage; the W3D/D3D11 override does the UV swap.
+	virtual void drawImageRotatedCCW90( const Image *image, Int startX, Int startY,
+	                                    Int endX, Int endY, Color color = 0xFFFFFFFF,
+	                                    DrawImageMode mode = DRAW_IMAGE_ALPHA )
+	{
+		drawImage( image, startX, startY, endX, endY, color, mode );
+	}
+
 	/// draw a video buffer fit within the screen coordinates
 	virtual void drawScaledVideoBuffer( VideoBuffer *buffer, VideoStreamInterface *stream ) = 0;
 	virtual void drawVideoBuffer( VideoBuffer *buffer, Int startX, Int startY,

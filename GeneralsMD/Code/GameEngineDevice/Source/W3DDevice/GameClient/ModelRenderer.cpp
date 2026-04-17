@@ -438,6 +438,9 @@ void ModelRenderer::RenderRenderObject(RenderObjClass* renderObject, bool isSubO
     if (!m_camera || !renderObject)
         return;
 
+    if (renderObject->Is_Hidden() || renderObject->Is_Animation_Hidden())
+        return;
+
     // Frustum cull using the render object's bounding sphere. Skip in
     // shadow caster mode — the camera frustum doesn't match the light
     // frustum, so we'd cull casters that ARE in the light's view but
@@ -625,13 +628,19 @@ void ModelRenderer::RenderMesh(MeshClass* mesh)
     const char* meshName = mesh->Get_Name();
     if (meshName)
     {
-        // Check for collision box meshes (e.g., "UIWRKR_SKN.BOX", "MODELNAME.BOUNDINGBOX")
+        // Collision proxies (e.g. "UIWRKR_SKN.BOX") combine a collision-suffix
+        // name AND non-zero collision type bits loaded from W3D_MESH_FLAG_COLLISION_*.
+        // Require BOTH: a suffix alone would drop legitimate visual sub-objects that
+        // share the naming convention — e.g. the worker's carried supply-box mesh,
+        // which exports with a ".BOX" suffix but has no collision bits.
         const char* dot = strrchr(meshName, '.');
         const char* suffix = dot ? dot + 1 : meshName;
-        if (_stricmp(suffix, "BOX") == 0 ||
+        const bool collisionSuffix =
+            _stricmp(suffix, "BOX") == 0 ||
             _stricmp(suffix, "BOUNDINGBOX") == 0 ||
             _stricmp(suffix, "COLLISION") == 0 ||
-            _stricmp(suffix, "PICK") == 0)
+            _stricmp(suffix, "PICK") == 0;
+        if (collisionSuffix && mesh->Get_Collision_Type() != 0)
             return;
     }
 
@@ -933,6 +942,8 @@ void ModelRenderer::RenderMesh(MeshClass* mesh)
 
     // Reset the cosmetic shader effect and accent flag so the next render
     // object's mesh / terrain / particle draws don't inherit this mesh's.
+    RenderGenericChildren(mesh);
+
     renderer.SetCurrentShaderEffect(0, false);
     renderer.SetCurrentIsAccentMesh(false);
 
@@ -990,7 +1001,7 @@ void ModelRenderer::RenderGenericChildren(RenderObjClass* renderObject)
     for (int i = 0; i < subObjectCount; ++i)
     {
         RenderObjClass* child = renderObject->Get_Sub_Object(i);
-        if (!child)
+        if (!child || child->Is_Hidden() || child->Is_Animation_Hidden())
             continue;
 
         RenderRenderObject(child, true);

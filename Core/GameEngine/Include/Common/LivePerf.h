@@ -59,13 +59,14 @@
 #include <cmath>
 #include <cstring>
 
-// Telemetry bridge: every LIVE_PERF_SCOPE also emits a per-sample row to
-// the SQLite telemetry subsystem (see Common/Telemetry.h). The Scope dtor
-// calls Telemetry::Record() with category "perf" and name = the scope
-// label. When GENERALS_TELEMETRY=0 this include contributes nothing
-// (Record becomes an inline no-op). This gives us p50/p95/p99 stats on
-// every existing LIVE_PERF_SCOPE site for free, in addition to the HUD
-// aggregates LivePerf maintains in-process.
+// Telemetry bridge: LivePerf emits ONE row per slot per frame to the SQLite
+// telemetry subsystem (see Common/Telemetry.h). The emission happens from
+// EndFrame(), not from the Scope dtor — per-sample writes flooded the ring
+// buffer on high-frequency sites (PhysicsBehavior at 200k calls / session,
+// W3DModelDraw at 400k) causing 40%+ drop rates and multi-GB DBs. The
+// per-frame aggregate gives the same actionable signal (the HUD shows
+// lastFrameMs too) at ~100× lower storage cost. When GENERALS_TELEMETRY=0
+// Record becomes a no-op and this bridge contributes nothing.
 #include "Common/Telemetry.h"
 
 namespace LivePerf
@@ -146,6 +147,10 @@ namespace LivePerf
     }
 
     // RAII timer. Accumulates elapsed ns into the slot in the dtor.
+    // No per-sample telemetry emission — that work happens once per frame
+    // in EndFrame(). Keeping the dtor as a simple accumulator preserves the
+    // sub-100ns cost per scope that lets us leave LIVE_PERF_SCOPE on in
+    // release builds.
     class Scope
     {
     public:
@@ -155,11 +160,6 @@ namespace LivePerf
             const long long delta = NowNs() - m_start;
             m_slot->accumNs   += delta;
             m_slot->callCount += 1;
-            // Bridge: also record into SQLite telemetry. Category is fixed
-            // to "perf" so a single predicate selects all LivePerf samples;
-            // the scope label lives in name. Telemetry::Record short-circuits
-            // on a single atomic load when the subsystem is disabled.
-            ::Telemetry::Record("perf", m_slot->name, (int64_t)delta);
         }
     private:
         Slot*     m_slot;
@@ -198,6 +198,17 @@ namespace LivePerf
             // Track floor too. First-sample fence via minMs==0 sentinel, which
             // is fine since a scope that truly took 0 ns won't have a useful min.
             if (s.minMs == 0.0f || ms < s.minMs) s.minMs = ms;
+
+            // Bridge to telemetry: one row per slot per frame that had calls.
+            // Row semantics are "total cost of N invocations within frame X"
+            // — p50/p95/p99 then become per-frame percentiles, matching how
+            // the HUD itself summarizes each slot (lastFrameMs). Dormant
+            // slots are skipped so the DB isn't padded with zero rows.
+            if (s.callCount > 0)
+            {
+                ::Telemetry::Record("perf", s.name, s.accumNs);
+            }
+
             s.accumNs   = 0;
             s.callCount = 0;
         }

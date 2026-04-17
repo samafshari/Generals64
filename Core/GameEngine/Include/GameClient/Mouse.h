@@ -306,6 +306,12 @@ public:
 
 	void drawTooltip();					///< draw the tooltip text
 	void drawCursorText();			///< draw the mouse cursor text
+
+	// Snapshot the active cursor-tooltip state for the Inspector/ImGui
+	// overlay. Returns true when a tooltip should be visible this frame
+	// (stillness gate satisfied + text non-empty). Fills `outUtf8` (UTF-8,
+	// NUL-terminated) and the cursor anchor in pixel coords.
+	Bool getActiveTooltipForOverlay(char* outUtf8, int bufSize, int* outX, int* outY) const;
 	Int getCursorIndex( const AsciiString& name );
 	void resetTooltipDelay();
 

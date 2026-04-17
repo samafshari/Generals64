@@ -600,30 +600,12 @@ protected:
 		}
 
 		const ParticleSystemTemplate *tmp = TheParticleSystemManager->findTemplate(m_name);
-#if defined(DEBUG_LOGGING)
-		{
-			char dbg[200];
-			_snprintf(dbg, sizeof(dbg),
-				"[USA01-FX]     ParticleSystemFXNugget %s template=%p count=%d\n",
-				m_name.str(), (void*)tmp, m_count);
-			OutputDebugStringA(dbg);
-		}
-#endif
 		DEBUG_ASSERTCRASH(tmp, ("ParticleSystem %s not found",m_name.str()));
 		if (tmp)
 		{
 			for (Int i = 0; i < m_count; i++ )
 			{
 				ParticleSystem *sys = TheParticleSystemManager->createParticleSystem(tmp);
-#if defined(DEBUG_LOGGING)
-				{
-					char dbg[200];
-					_snprintf(dbg, sizeof(dbg),
-						"[USA01-FX]       create %s [%d/%d] sys=%p\n",
-						m_name.str(), i+1, m_count, (void*)sys);
-					OutputDebugStringA(dbg);
-				}
-#endif
 				if (sys)
 				{
 					Coord3D newPos;
@@ -822,46 +804,15 @@ void FXList::clear()
 //-------------------------------------------------------------------------------------------------
 void FXList::doFXPos(const Coord3D *primary, const Matrix3D* primaryMtx, const Real primarySpeed, const Coord3D *secondary, const Real overrideRadius ) const
 {
-#if defined(DEBUG_LOGGING)
-	{
-		char dbg[160];
-		_snprintf(dbg, sizeof(dbg),
-			"[USA01-FX] FXList::doFXPos this=%p nuggets=%zu primary=(%.0f,%.0f,%.0f)\n",
-			(void*)this, (size_t)m_nuggets.size(),
-			primary?primary->x:0.0f, primary?primary->y:0.0f, primary?primary->z:0.0f);
-		OutputDebugStringA(dbg);
-	}
-#endif
-
 	const Int playerIndex = rts::getObservedOrLocalPlayer()->getPlayerIndex();
 
 	if (ThePartitionManager->getShroudStatusForPlayer(playerIndex, primary) != CELLSHROUD_CLEAR)
 		return;
 
-	int nug_idx = 0;
-	for (FXNuggetList::const_iterator it = m_nuggets.begin(); it != m_nuggets.end(); ++it, ++nug_idx)
+	for (FXNuggetList::const_iterator it = m_nuggets.begin(); it != m_nuggets.end(); ++it)
 	{
-#if defined(DEBUG_LOGGING)
-		{
-			char dbg[160];
-			_snprintf(dbg, sizeof(dbg),
-				"[USA01-FX]   nugget[%d] %p doFXPos begin\n", nug_idx, (void*)*it);
-			OutputDebugStringA(dbg);
-		}
-#endif
 		(*it)->doFXPos(primary, primaryMtx, primarySpeed, secondary, overrideRadius);
-#if defined(DEBUG_LOGGING)
-		{
-			char dbg[160];
-			_snprintf(dbg, sizeof(dbg),
-				"[USA01-FX]   nugget[%d] doFXPos end\n", nug_idx);
-			OutputDebugStringA(dbg);
-		}
-#endif
 	}
-#if defined(DEBUG_LOGGING)
-	OutputDebugStringA("[USA01-FX] FXList::doFXPos done\n");
-#endif
 }
 
 //-------------------------------------------------------------------------------------------------

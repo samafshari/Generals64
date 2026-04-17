@@ -82,6 +82,8 @@
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/W3DGameFont.h"
 #include "W3DDevice/GameClient/ModelRenderer.h"
+#include "Inspector/Inspector.h"
+#include "DebugDraw.h"
 #include "W3DDevice/GameClient/TerrainRenderer.h"
 #include "W3DDevice/GameClient/ImageCache.h"
 #include "W3DDevice/GameLogic/W3DGhostObject.h"
@@ -183,53 +185,17 @@ namespace
 			m_x = 0.0f;
 			m_y = 0.0f;
 			m_z = 0.0f;
-
-			// Default behavior matches the previously-shipping classic path:
-			// pass m_sizeX/m_sizeY through unchanged. For SHADOW_VOLUME entries
-			// these values are actually sun-elevation angles in degrees (the
-			// original W3DVolumetricShadow code does `tan(m_sizeX/180*PI)`),
-			// not world sizes — but the classic D3D11 port has been treating
-			// them as world sizes and clamping zero to 15. We preserve that
-			// behavior so default look doesn't regress. The Enhanced Shadows
-			// toggle (g_useEnhancedShadows) opts into the bbox-derived size
-			// path which produces accurate footprints but changes look.
 			Real sizeX = shadowInfo ? shadowInfo->m_sizeX : 0.0f;
 			Real sizeY = shadowInfo ? shadowInfo->m_sizeY : 0.0f;
-
-			extern bool g_useEnhancedShadows;
-			if (g_useEnhancedShadows)
+			if (robj)
 			{
-				const bool isVolume     = shadowInfo && (shadowInfo->m_type & SHADOW_VOLUME) != 0;
-				const bool isProjection = shadowInfo && (shadowInfo->m_type & SHADOW_PROJECTION) != 0;
-				// SHADOW_VOLUME stores sun-elevation degrees in m_sizeX (not a
-				// world size). SHADOW_PROJECTION's m_sizeX/m_sizeY are world
-				// sizes BUT often left at 0 in the INI for trees/buildings —
-				// the original game baked a per-object silhouette texture and
-				// used the obj-space bbox extent for the decal footprint. We
-				// don't bake silhouettes (yet) but we can at least use the
-				// bbox extent so trees and buildings get proportionally-correct
-				// shadow rectangles instead of a generic 15×15 disc.
-				if (isVolume || isProjection || sizeX <= 0.0f || sizeY <= 0.0f)
-				{
-					if (robj)
-					{
-						AABoxClass box;
-						robj->Get_Obj_Space_Bounding_Box(box);
-						Real bx = box.Extent.X * 2.0f;
-						Real by = box.Extent.Y * 2.0f;
-						if (isVolume || isProjection)
-						{
-							sizeX = bx;
-							sizeY = by;
-						}
-						else
-						{
-							if (sizeX <= 0.0f) sizeX = bx;
-							if (sizeY <= 0.0f) sizeY = by;
-						}
-					}
-				}
+				AABoxClass box;
+				robj->Get_Obj_Space_Bounding_Box(box);
+				if (sizeX <= 0.0f) sizeX = box.Extent.X * 2.0f;
+				if (sizeY <= 0.0f) sizeY = box.Extent.Y * 2.0f;
 			}
+			if (sizeX <= 0.0f) sizeX = 20.0f;
+			if (sizeY <= 0.0f) sizeY = 20.0f;
 			setSize(sizeX, sizeY);
 
 			setColor(0x00FFFFFF);
@@ -244,29 +210,6 @@ namespace
 				m_robj = robj;
 				m_robj->Add_Ref();
 			}
-
-			// Enhanced Shadows: for SHADOW_PROJECTION decals with no
-			// INI-authored texture name, hook a per-model name pattern so
-			// content authors can drop an e.g. "TreeFir01_Shadow.tga" into
-			// GameData and have it used automatically for that model's
-			// shadows. Falls through to g_shadowTexture via the existing
-			// fallback chain in RenderShadowDecalsDX11 when no such file
-			// exists — no-op for vanilla game data. Gated on the toggle
-			// so the classic default behavior is untouched.
-			extern bool g_useEnhancedShadows;
-			if (g_useEnhancedShadows && robj && shadowInfo &&
-			    (shadowInfo->m_type & SHADOW_PROJECTION) &&
-			    !m_shadowTexName[0])
-			{
-				const char* name = robj->Get_Name();
-				if (name && name[0])
-				{
-					// "{modelname}_Shadow" — rendering path will append .tga
-					// and try ImageCache.
-					snprintf(m_shadowTexName, sizeof(m_shadowTexName),
-					         "%s_Shadow", name);
-				}
-			}
 		}
 
 		~D3D11Shadow()
@@ -278,8 +221,11 @@ namespace
 		}
 
 		void release() override;
+		ShadowType getType() const { return m_type; }
+		void setType(ShadowType type) { m_type = type; }
 
 		// Public accessors for rendering
+		RenderObjClass* getRobj() const { return m_robj; }
 		void getData(float& outX, float& outY, float& outSizeX, float& outSizeY,
 					 UnsignedByte& outOpacity, Bool& outEnabled,
 					 float& outOffsetX, float& outOffsetY, float& outAngle,
@@ -333,6 +279,28 @@ namespace
 		D3D11Shadow* m_shadowList = nullptr;
 		int m_shadowCount = 0;
 
+		D3D11Shadow* addShadowInternal(RenderObjClass* robj, Shadow::ShadowTypeInfo* shadowInfo)
+		{
+			D3D11Shadow* shadow = new D3D11Shadow(shadowInfo, robj);
+			if (!shadowInfo || shadow->getType() == SHADOW_PROJECTION)
+			{
+				shadow->setType(SHADOW_PROJECTION);
+				const char* projectionName =
+					(shadowInfo && shadowInfo->m_ShadowName[0]) ? shadowInfo->m_ShadowName :
+					(robj ? robj->Get_Name() : nullptr);
+				if (projectionName && projectionName[0])
+					strncpy(shadow->m_shadowTexName, projectionName, sizeof(shadow->m_shadowTexName) - 1);
+			}
+
+			shadow->m_next = m_shadowList;
+			shadow->m_prev = nullptr;
+			if (m_shadowList)
+				m_shadowList->m_prev = shadow;
+			m_shadowList = shadow;
+			++m_shadowCount;
+			return shadow;
+		}
+
 		Shadow *addDecal(RenderObjClass *robj, Shadow::ShadowTypeInfo *shadowInfo) override
 		{
 			return addDecalInternal(robj, shadowInfo);
@@ -352,6 +320,18 @@ namespace
 			if (m_shadowList) m_shadowList->m_prev = shadow;
 			m_shadowList = shadow;
 			++m_shadowCount;
+			// One-shot "yes, shadows are being added" log.
+			{
+				static bool s_firstAdd = true;
+				if (s_firstAdd) {
+					Inspector::Log(
+						"[SHADOW] addDecalInternal first call: robj=%p model='%s' type=0x%x",
+						(void*)robj,
+						robj ? robj->Get_Name() : "(null)",
+						shadowInfo ? shadowInfo->m_type : 0);
+					s_firstAdd = false;
+				}
+			}
 			return shadow;
 		}
 
@@ -367,7 +347,8 @@ namespace
 		int getShadowData(float* outX, float* outY, float* outSizeX, float* outSizeY,
 						  UnsignedByte* outOpacity, float* outOffX, float* outOffY,
 						  float* outAngle, const char** outTexNames,
-						  ShadowType* outTypes, uint32_t* outDiffuse, int maxShadows) const
+						  ShadowType* outTypes, uint32_t* outDiffuse,
+						  RenderObjClass** outRobjs, int maxShadows) const
 		{
 			int count = 0;
 			for (D3D11Shadow* s = m_shadowList; s && count < maxShadows; s = s->m_next)
@@ -377,10 +358,9 @@ namespace
 						   outOpacity[count], enabled, outOffX[count], outOffY[count],
 						   outAngle[count], outTexNames[count], outTypes[count], outDiffuse[count]);
 				if (!enabled) continue;
-				// Last-ditch fallback for shadows with no robj (static UI/script
-				// decals). Real units now get bbox-derived sizes in the ctor.
-				if (outSizeX[count] <= 0) outSizeX[count] = 15.0f;
-				if (outSizeY[count] <= 0) outSizeY[count] = 15.0f;
+				if (outSizeX[count] <= 0.0f) outSizeX[count] = 20.0f;
+				if (outSizeY[count] <= 0.0f) outSizeY[count] = 20.0f;
+				outRobjs[count] = s->getRobj();
 				++count;
 			}
 			return count;
@@ -394,6 +374,362 @@ namespace
 	{
 		g_d3d11ShadowManager.removeShadow(this);
 		delete this;
+	}
+
+	// ============================================================================
+	// SilhouetteBaker — original Generals projected-shadow approach
+	// ============================================================================
+	//
+	// For each unique caster model, render its geometry once into a 256x256
+	// alpha mask from a TOP-DOWN orthographic projection that fits the
+	// model's obj-space bounding box. Cache the result keyed by model name.
+	// RenderShadowDecalsDX11 then stamps this silhouette onto the terrain
+	// via the existing heightmap-conforming decal pipeline.
+	//
+	// This matches what W3DProjectedShadow did in the DX8 original — per-
+	// model baked silhouette textures — which is stable, crisp, cheap, and
+	// doesn't suffer from any of the shadow-map issues (jitter, acne, poor
+	// resolution distribution, camera-dependent behavior).
+	static constexpr float kProjectedShadowBakeFloorOffsetDX11 = 2.0f;
+	static constexpr float kProjectedShadowBakePaddingDX11 = 0.25f;
+	static constexpr float kProjectedShadowMinLightAbsZDX11 = 0.05f;
+	static constexpr float kProjectedShadowLightKeyScaleDX11 = 32.0f;
+
+	struct ProjectedShadowBoundsDX11
+	{
+		float minX = 0.0f;
+		float maxX = 0.0f;
+		float minY = 0.0f;
+		float maxY = 0.0f;
+		float floorZ = 0.0f;
+
+		float GetWidth() const { return maxX - minX; }
+		float GetHeight() const { return maxY - minY; }
+		float GetCenterX() const { return 0.5f * (minX + maxX); }
+		float GetCenterY() const { return 0.5f * (minY + maxY); }
+	};
+
+	static Vector3 GetShadowLightTravelDirectionWorldDX11(RenderObjClass* robj)
+	{
+		Vector3 lightDir = robj ? (robj->Get_Position() - g_fallbackShadowLightPos[0]) : Vector3(0.0f, 0.0f, -1.0f);
+		float length = lightDir.Length();
+		if (length < 0.001f)
+			lightDir.Set(0.0f, 0.0f, -1.0f);
+		else
+			lightDir *= 1.0f / length;
+
+		const float minAbsZ = kProjectedShadowMinLightAbsZDX11;
+		if (lightDir.Z > -minAbsZ)
+		{
+			const float horizLenSq = lightDir.X * lightDir.X + lightDir.Y * lightDir.Y;
+			if (horizLenSq > 0.0001f)
+			{
+				const float horizScale = sqrtf(__max(0.0f, 1.0f - minAbsZ * minAbsZ)) / sqrtf(horizLenSq);
+				lightDir.X *= horizScale;
+				lightDir.Y *= horizScale;
+				lightDir.Z = -minAbsZ;
+			}
+			else
+			{
+				lightDir.Set(0.0f, 0.0f, -1.0f);
+			}
+		}
+
+		return lightDir;
+	}
+
+	static Vector3 GetShadowLightTravelDirectionLocalDX11(RenderObjClass* robj)
+	{
+		Vector3 lightDir = GetShadowLightTravelDirectionWorldDX11(robj);
+		if (!robj)
+			return lightDir;
+
+		const Matrix3D& objXform = robj->Get_Transform();
+		Vector3 localDir = objXform.Inverse_Rotate_Vector(lightDir);
+		float localLength = localDir.Length();
+		if (localLength < 0.001f)
+			return Vector3(0.0f, 0.0f, -1.0f);
+
+		localDir *= 1.0f / localLength;
+		return localDir;
+	}
+
+	static void BuildAABoxCornersDX11(const AABoxClass& box, Vector3* corners)
+	{
+		const Vector3& c = box.Center;
+		const Vector3& e = box.Extent;
+		corners[0].Set(c.X + e.X, c.Y + e.Y, c.Z + e.Z);
+		corners[1].Set(c.X - e.X, c.Y + e.Y, c.Z + e.Z);
+		corners[2].Set(c.X - e.X, c.Y - e.Y, c.Z + e.Z);
+		corners[3].Set(c.X + e.X, c.Y - e.Y, c.Z + e.Z);
+		corners[4].Set(c.X + e.X, c.Y + e.Y, c.Z - e.Z);
+		corners[5].Set(c.X - e.X, c.Y + e.Y, c.Z - e.Z);
+		corners[6].Set(c.X - e.X, c.Y - e.Y, c.Z - e.Z);
+		corners[7].Set(c.X + e.X, c.Y - e.Y, c.Z - e.Z);
+	}
+
+	static Vector3 ProjectOntoShadowFloorDX11(const Vector3& point, const Vector3& lightDir, float floorZ)
+	{
+		if (lightDir.Z >= -0.0001f)
+			return Vector3(point.X, point.Y, floorZ);
+
+		const float travel = (floorZ - point.Z) / lightDir.Z;
+		return point + lightDir * travel;
+	}
+
+	static ProjectedShadowBoundsDX11 ComputeProjectedShadowBoundsDX11(const AABoxClass& box, const Vector3& lightDirLocal)
+	{
+		ProjectedShadowBoundsDX11 bounds;
+		bounds.floorZ = box.Center.Z - box.Extent.Z - kProjectedShadowBakeFloorOffsetDX11;
+
+		Vector3 corners[8];
+		BuildAABoxCornersDX11(box, corners);
+
+		Vector3 projected = ProjectOntoShadowFloorDX11(corners[0], lightDirLocal, bounds.floorZ);
+		bounds.minX = bounds.maxX = projected.X;
+		bounds.minY = bounds.maxY = projected.Y;
+
+		for (int i = 1; i < 8; ++i)
+		{
+			projected = ProjectOntoShadowFloorDX11(corners[i], lightDirLocal, bounds.floorZ);
+			bounds.minX = __min(bounds.minX, projected.X);
+			bounds.maxX = __max(bounds.maxX, projected.X);
+			bounds.minY = __min(bounds.minY, projected.Y);
+			bounds.maxY = __max(bounds.maxY, projected.Y);
+		}
+
+		bounds.minX -= kProjectedShadowBakePaddingDX11;
+		bounds.maxX += kProjectedShadowBakePaddingDX11;
+		bounds.minY -= kProjectedShadowBakePaddingDX11;
+		bounds.maxY += kProjectedShadowBakePaddingDX11;
+
+		if (bounds.GetWidth() < 0.5f)
+		{
+			const float centerX = bounds.GetCenterX();
+			bounds.minX = centerX - 0.25f;
+			bounds.maxX = centerX + 0.25f;
+		}
+		if (bounds.GetHeight() < 0.5f)
+		{
+			const float centerY = bounds.GetCenterY();
+			bounds.minY = centerY - 0.25f;
+			bounds.maxY = centerY + 0.25f;
+		}
+
+		return bounds;
+	}
+
+	static Render::Float4x4 BuildProjectedShadowBakeMatrixDX11(const ProjectedShadowBoundsDX11& bounds, const Vector3& lightDirLocal)
+	{
+		const float width = bounds.GetWidth();
+		const float height = bounds.GetHeight();
+		const float shearX = lightDirLocal.X / lightDirLocal.Z;
+		const float shearY = lightDirLocal.Y / lightDirLocal.Z;
+		const float tx = 2.0f * (shearX * bounds.floorZ - bounds.GetCenterX()) / width;
+		const float ty = 2.0f * (shearY * bounds.floorZ - bounds.GetCenterY()) / height;
+
+		return Render::Float4x4(
+			2.0f / width, 0.0f, 0.0f, 0.0f,
+			0.0f, 2.0f / height, 0.0f, 0.0f,
+			-2.0f * shearX / width, -2.0f * shearY / height, 0.0f, 0.0f,
+			tx, ty, 0.5f, 1.0f);
+	}
+
+	static std::string BuildProjectedShadowBakeKeyDX11(const char* modelName, const Vector3& lightDirLocal)
+	{
+		char key[160];
+		snprintf(
+			key,
+			sizeof(key),
+			"%s|%d|%d|%d",
+			modelName,
+			(int)std::lround(lightDirLocal.X * kProjectedShadowLightKeyScaleDX11),
+			(int)std::lround(lightDirLocal.Y * kProjectedShadowLightKeyScaleDX11),
+			(int)std::lround(lightDirLocal.Z * kProjectedShadowLightKeyScaleDX11));
+		return std::string(key);
+	}
+
+	struct BakedSilhouette
+	{
+		// Owned permanent texture holding the alpha silhouette. Black
+		// wherever geometry projects to, transparent elsewhere. The decal
+		// shader samples this and multiplies against terrain, giving a
+		// dark shadow.
+		Render::Texture tex;
+		// Obj-space bbox extents used to size the baked quad. The decal
+		// is stamped at these world-space sizes around the caster's
+		// position so the silhouette lines up with the mesh.
+		float sizeX = 0, sizeY = 0;
+		float offsetX = 0, offsetY = 0;
+		bool  ready = false;
+	};
+
+	class SilhouetteBaker
+	{
+	public:
+		// Returns the cached silhouette for this model name, baking it
+		// on first access if necessary. Safe to call every frame; only
+		// the first call per model does real work. Returns nullptr if
+		// baking infrastructure isn't ready or the bake failed.
+		BakedSilhouette* GetOrBake(RenderObjClass* robj, const char* modelName);
+
+	private:
+		bool Bake(RenderObjClass* robj, const Vector3& lightDirLocal, BakedSilhouette& out);
+
+		// Keyed by model name (stable for the lifetime of the engine —
+		// W3D render objects are asset-backed, names match on disk).
+		std::unordered_map<std::string, std::unique_ptr<BakedSilhouette>> m_cache;
+	};
+
+	SilhouetteBaker g_silhouetteBaker;
+
+	BakedSilhouette* SilhouetteBaker::GetOrBake(RenderObjClass* robj, const char* modelName)
+	{
+		if (!robj || !modelName || !modelName[0])
+			return nullptr;
+
+		const Vector3 lightDirLocal = GetShadowLightTravelDirectionLocalDX11(robj);
+		const std::string cacheKey = BuildProjectedShadowBakeKeyDX11(modelName, lightDirLocal);
+
+		auto it = m_cache.find(cacheKey);
+		if (it != m_cache.end())
+			return it->second->ready ? it->second.get() : nullptr;
+
+		Inspector::Log("[SILHOUETTE] baking model '%s' ...", cacheKey.c_str());
+
+		auto entry = std::make_unique<BakedSilhouette>();
+		bool ok = Bake(robj, lightDirLocal, *entry);
+		Inspector::Log("[SILHOUETTE]  -> %s (size=%.1fx%.1f offset=%.1f,%.1f)",
+			ok ? "OK" : "FAILED", entry->sizeX, entry->sizeY, entry->offsetX, entry->offsetY);
+
+		if (!ok)
+		{
+			entry->ready = false;
+			m_cache[cacheKey] = std::move(entry);
+			return nullptr;
+		}
+		entry->ready = true;
+		BakedSilhouette* ptr = entry.get();
+		m_cache[cacheKey] = std::move(entry);
+		return ptr;
+	}
+
+	bool SilhouetteBaker::Bake(RenderObjClass* robj, const Vector3& lightDirLocal, BakedSilhouette& out)
+	{
+		auto& renderer = Render::Renderer::Instance();
+		if (!renderer.IsSilhouetteReady())
+		{
+			Inspector::Log("[SILHOUETTE]   Renderer::IsSilhouetteReady == false");
+			return false;
+		}
+
+		// Project the caster's obj-space bounding box along the current sun
+		// direction onto the local ground plane. The resulting projected AABB
+		// becomes the baked shadow texture's size/offset, so the final stamped
+		// decal casts away from the model instead of sitting centered under it.
+		AABoxClass box;
+		robj->Get_Obj_Space_Bounding_Box(box);
+		const ProjectedShadowBoundsDX11 bounds = ComputeProjectedShadowBoundsDX11(box, lightDirLocal);
+		out.sizeX = bounds.GetWidth();
+		out.sizeY = bounds.GetHeight();
+		out.offsetX = bounds.GetCenterX();
+		out.offsetY = bounds.GetCenterY();
+
+		const Render::Float4x4 viewProj = BuildProjectedShadowBakeMatrixDX11(bounds, lightDirLocal);
+
+		// Create the permanent per-model texture BEFORE rendering so we
+		// have somewhere to copy the scratch RT into.
+		auto& device = renderer.GetDevice();
+		if (!out.tex.CreateRenderTarget(device,
+		                                Render::Renderer::SILHOUETTE_SIZE,
+		                                Render::Renderer::SILHOUETTE_SIZE))
+			return false;
+
+		// --- BAKE PASS ---
+		// Save & override frame constants (viewProjection only — the
+		// silhouette shader doesn't touch any other fields).
+		renderer.PushFrameConstants();
+		renderer.GetFrameData().viewProjection = viewProj;
+		renderer.FlushFrameConstants();
+
+		// Switch to the silhouette RT, clear to fully transparent.
+		auto& scratch = renderer.GetSilhouetteScratchRT();
+		device.ClearRenderTarget(scratch, 1, 1, 1, 1);
+		device.SetRenderTarget(scratch);
+		renderer.SetViewport(0, 0,
+			(float)Render::Renderer::SILHOUETTE_SIZE,
+			(float)Render::Renderer::SILHOUETTE_SIZE);
+
+		// Bind silhouette shader + no-cull / no-depth / opaque pipeline.
+		renderer.GetSilhouetteShader().Bind(device);
+		renderer.GetSilhouetteRaster().Bind(device);
+		renderer.GetSilhouetteBlend().Bind(device);
+		renderer.GetSilhouetteDepth().Bind(device);
+
+		// Drive the submit through ModelRenderer in shadow caster mode —
+		// it skips per-batch Restore3DState / SetAlphaTest3DState and
+		// particle emitter side-effects, keeping OUR bound state intact.
+		// We use an OBJECT-SPACE world matrix (identity) because we want
+		// the silhouette in obj-space XY — the decal later transforms to
+		// world space via the caster's real transform.
+		auto& mr = Render::ModelRenderer::Instance();
+		mr.SetShadowCasterMode(true);
+
+		// ModelRenderer requires m_camera non-null. We use whatever the
+		// regular frame already set. If called before any frame has run
+		// (unlikely — bakes are lazy from RenderShadowDecalsDX11), we
+		// just bail; a later frame will retry.
+		// Walk the render-object hierarchy manually so we can pass an
+		// identity world matrix per-mesh. HLOD / DistLOD expand into
+		// sub-meshes which the LODs manage; we just iterate SubObjects.
+		auto drawLeaf = [&](RenderObjClass* leaf, const Matrix3D& worldXform) {
+			// Only meshes contribute to the silhouette. Particle emitters,
+			// lines, etc. would produce junk if we tried to bake them.
+			if (!leaf || leaf->Class_ID() != RenderObjClass::CLASSID_MESH)
+				return;
+			// Temporarily place the leaf at the target transform. The
+			// ModelRenderer path reads the leaf's Get_Transform(), so
+			// set it to the effective obj-space transform we want.
+			Matrix3D saved = leaf->Get_Transform();
+			leaf->Set_Transform(worldXform);
+			mr.RenderRenderObject(leaf);
+			leaf->Set_Transform(saved);
+		};
+
+		// Walk: if the root is a mesh, draw it directly at identity.
+		// Otherwise iterate sub-objects and draw each mesh at identity
+		// (silhouettes compose correctly because we just want UNION of
+		// footprints projected top-down).
+		if (robj->Class_ID() == RenderObjClass::CLASSID_MESH)
+		{
+			Matrix3D ident(1);
+			drawLeaf(robj, ident);
+		}
+		else
+		{
+			int subCount = robj->Get_Num_Sub_Objects();
+			Matrix3D ident(1);
+			for (int i = 0; i < subCount; ++i)
+			{
+				RenderObjClass* sub = robj->Get_Sub_Object(i);
+				if (!sub) continue;
+				if (sub->Class_ID() == RenderObjClass::CLASSID_MESH)
+					drawLeaf(sub, ident);
+				sub->Release_Ref();
+			}
+		}
+
+		mr.SetShadowCasterMode(false);
+
+		// Copy scratch -> permanent cache texture, restore state.
+		device.CopyTexture(out.tex, scratch);
+
+		device.SetBackBuffer();
+		renderer.ResetViewport();
+		renderer.PopFrameConstants();
+		renderer.Restore3DState();
+
+		return true;
 	}
 }
 
@@ -2340,9 +2676,8 @@ Shadow* W3DShadowManager::addShadow(RenderObjClass* robj, Shadow::ShadowTypeInfo
 	if (shadowInfo && shadowInfo->m_type == SHADOW_NONE)
 		return nullptr;
 
-	// Pass the render object through so the resulting D3D11Shadow can sample
-	// its world transform every frame and follow the unit as it moves.
-	return g_d3d11ShadowManager.addDecalInternal(robj, shadowInfo);
+	(void)draw;
+	return g_d3d11ShadowManager.addShadowInternal(robj, shadowInfo);
 }
 
 void W3DShadowManager::removeShadow(Shadow* shadow)
@@ -10734,9 +11069,12 @@ static void RenderParticleBufferDX11(RenderObjClass* robj, RenderInfoClass& rinf
 static Render::Texture* g_shadowTexture = nullptr;
 static Render::Texture g_proceduralShadowTexture;
 static Render::Texture g_proceduralRadiusDecalTexture; // white-RGB + alpha gradient for
-                                                       // alpha/additive radius decals
-                                                       // (guard circle, radiation range, ...)
+                                                        // alpha/additive radius decals
+                                                        // (guard circle, radiation range, ...)
 static bool g_shadowTextureLoaded = false;
+static constexpr float kClassicShadowZOffset = 0.01f * MAP_XY_FACTOR;
+static constexpr float kBridgeShadowOffset = 0.25f;
+static constexpr int kMaxShadowDecalsDX11 = 2048;
 
 static Render::Texture* CreateProceduralShadowTexture(Render::Device& device)
 {
@@ -10779,7 +11117,7 @@ static Render::Texture* CreateProceduralShadowTexture(Render::Device& device)
 		}
 	}
 
-	if (g_proceduralShadowTexture.CreateFromRGBA(device, pixels.data(), size, size, true))
+	if (g_proceduralShadowTexture.CreateFromRGBA(device, pixels.data(), size, size, false))
 		return &g_proceduralShadowTexture;
 	return nullptr;
 }
@@ -10852,43 +11190,272 @@ static Render::Texture* CreateProceduralRadiusDecalTexture(Render::Device& devic
 
 // Heightmap GPU texture for instanced decal rendering.
 // Created lazily from WorldHeightMap data, recreated if the heightmap changes.
-static Render::Texture g_hmTexture;
-static WorldHeightMap* g_hmLastPtr = nullptr;
-static int g_hmLastWidth = 0, g_hmLastHeight = 0;
-
-// Instance buffer for decal data (StructuredBuffer<DecalInstance>)
-static Render::GPUBuffer g_decalInstanceBuffer;
-static bool g_decalInstanceBufferCreated = false;
-static const int MAX_DECAL_INSTANCES = 2048;
-
-static bool UpdateHeightmapTexture(Render::Device& device, WorldHeightMap* hm)
+static Render::Texture* ResolveShadowTextureDX11(
+	Render::Device& device,
+	const char* texName,
+	ShadowType type,
+	RenderObjClass* robj,
+	BakedSilhouette** outBaked = nullptr)
 {
-	if (!hm) return false;
+	if (outBaked)
+		*outBaked = nullptr;
 
-	int w = hm->getXExtent();
-	int h = hm->getYExtent();
+	if ((type & SHADOW_PROJECTION) && robj)
+	{
+		const char* modelName = (texName && texName[0]) ? texName : robj->Get_Name();
+		if (modelName && modelName[0])
+		{
+			if (BakedSilhouette* baked = g_silhouetteBaker.GetOrBake(robj, modelName))
+			{
+				if (outBaked)
+					*outBaked = baked;
+				return &baked->tex;
+			}
+		}
+	}
 
-	if (hm == g_hmLastPtr && w == g_hmLastWidth && h == g_hmLastHeight && g_hmTexture.IsValid())
-		return true;
+	Render::Texture* fallback = ((type & (SHADOW_ALPHA_DECAL | SHADOW_ADDITIVE_DECAL)) != 0)
+		? &g_proceduralRadiusDecalTexture
+		: g_shadowTexture;
+	if (!texName || !texName[0])
+		return fallback;
 
-	// Recreate heightmap texture with R32_FLOAT format
-	g_hmTexture = Render::Texture(); // Reset
+	auto& imgCache = Render::ImageCache::Instance();
+	char fullName[80];
+	Render::Texture* tex = nullptr;
+	snprintf(fullName, sizeof(fullName), "%s.tga", texName);
+	tex = imgCache.GetTexture(device, fullName, false);
+	if (!tex)
+	{
+		snprintf(fullName, sizeof(fullName), "%s.dds", texName);
+		tex = imgCache.GetTexture(device, fullName);
+	}
+	if (!tex)
+		tex = imgCache.GetTexture(device, texName, false);
+	return tex ? tex : fallback;
+}
 
-	const float hmHeightScale = MAP_XY_FACTOR / 16.0f;
+static float GetShadowLayerHeightDX11(RenderObjClass* robj, const Vector3& objPos)
+{
+	if (!robj || !TheTerrainLogic || !robj->Get_User_Data())
+		return 0.0f;
 
-	std::vector<float> heights(w * h);
-	for (int y = 0; y < h; ++y)
-		for (int x = 0; x < w; ++x)
-			heights[y * w + x] = (float)hm->getHeight(x, y) * hmHeightScale;
+	const DrawableInfo* drawInfo = static_cast<const DrawableInfo*>(robj->Get_User_Data());
+	const Drawable* draw = drawInfo ? drawInfo->m_drawable : nullptr;
+	const Object* object = draw ? draw->getObject() : nullptr;
+	if (!object)
+		return 0.0f;
 
-	if (!g_hmTexture.CreateFromPixels(device, heights.data(), w, h,
-		Render::PixelFormat::R32_FLOAT, sizeof(float)))
+	const PathfindLayerEnum objectLayer = object->getLayer();
+	if (objectLayer == LAYER_GROUND)
+		return 0.0f;
+
+	return kBridgeShadowOffset + TheTerrainLogic->getLayerHeight(objPos.X, objPos.Y, objectLayer);
+}
+
+static bool BuildClassicShadowDecalMeshDX11(
+	WorldHeightMap* hmap,
+	float x,
+	float y,
+	float angle,
+	ShadowType type,
+	float sizeX,
+	float sizeY,
+	float offsetX,
+	float offsetY,
+	uint32_t diffuse,
+	RenderObjClass* robj,
+	std::vector<Render::Vertex3D>& vertices,
+	std::vector<uint32_t>& indices)
+{
+	if (!hmap || sizeX <= 0.0f || sizeY <= 0.0f)
 		return false;
 
-	g_hmLastPtr = hm;
-	g_hmLastWidth = w;
-	g_hmLastHeight = h;
-	return true;
+	const int borderSize = hmap->getBorderSizeInline();
+	const int drawStartX = hmap->getDrawOrgX();
+	const int drawStartY = hmap->getDrawOrgY();
+	const int drawEdgeX = drawStartX + hmap->getDrawWidth() - 1;
+	const int drawEdgeY = drawStartY + hmap->getDrawHeight() - 1;
+
+	Vector3 objPos(x, y, 0.0f);
+	Vector3 uVector;
+	Vector3 vVector;
+	if (robj)
+	{
+		objPos = robj->Get_Position();
+		if ((type & SHADOW_DIRECTIONAL_PROJECTION) && !(type & SHADOW_PROJECTION))
+		{
+			uVector = g_fallbackShadowLightPos[0] - objPos;
+			uVector.Z = 0.0f;
+			vVector.Set(0.0f, -1.0f, 0.0f);
+		}
+		else
+		{
+			const Matrix3D& objXform = robj->Get_Transform();
+			uVector = objXform.Get_X_Vector();
+			vVector = objXform.Get_Y_Vector();
+		}
+	}
+	else
+	{
+		uVector.Set(cosf(angle), sinf(angle), 0.0f);
+		vVector.Set(0.0f, -1.0f, 0.0f);
+	}
+	objPos.Z = 0.0f;
+
+	uVector.Z = 0.0f;
+	float vecLength = uVector.Length();
+	if (vecLength != 0.0f)
+	{
+		uVector *= 1.0f / vecLength;
+		vVector = uVector;
+		vVector.Rotate_Z(-1.0f, 0.0f);
+	}
+	else
+	{
+		vVector.Z = 0.0f;
+		vecLength = vVector.Length();
+		if (vecLength != 0.0f)
+			vVector *= 1.0f / vecLength;
+		else
+			vVector.Set(0.0f, -1.0f, 0.0f);
+
+		uVector = vVector;
+		uVector.Rotate_Z(1.0f, 0.0f);
+	}
+
+	const float decalOffsetU = (offsetX != 0.0f) ? (-offsetX / sizeX) : 0.0f;
+	const float decalOffsetV = (offsetY != 0.0f) ? ( offsetY / sizeY) : 0.0f;
+	const Vector3 leftX = -sizeX * (uVector * (0.5f + decalOffsetU));
+	const Vector3 rightX = sizeX * (uVector * (0.5f - decalOffsetU));
+	const Vector3 topY = -sizeY * (vVector * (0.5f + decalOffsetV));
+	const Vector3 bottomY = sizeY * (vVector * (0.5f - decalOffsetV));
+
+	Vector3 boxCorners[4];
+	boxCorners[0] = leftX + topY;
+	boxCorners[1] = rightX + topY;
+	boxCorners[2] = rightX + bottomY;
+	boxCorners[3] = leftX + bottomY;
+
+	float minX = boxCorners[0].X;
+	float maxX = boxCorners[0].X;
+	float minY = boxCorners[0].Y;
+	float maxY = boxCorners[0].Y;
+	for (int i = 1; i < 4; ++i)
+	{
+		minX = __min(minX, boxCorners[i].X);
+		maxX = __max(maxX, boxCorners[i].X);
+		minY = __min(minY, boxCorners[i].Y);
+		maxY = __max(maxY, boxCorners[i].Y);
+	}
+
+	Vector3 scaledU = uVector * (1.0f / sizeX);
+	Vector3 scaledV = vVector * (-1.0f / sizeY);
+	const float uOffset = decalOffsetU + 0.5f;
+	const float vOffset = decalOffsetV + 0.5f;
+
+	int startX = REAL_TO_INT_FLOOR((objPos.X + minX) / MAP_XY_FACTOR) + borderSize;
+	int endX = REAL_TO_INT_CEIL((objPos.X + maxX) / MAP_XY_FACTOR) + borderSize;
+	int startY = REAL_TO_INT_FLOOR((objPos.Y + minY) / MAP_XY_FACTOR) + borderSize;
+	int endY = REAL_TO_INT_CEIL((objPos.Y + maxY) / MAP_XY_FACTOR) + borderSize;
+
+	startX = __max(startX, drawStartX);
+	startX = __min(startX, drawEdgeX);
+	startY = __max(startY, drawStartY);
+	startY = __min(startY, drawEdgeY);
+	endX = __max(endX, drawStartX);
+	endX = __min(endX, drawEdgeX);
+	endY = __max(endY, drawStartY);
+	endY = __min(endY, drawEdgeY);
+
+	int numExtraX = (endX - startX + 1) - 104;
+	if (numExtraX > 0)
+	{
+		const int numStartExtraX = REAL_TO_INT_FLOOR((float)numExtraX / 2.0f);
+		startX += numStartExtraX;
+		endX -= numExtraX - numStartExtraX;
+	}
+	int numExtraY = (endY - startY + 1) - 104;
+	if (numExtraY > 0)
+	{
+		const int numStartExtraY = REAL_TO_INT_FLOOR((float)numExtraY / 2.0f);
+		startY += numStartExtraY;
+		endY -= numExtraY - numStartExtraY;
+	}
+
+	const int vertsPerRow = endX - startX + 1;
+	const int vertsPerColumn = endY - startY + 1;
+	if (vertsPerRow <= 1 || vertsPerColumn <= 1)
+		return false;
+
+	const float layerHeight = GetShadowLayerHeightDX11(robj, objPos);
+	vertices.clear();
+	indices.clear();
+	vertices.reserve(vertsPerRow * vertsPerColumn);
+	indices.reserve((endX - startX) * (endY - startY) * 6);
+
+	for (int j = startY; j <= endY; ++j)
+	{
+		const float worldY = (float)(j - borderSize) * MAP_XY_FACTOR;
+		for (int i = startX; i <= endX; ++i)
+		{
+			Vector3 hmapVertex;
+			hmapVertex.X = (float)(i - borderSize) * MAP_XY_FACTOR;
+			hmapVertex.Y = worldY;
+			hmapVertex.Z = (float)hmap->getHeight(i, j) * MAP_HEIGHT_SCALE;
+			if (layerHeight != 0.0f)
+				hmapVertex.Z = __max(hmapVertex.Z, layerHeight);
+			else
+				hmapVertex.Z += kClassicShadowZOffset;
+
+			Render::Vertex3D vertex = {};
+			vertex.position = { hmapVertex.X, hmapVertex.Y, hmapVertex.Z };
+			vertex.normal = { 0.0f, 0.0f, 1.0f };
+			vertex.texcoord = {
+				Vector3::Dot_Product(scaledU, (hmapVertex - objPos)) + uOffset,
+				Vector3::Dot_Product(scaledV, (hmapVertex - objPos)) + vOffset
+			};
+			vertex.color = diffuse;
+			vertices.push_back(vertex);
+		}
+	}
+
+	for (int j = startY, rowStart = 0; j < endY; ++j, rowStart += vertsPerRow)
+	{
+		for (int i = rowStart, k = startX; k < endX; ++i, ++k)
+		{
+			if (hmap->getFlipState(k, j))
+			{
+				indices.push_back(i + 1);
+				indices.push_back(i + vertsPerRow);
+				indices.push_back(i);
+				indices.push_back(i + 1);
+				indices.push_back(i + 1 + vertsPerRow);
+				indices.push_back(i + vertsPerRow);
+			}
+			else
+			{
+				indices.push_back(i);
+				indices.push_back(i + 1 + vertsPerRow);
+				indices.push_back(i + vertsPerRow);
+				indices.push_back(i);
+				indices.push_back(i + 1);
+				indices.push_back(i + 1 + vertsPerRow);
+			}
+		}
+	}
+
+	return !vertices.empty() && !indices.empty();
+}
+
+static void SetClassicShadowBlendStateDX11(Render::Renderer& renderer, ShadowType type)
+{
+	if (type & SHADOW_ALPHA_DECAL)
+		renderer.SetDecalAlphaBlend3DState();
+	else if (type & SHADOW_ADDITIVE_DECAL)
+		renderer.SetDecalAdditive3DState();
+	else
+		renderer.SetDecalMultiplicative3DState();
 }
 
 void RenderShadowDecalsDX11(CameraClass* camera)
@@ -10897,10 +11464,15 @@ void RenderShadowDecalsDX11(CameraClass* camera)
 		return;
 
 	auto& shadowMgr = g_d3d11ShadowManager;
+	auto& renderer = Render::Renderer::Instance();
+	{
+		auto& fd = renderer.GetFrameData();
+		fd.buildingShadowCount = { 0.0f, 0.0f, 0.0f, 0.0f };
+	}
+	renderer.FlushFrameConstants();
 	if (shadowMgr.m_shadowCount == 0 || !shadowMgr.m_shadowList)
 		return;
 
-	auto& renderer = Render::Renderer::Instance();
 	auto& device = renderer.GetDevice();
 
 	// Load default shadow texture on first use
@@ -10914,246 +11486,87 @@ void RenderShadowDecalsDX11(CameraClass* camera)
 		};
 		for (const char* name : shadowTexNames)
 		{
-			g_shadowTexture = imgCache.GetTexture(device, name);
+			g_shadowTexture = imgCache.GetTexture(device, name, false);
 			if (g_shadowTexture) break;
 		}
 		if (!g_shadowTexture)
 			g_shadowTexture = CreateProceduralShadowTexture(device);
-		// Radius decal fallback is always the procedural ring — authored
-		// assets don't share a single "default radius decal" name, so if a
-		// specific .tga is missing the ring is the right fallback.
 		CreateProceduralRadiusDecalTexture(device);
 		g_shadowTextureLoaded = true;
 	}
 	if (!g_shadowTexture)
 		return;
 
-	// Create instance StructuredBuffer on first use
-	if (!g_decalInstanceBufferCreated)
-	{
-		if (!g_decalInstanceBuffer.Create(device, sizeof(Render::Renderer::DecalInstance), MAX_DECAL_INSTANCES))
-			return;
-		g_decalInstanceBufferCreated = true;
-	}
-
-	// Upload heightmap to GPU texture (lazy, only recreated when heightmap changes)
 	WorldHeightMap* hm = GetTerrainHeightMap();
-	if (!UpdateHeightmapTexture(device, hm))
+	if (!hm)
 		return;
 
-	// Compute heightmap UV transform constants
-	const float mapXYFactor = (float)MAP_XY_FACTOR;
-	// Classic D3D8 bias (~0.1 world units) was fine for ground shadows that
-	// sit flush on terrain. It's nowhere near enough for alpha/additive
-	// radius decals (guard circle, attack-move ring, scud reticle, generals
-	// powers) which z-fight heavily on sloped / ridged terrain viewed from
-	// the RTS camera. The per-vertex heightmap sample in the VS already
-	// conforms the decal quad to terrain contour, but the bilinear sample
-	// can dip below the shaded triangle between adjacent heightmap cells
-	// and the terrain pass itself uses a slightly different interpolation
-	// (diagonal flip bit), so we need a generous constant lift. Shadows
-	// keep the tiny original bias so unit shadows don't look detached;
-	// radius/command decals get ~1.25 units so they read as painted-on
-	// overlays but never clip into slopes.
-	const float shadowZOffset = 0.01f * mapXYFactor;   // ~0.1 units (shadows)
-	const float decalRingZOffset = 1.25f;              // ~1.25 units (radius cursors)
-	int hmW = hm->getXExtent();
-	int hmH = hm->getYExtent();
-	int border = hm->getBorderSize();
-
-	Render::Renderer::DecalConstants decalCB = {};
-	decalCB.hmTransform = {
-		1.0f / ((float)hmW * MAP_XY_FACTOR),  // worldX → UV scale
-		1.0f / ((float)hmH * MAP_XY_FACTOR),  // worldY → UV scale
-		(float)border / (float)hmW,            // UV offset X
-		(float)border / (float)hmH             // UV offset Y
-	};
-	decalCB.hmParams = { shadowZOffset, 0.0f, 0.0f, 0.0f };
-
-	// Extract shadow data
-	static float sX[MAX_DECAL_INSTANCES], sY[MAX_DECAL_INSTANCES];
-	static float sSizeX[MAX_DECAL_INSTANCES], sSizeY[MAX_DECAL_INSTANCES];
-	static float sOffX[MAX_DECAL_INSTANCES], sOffY[MAX_DECAL_INSTANCES], sAngle[MAX_DECAL_INSTANCES];
-	static UnsignedByte sOpacity[MAX_DECAL_INSTANCES];
-	static const char* sTexNames[MAX_DECAL_INSTANCES];
-	static ShadowType sTypes[MAX_DECAL_INSTANCES];
-	static uint32_t sDiffuse[MAX_DECAL_INSTANCES];
+	static float sX[kMaxShadowDecalsDX11], sY[kMaxShadowDecalsDX11];
+	static float sSizeX[kMaxShadowDecalsDX11], sSizeY[kMaxShadowDecalsDX11];
+	static float sOffX[kMaxShadowDecalsDX11], sOffY[kMaxShadowDecalsDX11], sAngle[kMaxShadowDecalsDX11];
+	static UnsignedByte sOpacity[kMaxShadowDecalsDX11];
+	static const char* sTexNames[kMaxShadowDecalsDX11];
+	static ShadowType sTypes[kMaxShadowDecalsDX11];
+	static uint32_t sDiffuse[kMaxShadowDecalsDX11];
+	static RenderObjClass* sRobjs[kMaxShadowDecalsDX11];
 
 	int shadowCount = shadowMgr.getShadowData(
 		sX, sY, sSizeX, sSizeY, sOpacity, sOffX, sOffY, sAngle,
-		sTexNames, sTypes, sDiffuse, MAX_DECAL_INSTANCES);
+		sTexNames, sTypes, sDiffuse, sRobjs, kMaxShadowDecalsDX11);
 	if (shadowCount == 0)
 		return;
 
-	// Build flat DecalInstance array — just parameters, no vertex generation.
-	// GPU vertex shader handles quad expansion, rotation, and heightmap sampling.
-	static Render::Renderer::DecalInstance instances[MAX_DECAL_INSTANCES];
-	// Sun azimuth — only used when Enhanced Shadows toggle is on, to rotate
-	// SHADOW_DIRECTIONAL_PROJECTION decals with the sun direction instead of
-	// with the model's heading.
-	extern bool g_useEnhancedShadows;
-	float sunAzimuth = 0.0f;
-	if (g_useEnhancedShadows)
-	{
-		const Vector3& sunPos = g_fallbackShadowLightPos[0];
-		if (sunPos.X != 0.0f || sunPos.Y != 0.0f)
-			sunAzimuth = atan2f(sunPos.Y, sunPos.X);
-	}
+	Render::Float4x4 identity;
+	DirectX::XMStoreFloat4x4(&Render::ToXM(identity), DirectX::XMMatrixIdentity());
+	const Render::Float4 white = { 1.0f, 1.0f, 1.0f, 1.0f };
+	std::vector<Render::Vertex3D> vertices;
+	std::vector<uint32_t> indices;
 	for (int si = 0; si < shadowCount; ++si)
 	{
-		auto& inst = instances[si];
-		inst.posX = sX[si];
-		inst.posY = sY[si];
-		inst.offsetX = sOffX[si];
-		inst.offsetY = sOffY[si];
-		inst.sizeX = sSizeX[si];
-		inst.sizeY = sSizeY[si];
-		inst.angle = (g_useEnhancedShadows && (sTypes[si] & SHADOW_DIRECTIONAL_PROJECTION))
-			? sunAzimuth : sAngle[si];
-
-		if (sTypes[si] & (SHADOW_ALPHA_DECAL | SHADOW_ADDITIVE_DECAL))
-		{
-			inst.color = sDiffuse[si]; // already ABGR-converted by getData()
-		}
-		else
-		{
-			// Multiplicative shadow darkening. Classic path uses a 50% cap
-			// (the previously-shipping behavior — looks ghostly but matches
-			// what the user is used to). Enhanced Shadows toggle removes
-			// the cap and uses full opacity for darker, more accurate-look
-			// shadows.
-			extern bool g_useEnhancedShadows;
-			float opacityF = sOpacity[si] / 255.0f;
-			float multiplier = g_useEnhancedShadows
-				? (1.0f - opacityF)
-				: (1.0f - opacityF * 0.5f);
-			if (multiplier < 0.0f) multiplier = 0.0f;
-			UnsignedByte c = static_cast<UnsignedByte>(multiplier * 255.0f);
-			inst.color = 0xFF000000 | (c << 16) | (c << 8) | c;
-		}
-	}
-
-	// Group instances by (texture, blend mode) for batched DrawInstanced calls.
-	// Uses static arrays to avoid per-frame heap allocations.
-	struct DecalBatch {
-		Render::Texture* tex;
-		Render::Renderer::DecalBlend blend;
-		int start;
-		int count;
-	};
-	static DecalBatch batches[MAX_DECAL_INSTANCES];
-	static Render::Renderer::DecalInstance batchedInstances[MAX_DECAL_INSTANCES];
-	int numBatches = 0;
-
-	// Sort/partition instances by (texture, blend mode)
-	auto& imgCache = Render::ImageCache::Instance();
-
-	// First pass: resolve textures and assign blend modes
-	struct ShadowKey {
-		Render::Texture* tex;
-		int blendMode; // 0=mult, 1=alpha, 2=additive
-	};
-	static ShadowKey keys[MAX_DECAL_INSTANCES];
-	for (int si = 0; si < shadowCount; ++si)
-	{
-		// Blend mode first — picks the correct fallback texture.
-		int blendMode = 0;
-		if (sTypes[si] & SHADOW_ALPHA_DECAL) blendMode = 1;
-		else if (sTypes[si] & SHADOW_ADDITIVE_DECAL) blendMode = 2;
-
-		// Fallback: shadow blob (dark RGB) for multiplicative, white ring for
-		// alpha/additive radius decals. Using the dark shadow as fallback for
-		// a radius decal would tint the colored circle toward black.
-		Render::Texture* tex = (blendMode == 0)
-			? g_shadowTexture
-			: &g_proceduralRadiusDecalTexture;
-
-		if (sTexNames[si])
-		{
-			char fullName[80];
-			Render::Texture* perObj = nullptr;
-			// Try common extensions and then the as-is name.
-			snprintf(fullName, sizeof(fullName), "%s.tga", sTexNames[si]);
-			perObj = imgCache.GetTexture(device, fullName);
-			if (!perObj)
-			{
-				snprintf(fullName, sizeof(fullName), "%s.dds", sTexNames[si]);
-				perObj = imgCache.GetTexture(device, fullName);
-			}
-			if (!perObj)
-				perObj = imgCache.GetTexture(device, sTexNames[si]);
-			if (perObj) tex = perObj;
-		}
-		keys[si].tex = tex;
-		keys[si].blendMode = blendMode;
-	}
-
-	// Second pass: group contiguous runs and collect batches
-	int batchedCount = 0;
-	for (int mode = 0; mode <= 2; ++mode)
-	{
-		// Collect all instances of this blend mode, sub-grouped by texture
-		Render::Texture* lastTex = nullptr;
-		for (int si = 0; si < shadowCount; ++si)
-		{
-			if (keys[si].blendMode != mode) continue;
-			if (keys[si].tex != lastTex)
-			{
-				// Start a new batch
-				if (numBatches > 0 && batches[numBatches - 1].count == 0)
-					--numBatches; // remove empty batch
-				batches[numBatches].tex = keys[si].tex;
-				batches[numBatches].blend = static_cast<Render::Renderer::DecalBlend>(mode);
-				batches[numBatches].start = batchedCount;
-				batches[numBatches].count = 0;
-				++numBatches;
-				lastTex = keys[si].tex;
-			}
-			batchedInstances[batchedCount++] = instances[si];
-			batches[numBatches - 1].count++;
-		}
-	}
-
-	if (batchedCount == 0)
-		return;
-
-	// Upload all instances to GPU in one shot
-	g_decalInstanceBuffer.Update(device, batchedInstances, batchedCount);
-
-	// Render each batch with its blend mode — one DrawInstanced call per (texture, blend) group.
-	// The StructuredBuffer contains all instances contiguously; each batch references a sub-range.
-	// Since DrawInstanced doesn't support base-instance offset, we re-upload per batch.
-	for (int bi = 0; bi < numBatches; ++bi)
-	{
-		auto& batch = batches[bi];
-		if (batch.count == 0) continue;
-
-		// Skip multiplicative shadow blobs — the `tex * input.color` shader
-		// renders them as solid black squares when input.color is dark
-		// (g_useEnhancedShadows or any high-opacity shadow). Alpha and
-		// additive batches (guard rings, generals-power markers, radiation
-		// range, bomb blast, faction logos) still render normally.
-		if (batch.blend == Render::Renderer::DecalBlend::Multiplicative)
+		BakedSilhouette* baked = nullptr;
+		Render::Texture* tex = ResolveShadowTextureDX11(device, sTexNames[si], sTypes[si], sRobjs[si], &baked);
+		if (!tex)
 			continue;
 
-		// Pass blend mode to pixel shader via hmParams.y so it can handle
-		// textures without alpha (24-bit TGA / DXT1 faction logos)
-		decalCB.hmParams.y = static_cast<float>(batch.blend);
-		// Per-blend-mode Z bias: radius cursors (alpha/additive) need a
-		// larger lift above terrain to avoid clipping into hills / ridges
-		// under the RTS camera. Shadows (multiplicative) keep the classic
-		// flush bias. See comment above for picked values.
-		decalCB.hmParams.x = (batch.blend == Render::Renderer::DecalBlend::Multiplicative)
-			? shadowZOffset
-			: decalRingZOffset;
+		float decalSizeX = sSizeX[si];
+		float decalSizeY = sSizeY[si];
+		float decalOffsetX = sOffX[si];
+		float decalOffsetY = sOffY[si];
+		if (baked)
+		{
+			decalSizeX = baked->sizeX;
+			decalSizeY = baked->sizeY;
+			decalOffsetX += baked->offsetX;
+			decalOffsetY += baked->offsetY;
+		}
 
-		// Upload just this batch's instances
-		g_decalInstanceBuffer.Update(device, &batchedInstances[batch.start], batch.count);
+		if (!BuildClassicShadowDecalMeshDX11(
+			hm,
+			sX[si],
+			sY[si],
+			sAngle[si],
+			sTypes[si],
+			decalSizeX,
+			decalSizeY,
+			decalOffsetX,
+			decalOffsetY,
+			sDiffuse[si],
+			sRobjs[si],
+			vertices,
+			indices))
+		{
+			continue;
+		}
 
-		renderer.DrawDecalsInstanced(
-			batch.count, batch.tex,
-			g_decalInstanceBuffer, &g_hmTexture,
-			decalCB, batch.blend);
+		Render::VertexBuffer vb;
+		Render::IndexBuffer ib;
+		if (!vb.Create(device, vertices.data(), static_cast<uint32_t>(vertices.size()), sizeof(Render::Vertex3D), false))
+			continue;
+		if (!ib.Create32(device, indices.data(), static_cast<uint32_t>(indices.size()), false))
+			continue;
+
+		SetClassicShadowBlendStateDX11(renderer, sTypes[si]);
+		renderer.Draw3D(vb, ib, tex, identity, white);
 	}
 
 	renderer.Restore3DState();

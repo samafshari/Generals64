@@ -54,6 +54,13 @@ bool ProcessEvent(const SDL_Event* event);
 bool WantCaptureMouse();
 bool WantCaptureKeyboard();
 
+// Unified logging: formats a line, pushes to the inspector's Log panel
+// ring (see View → Log in the toolbar) and mirrors to stderr/game_stderr.
+// Always active (including Release). Safe from any thread. Defined in
+// Panels.cpp. Use for diagnostics you want visible in-game without a
+// second tool like DbgView.
+void Log(const char* fmt, ...);
+
 // --- Pause / step control ---
 //
 // The inspector owns a global pause flag that GameEngine::update()
@@ -89,6 +96,13 @@ void Log(const char* fmt, ...);
 // Internally re-binds the backbuffer in case the engine left a
 // post-process render target bound.
 void Render();
+
+// Queue a game tooltip for rendering this frame as an ImGui overlay.
+// Callers (e.g. Mouse::drawTooltip) convert their UnicodeString to UTF-8
+// and hand off the desired pixel-space anchor. The tooltip is drawn
+// once by Render() and cleared; call every frame to keep it on screen.
+// Passing an empty string or a null pointer clears any pending tooltip.
+void SetFrameTooltip(const char* utf8Text, int anchorX, int anchorY);
 
 // --- Free-fly editor camera ---
 //

@@ -32,6 +32,7 @@
 #include "Common/Snapshot.h"
 #include "Common/Thing.h"
 #include "GameLogic/Object.h"
+#include <vector>
 
 class PolygonTrigger;
 class Waypoint;
@@ -249,6 +250,9 @@ public:
 
 	/// return the prototype used to create this team
 	const TeamPrototype *getPrototype() { return m_proto; }
+	const TeamPrototype *getPrototype() const { return m_proto; }
+	Bool isRecruitabilityOverridden() const { return m_isRecruitablitySet; }
+	Bool getOverrideRecruitable() const { return m_isRecruitable; }
 
 	void setID( TeamID id ) { m_id = id; }
 	TeamID getID() const { return m_id; }
@@ -350,6 +354,17 @@ public:
 	Bool noneInside(PolygonTrigger *pTrigger, UnsignedInt whichToConsider) const;					///< No members are in the area.
 
 	Object * tryToRecruit(const ThingTemplate *, const Coord3D *teamHome, Real maxDist); ///< Try to recruit the closest unit of this thing type.  Return true if successful.
+	/// Variant that scans an explicit candidate list instead of the full
+	/// TheGameLogic object chain. Callers in hot loops (AIPlayer::queueUnits,
+	/// AISkirmishPlayer::queueUnits) build the candidate vector once per
+	/// queueUnits call and pass it to every inner tryToRecruit, collapsing
+	/// an O(queues*orders*recruits*AllObjects) pattern into O(AllObjects +
+	/// queues*orders*recruits*PlayerObjects). 154 ms AIPlayer::doTeamBuilding
+	/// spikes in session 11 traced to the original full-chain scan.
+	Object * tryToRecruitFromCandidates(const ThingTemplate *tTemplate,
+	                                    const Coord3D *teamHome,
+	                                    Real maxDist,
+	                                    const std::vector<Object*>& candidates);
 
 	/**
 		return our relationship with the other team.

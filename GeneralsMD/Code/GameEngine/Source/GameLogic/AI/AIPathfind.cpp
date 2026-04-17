@@ -134,6 +134,102 @@ constexpr const UnsignedInt PATHFIND_CELLS_PER_FRAME_PLAYER = 7500;
 constexpr const UnsignedInt PATHFIND_CELLS_PER_FRAME_AI     = 2500;
 constexpr const UnsignedInt CELL_INFOS_TO_ALLOCATE = 60000;  // sized for worst-case simultaneous A* frontiers
 
+// ---------------------------------------------------------------------------
+// Slow-path findPath memoization (cooldown ring).
+//
+// Problem: when the flow-field cache misses and the classic A*+JPS+ fallback
+// runs on an unreachable or pathologically long goal, a single internalFindPath
+// call could walk toward the 60k CELL_INFOS ceiling and spend 200-500 ms on
+// one frame. Live telemetry (session 6) showed 3 of the 5 worst frames in a
+// match were findPath stalls, with AI::update waiting the whole time.
+//
+// Two fixes work together:
+//   1) Hard soft-cap the A* expansion at FINDPATH_CELL_EXPANSION_CAP cells
+//      (deterministic integer count — same on every MP client).
+//   2) When a call trips the cap (or exhausts the open list naturally), park
+//      the (objectID, goalCellX, goalCellY) triple in a ring buffer so repeat
+//      calls from the same unit to the same cell in the next FINDPATH_MEMO_COOLDOWN_FRAMES
+//      short-circuit to nullptr without running A* again.
+//
+// Determinism contract:
+//   - Ring is indexed by GameLogic frame (integer, lockstep-identical).
+//   - Keyed on ObjectID + cell coords — no floats, no wall clock.
+//   - Every client evaluates findPath in the same order from the same logic
+//     queue, so the ring evolves identically and produces identical
+//     nullptr decisions. No desync surface.
+//
+// Size math: 256 entries × (4+4+4+4) bytes = 4 KB. Inconsequential.
+// ---------------------------------------------------------------------------
+constexpr const Int FINDPATH_MEMO_RING_SIZE = 256;		// bumped from the 64 described in pathfind_slow_memo.md
+constexpr const UnsignedInt FINDPATH_MEMO_COOLDOWN_FRAMES = 30;	// ~1 s at 30 Hz logic
+// First pass used 50 000 to stay below CELL_INFOS_TO_ALLOCATE=60 000, but at
+// ~5.7 µs per expansion (measured from mean 171 µs / ~30-cell typical)
+// that's still ~285 ms worst case — live telemetry session 11 confirmed
+// 311 ms findPath tail frames. Siblings findSafePath (2000) and attack paths
+// (2500) are ~20× tighter; findPath at 5 000 lines up with that and yields
+// an actual ~30 ms worst case. The (obj, goal) memo ring + 30-frame
+// cooldown prevents retry storms when the cap trips, so AI falls back to
+// idle/retry cleanly instead of re-hitting the cap every frame.
+constexpr const Int FINDPATH_CELL_EXPANSION_CAP = 5000;
+
+namespace {
+
+struct FindPathMemoEntry
+{
+	ObjectID		objID;		// INVALID_ID for empty slot
+	Int			goalCellX;
+	Int			goalCellY;
+	UnsignedInt		expiryFrame;	// frame at which the entry stops short-circuiting
+};
+
+// File-scope ring. Single-threaded: the pathfind queue runs on the logic
+// thread; async precomp rebuild workers never touch findPath.
+static FindPathMemoEntry s_findPathMemo[FINDPATH_MEMO_RING_SIZE] = {};
+static Int s_findPathMemoNextSlot = 0;
+
+// Returns true iff a recent-failure entry exists for (obj, goalCell) that
+// hasn't expired yet. Scans the whole ring; 256 compares is trivial next to
+// the cost of running even a fast A*.
+static inline Bool findPathMemoHit(ObjectID objID, Int gx, Int gy, UnsignedInt nowFrame)
+{
+	if (objID == INVALID_ID)
+		return false;
+	for (Int i = 0; i < FINDPATH_MEMO_RING_SIZE; ++i) {
+		const FindPathMemoEntry& e = s_findPathMemo[i];
+		if (e.objID == objID && e.goalCellX == gx && e.goalCellY == gy) {
+			if (nowFrame < e.expiryFrame)
+				return true;
+		}
+	}
+	return false;
+}
+
+static inline void findPathMemoRecord(ObjectID objID, Int gx, Int gy, UnsignedInt nowFrame)
+{
+	if (objID == INVALID_ID)
+		return;
+	// Overwrite oldest slot (FIFO). Good enough — the only cost of a
+	// late-evicted entry is one wasted A* run. 256 slots absorbs even a
+	// 200-unit selection issuing a bulk attack-move.
+	FindPathMemoEntry& slot = s_findPathMemo[s_findPathMemoNextSlot];
+	slot.objID        = objID;
+	slot.goalCellX    = gx;
+	slot.goalCellY    = gy;
+	slot.expiryFrame  = nowFrame + FINDPATH_MEMO_COOLDOWN_FRAMES;
+	s_findPathMemoNextSlot = (s_findPathMemoNextSlot + 1) % FINDPATH_MEMO_RING_SIZE;
+}
+
+static inline void findPathMemoReset()
+{
+	for (Int i = 0; i < FINDPATH_MEMO_RING_SIZE; ++i) {
+		s_findPathMemo[i].objID = INVALID_ID;
+		s_findPathMemo[i].expiryFrame = 0;
+	}
+	s_findPathMemoNextSlot = 0;
+}
+
+} // namespace
+
 //-----------------------------------------------------------------------------------
 PathNode::PathNode() :
 	m_nextOpti(nullptr),
@@ -3937,6 +4033,9 @@ void Pathfinder::reset()
 
 	m_precomputed.release();
 	m_flowCache.release();
+	// Drop any stale (obj, goal-cell) memos — new map → object IDs will be
+	// recycled → false cache hits otherwise.
+	findPathMemoReset();
 
 	Int i;
 	for (i=0; i<=LAYER_LAST; i++) {
@@ -4696,6 +4795,10 @@ void Pathfinder::forceMapRecalculation()
 	// precomp workers must be fully joined before it runs.
 	m_precomputed.waitForAsync();
 	m_flowCache.invalidateAll();
+	// A goal previously declared unreachable may now be reachable (or vice
+	// versa) after a full reclassify; flush the findPath cooldown ring so
+	// stale failures don't shadow the new topology.
+	findPathMemoReset();
 	classifyMap();
 	m_precomputed.rebuildAsync();
 }
@@ -5883,6 +5986,7 @@ void Pathfinder::processPathfindQueue()
 		// cell zones; wait for them before mutating.
 		m_precomputed.waitForAsync();
 		m_flowCache.invalidateAll();	// zone changes invalidate shared-goal fields
+		findPathMemoReset();			// same rationale — topology just changed under our feet
 		m_zoneManager.calculateZones(m_map, m_layers, m_extent);
 		// Zones just changed, so every jump-table and the zone-distance matrix
 		// are stale. Kick the rebuild on worker threads; consumers fall back
@@ -6711,6 +6815,21 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
 {
 	LIVE_PERF_SCOPE("Pathfinder::findPath");
 	TELEMETRY_SCOPE("Pathfind", "Pathfinder::findPath");
+
+	// Slow-path cooldown: if this (obj, goal-cell) failed or was capped in the
+	// last ~1 s, don't re-run the A*. Units re-issue findPath every tick while
+	// idle; one bad goal used to cost 200-500 ms every time. Deterministic
+	// across clients (integer key, logic-frame expiry) so lockstep MP stays
+	// in sync. See FINDPATH_MEMO_* constants above for rationale.
+	if (obj != nullptr && rawTo != nullptr && TheGameLogic != nullptr) {
+		ICoord2D goalCellNdx;
+		worldToCell(rawTo, &goalCellNdx);
+		if (findPathMemoHit(obj->getID(), goalCellNdx.x, goalCellNdx.y,
+												 TheGameLogic->getFrame())) {
+			return nullptr;
+		}
+	}
+
 	if (!clientSafeQuickDoesPathExist(locomotorSet, from, rawTo)) {
 		return nullptr;
 	}
@@ -6950,9 +7069,32 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 
 		cellCount += examineNeighboringCells(parentCell, goalCell, locomotorSet, isHuman, centerInCell, radius, startCellNdx, obj, NO_ATTACK);
 
+		// Deterministic soft cap. If we've scanned more cells than the cap
+		// without finding the goal, bail out. Previously the loop would run
+		// until either CELL_INFOS_TO_ALLOCATE (60000) exhausted inside
+		// allocateInfo() or the open list naturally emptied — on a wide-open
+		// map with an unreachable/very far goal this could spend 200-500 ms on
+		// one frame (session 6 telemetry: 3 of the 5 worst frames were here).
+		// The cap is a pure integer comparison on cellCount, so every MP client
+		// reaches it at the same iteration and returns the same nullptr — no
+		// desync risk. Callers (AIStateMachine::lookAtTarget, attackState etc.)
+		// already handle nullptr by going idle and retrying; the memo ring
+		// below stops that retry from re-running A* every tick.
+		if (cellCount > FINDPATH_CELL_EXPANSION_CAP) {
+			break;
+		}
 	}
 
-	// failure - goal cannot be reached
+	// failure - goal cannot be reached (exhausted open list, or hit the
+	// expansion cap). Park (obj, goal-cell) in the memo ring so the next
+	// ~30 logic frames of retries from the same unit skip A* entirely.
+	if (obj != nullptr) {
+		findPathMemoRecord(obj->getID(),
+			goalCell->getXIndex(), goalCell->getYIndex(),
+			TheGameLogic != nullptr ? TheGameLogic->getFrame() : 0);
+	}
+
+
 #if defined(RTS_DEBUG)
 #ifdef INTENSE_DEBUG
 	DEBUG_LOG(("internal find path FAILURE..."));

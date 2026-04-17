@@ -1030,8 +1030,12 @@ UpdateSleepTime AIUpdateInterface::update()
 	//DEBUG_LOG(("AIUpdateInterface frame %d: %08lx",TheGameLogic->getFrame(),getObject()));
 
 	USE_PERF_TIMER(AIUpdateInterface_update)
+	// LivePerf gives per-frame aggregate (HUD + SQLite). The explicit
+	// per-sample TELEMETRY_SCOPE was removed: at ~115 calls/frame × 30 Hz =
+	// 3,450 writes/sec just from this site, which was measurably costing AI
+	// frame time (clock::now × 2 + mutex + ring push per call). Mean 20-26µs
+	// was also below the useful signal threshold.
 	LIVE_PERF_SCOPE("AIUpdateInterface::update");
-	TELEMETRY_SCOPE("AI", "AIUpdateInterface::update");
 
 	m_isInUpdate = TRUE;
 

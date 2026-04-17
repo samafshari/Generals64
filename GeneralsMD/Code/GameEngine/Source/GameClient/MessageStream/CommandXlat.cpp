@@ -846,6 +846,14 @@ void pickAndPlayUnitVoiceResponse( const DrawableList *list, GameMessage::Type m
 	if( objectWithSound )
 	{
 		soundToPlay.setObjectID( objectWithSound->getID() );
+
+		// Preempt any voice already playing for this object. Without this,
+		// SoundManager::canPlayNow's violatesVoice gate rejects the command
+		// voice whenever the unit is still in the middle of VoiceSelect, so
+		// move/attack/guard orders sound silent. Behaves like Miles' AC_INTERRUPT
+		// replace-on-kill, extended from same-name to voice-per-object.
+		TheAudio->killVoiceOnObject( (UnsignedInt)objectWithSound->getID() );
+
 		TheAudio->addAudioEvent(&soundToPlay);
 
 		// This seems really hacky, and MarkL admits that it is. However, we do this so that we

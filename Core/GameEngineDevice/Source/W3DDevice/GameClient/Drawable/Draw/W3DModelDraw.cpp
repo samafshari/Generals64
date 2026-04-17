@@ -40,6 +40,7 @@
 
 #include "Common/crc.h"
 #include "Common/CRCDebug.h"
+#include "Inspector/Inspector.h"
 #include "Common/GameState.h"
 #include "Common/GlobalData.h"
 #include "Common/PerfTimer.h"
@@ -2126,8 +2127,10 @@ void W3DModelDraw::adjustTransformMtx(Matrix3D& mtx) const
 //-------------------------------------------------------------------------------------------------
 void W3DModelDraw::doDrawModule(const Matrix3D* transformMtx)
 {
+	// LivePerf covers this site (HUD + per-frame SQLite aggregate). The
+	// per-sample TELEMETRY_SCOPE was removed: 1.1µs mean was below telemetry
+	// overhead itself and it generated ~2M rows/session with zero signal.
 	LIVE_PERF_SCOPE("W3DModelDraw::doDrawModule");
-	TELEMETRY_SCOPE("Draw", "W3DModelDraw::doDrawModule");
 	// update whether or not we should be animating.
 	setPauseAnimation( !getDrawable()->getShouldAnimate(getW3DModelDrawModuleData()->m_animationsRequirePower) );
 
@@ -3189,6 +3192,17 @@ void W3DModelDraw::setModelState(const ModelConditionInfo* newState)
 		}
 
 		// set up shadows
+		{
+			static bool s_logged = false;
+			if (!s_logged) {
+				Inspector::Log(
+					"[SHADOW] setModelState shadow-eligibility: robj=%p mgr=%p shadowType=%d model=%s",
+					(void*)m_renderObject, (void*)TheW3DShadowManager,
+					tmplate ? (int)tmplate->getShadowType() : -1,
+					newState->m_modelName.str());
+				s_logged = true;
+			}
+		}
 		if (m_renderObject && TheW3DShadowManager && tmplate->getShadowType() != SHADOW_NONE)
 		{
 			Shadow::ShadowTypeInfo shadowInfo;

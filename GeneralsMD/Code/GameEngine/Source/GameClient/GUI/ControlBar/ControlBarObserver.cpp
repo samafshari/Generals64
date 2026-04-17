@@ -60,10 +60,12 @@
 #include "Common/KindOf.h"
 #include "Common/Recorder.h"
 #include "GameClient/ControlBar.h"
+#include "GameClient/Display.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/GadgetPushButton.h"
 #include "GameClient/GadgetStaticText.h"
 #include "GameClient/GameText.h"
+#include "GameClient/Image.h"
 #include "GameNetwork/NetworkDefs.h"
 //-----------------------------------------------------------------------------
 // DEFINES ////////////////////////////////////////////////////////////////////
@@ -101,6 +103,32 @@ static NameKeyType s_replayObserverNameKey = NAMEKEY_INVALID;
 // PUBLIC FUNCTIONS ///////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 
+//-----------------------------------------------------------------------------
+// Observer-HUD player buttons render their faction logo rotated 90° CCW.
+// The artwork shipped with the game exports with the logo tipped on its side
+// inside the observer panel layout; a per-button draw override re-rotates the
+// sampled texels without touching the standard pushbutton draw path (which is
+// shared with the in-game command bar where the logos are already upright).
+static void ObserverPlayerButtonDraw(GameWindow *window, WinInstanceData *instData)
+{
+	if (!window || !instData)
+		return;
+
+	const Image *image = GadgetButtonGetEnabledImage(window);
+	if (!image)
+		return;
+
+	ICoord2D start, size;
+	window->winGetScreenPosition(&start.x, &start.y);
+	window->winGetSize(&size.x, &size.y);
+	start.x += instData->m_imageOffset.x;
+	start.y += instData->m_imageOffset.y;
+
+	TheDisplay->drawImageRotatedCCW90(
+		image,
+		start.x, start.y,
+		start.x + size.x, start.y + size.y);
+}
 
 void ControlBar::initObserverControls()
 {
@@ -264,6 +292,7 @@ void ControlBar::populateObserverList()
 				DEBUG_ASSERTCRASH(currentButton < MAX_BUTTONS, ("ControlBar::populateObserverList trying to populate more buttons then we have"));
 				GadgetButtonSetData(buttonPlayer[currentButton], (void *)p);
 				GadgetButtonSetEnabledImage( buttonPlayer[currentButton], p->getPlayerTemplate()->getEnabledImage() );
+				buttonPlayer[currentButton]->winSetDrawFunc(ObserverPlayerButtonDraw);
 				//GadgetButtonSetHiliteImage( buttonPlayer[currentButton], p->getPlayerTemplate()->getHiliteImage() );
 				//GadgetButtonSetHiliteSelectedImage( buttonPlayer[currentButton], p->getPlayerTemplate()->getPushedImage() );
 				//GadgetButtonSetDisabledImage( buttonPlayer[currentButton], p->getPlayerTemplate()->getDisabledImage() );
@@ -306,6 +335,7 @@ void ControlBar::populateObserverList()
 				DEBUG_ASSERTCRASH(currentButton < MAX_BUTTONS, ("ControlBar::populateObserverList trying to populate more buttons then we have"));
 				GadgetButtonSetData(buttonPlayer[currentButton], (void *)p);
 				GadgetButtonSetEnabledImage( buttonPlayer[currentButton], p->getPlayerTemplate()->getEnabledImage() );
+				buttonPlayer[currentButton]->winSetDrawFunc(ObserverPlayerButtonDraw);
 				//GadgetButtonSetHiliteImage( buttonPlayer[currentButton], p->getPlayerTemplate()->getHiliteImage() );
 				//GadgetButtonSetHiliteSelectedImage( buttonPlayer[currentButton], p->getPlayerTemplate()->getPushedImage() );
 				//GadgetButtonSetDisabledImage( buttonPlayer[currentButton], p->getPlayerTemplate()->getDisabledImage() );

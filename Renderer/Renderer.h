@@ -28,6 +28,19 @@ struct alignas(16) FrameConstants
     Render::Float4 atmosphereParams; // x = fog density, y = scatter power, z = specular intensity, w = unused
     Render::Float4x4 shadowMapMatrix; // world → shadow UV+depth
     Render::Float4 shadowParams;      // x = enabled, y = texel size (1/2048), z = bias, w = unused
+
+    // --- Terrain-side building shadow rects ---
+    // Each active caster puts one entry here; the terrain pixel shader
+    // darkens fragments whose XY land inside the rotated rect. Same
+    // architecture as ApplyCloudShadow: procedural, read-per-fragment,
+    // no separate render target / decal pass needed.
+    // buildingShadowCount.x = live count (max kMaxBuildingShadows).
+    // Each rect: xy = world center, z = halfWidth, w = halfHeight.
+    // Each rot:  xy = (cos, sin) of yaw, zw = reserved.
+    static constexpr int kMaxBuildingShadows = 256;
+    Render::Float4 buildingShadowCount;
+    Render::Float4 buildingShadowRect[kMaxBuildingShadows];
+    Render::Float4 buildingShadowRot[kMaxBuildingShadows];
 };
 
 // Per-object constants
@@ -282,6 +295,11 @@ public:
     void DrawRect(float x, float y, float w, float h, uint32_t color);
     void DrawImage(const Texture& texture, float x, float y, float w, float h, uint32_t tint = 0xFFFFFFFF);
     void DrawImageUV(const Texture& texture, float x, float y, float w, float h, float u0, float v0, float u1, float v1, uint32_t tint = 0xFFFFFFFF);
+    // Draws `texture` into the destination rect with the sampled texels rotated
+    // 90° counter-clockwise on screen (matching a `-90°` image rotation as seen
+    // by the user). Used by the post-defeat observer HUD where team logos are
+    // exported with the wrong axis orientation.
+    void DrawImageUVRotatedCCW90(const Texture& texture, float x, float y, float w, float h, float u0, float v0, float u1, float v1, uint32_t tint = 0xFFFFFFFF);
     void DrawLine(float x1, float y1, float x2, float y2, float width, uint32_t color);
     void DrawTri(float x0, float y0, float x1, float y1, float x2, float y2, uint32_t color);
     void Set2DGrayscale(bool grayscale);
@@ -313,6 +331,9 @@ public:
     void SetParticleAlphaBlend3DState();
     void SetParticleMultiplicative3DState();
     void SetParticleAlphaTest3DState();
+    void SetDecalAlphaBlend3DState();
+    void SetDecalMultiplicative3DState();
+    void SetDecalAdditive3DState();
     // Heat-distortion smudge state. Snapshots the current backbuffer into the
     // scene RT and binds it as the bumpTexture (slot 1) for the smudge shader,
     // which displaces UVs based on the smudge texture's RG channels and reads
@@ -360,6 +381,7 @@ public:
 
     bool CaptureScreenshot(const char* filename) { return m_device.CaptureScreenshot(filename); }
     const FrameConstants& GetFrameData() const { return m_frameData; }
+    FrameConstants& GetFrameData() { return m_frameData; }
 
 private:
     Renderer() = default;
@@ -640,6 +662,41 @@ public:
     RasterizerState m_rasterShadow;
     SamplerState m_samplerShadowPCF;
     static constexpr int SHADOW_MAP_SIZE = 2048;
+
+    // Silhouette baker: small scratch RT + flat-alpha PS. D3D11Shims
+    // SilhouetteBaker renders a caster's top-down silhouette into this
+    // scratch RT, then copies it to a permanent texture cached by model
+    // name, which RenderShadowDecalsDX11 then stamps onto the terrain.
+    static constexpr int SILHOUETTE_SIZE = 256;
+    Shader            m_shaderSilhouette;
+    Texture           m_silhouetteScratchRT;
+    RasterizerState   m_silhouetteRaster;
+    BlendState        m_silhouetteBlend;
+    DepthStencilState m_silhouetteDepth;
+    bool              m_silhouetteReady = false;
+public:
+    Shader&            GetSilhouetteShader()     { return m_shaderSilhouette; }
+    Texture&           GetSilhouetteScratchRT()  { return m_silhouetteScratchRT; }
+    RasterizerState&   GetSilhouetteRaster()     { return m_silhouetteRaster; }
+    BlendState&        GetSilhouetteBlend()      { return m_silhouetteBlend; }
+    DepthStencilState& GetSilhouetteDepth()      { return m_silhouetteDepth; }
+    bool               IsSilhouetteReady() const { return m_silhouetteReady; }
+public:
+
+    // Published by BuildCameraFitLightVP each frame for Inspector display.
+    struct ShadowFitDebug {
+        Render::Float3 center, lightEye, sunDir;
+        float lsMinX, lsMaxX, lsMinY, lsMaxY, lsMinZ, lsMaxZ;
+        float lightNear, lightFar;
+        int   castersSubmitted;
+        bool  valid;
+    };
+    ShadowFitDebug m_shadowFitDebug = {};
+
+public:
+    const ShadowFitDebug& GetShadowFitDebug() const { return m_shadowFitDebug; }
+    void SetShadowCastersSubmitted(int n) { m_shadowFitDebug.castersSubmitted = n; }
+private:
     Shader m_shaderLensFlare;
     Shader m_shaderVolumetric;
     ConstantBuffer m_cbLensFlare;

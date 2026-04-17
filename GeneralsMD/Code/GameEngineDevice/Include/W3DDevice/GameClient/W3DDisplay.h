@@ -70,6 +70,7 @@ public:
 	virtual void drawRectClock(Int startX, Int startY, Int width, Int height, Int percent, UnsignedInt color);
 	virtual void drawRemainingRectClock(Int startX, Int startY, Int width, Int height, Int percent, UnsignedInt color);
 	virtual void drawImage( const Image *image, Int startX, Int startY, Int endX, Int endY, Color color = 0xFFFFFFFF, DrawImageMode mode = DRAW_IMAGE_ALPHA);
+	virtual void drawImageRotatedCCW90( const Image *image, Int startX, Int startY, Int endX, Int endY, Color color = 0xFFFFFFFF, DrawImageMode mode = DRAW_IMAGE_ALPHA) override;
 	virtual void drawScaledVideoBuffer( VideoBuffer *buffer, VideoStreamInterface *stream );
 	virtual void drawVideoBuffer( VideoBuffer *buffer, Int startX, Int startY, Int endX, Int endY );
 	virtual VideoBuffer* createVideoBuffer();
