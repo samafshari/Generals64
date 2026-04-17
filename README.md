@@ -4,6 +4,7 @@ Generals64 is a fork of the original Generals source code. It features:
 
 - A fully 64-bit codebase
 - D3D11 based renderer
+- SDL for window management
 - FFMpeg for video playback
 - XAudio2 for sound playback
 - AI and path-finding optimizations
