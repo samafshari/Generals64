@@ -71,7 +71,6 @@ GameData/extern/tools/*.param
 /GameData/extern/tools/input.jpg
 /GameData/extern/tools/input2.jpg
 /GameData/*.obj
-bin
 obj
 *.bmp
 Debug
