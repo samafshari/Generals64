@@ -1261,7 +1261,7 @@ xcopy /Y /D "$(SolutionDir)extern\sdl3\bin\*.dll" "$(OutDir)"</Command>
   <!-- Dear ImGui sources: only compiled for D3D11 configurations.
        Under BUILD_WITH_VULKAN the Inspector module compiles to no-op stubs,
        so we save build time and avoid pulling in the DX11 backend headers. -->
-  <ItemGroup Condition="'$(Configuration)'=='Debug' Or '$(Configuration)'=='Release'">
+  <ItemGroup Condition="'$(Configuration)'=='Debug' Or '$(Configuration)'=='Release' Or '$(Configuration)'=='ReleasePublic'">
     <ClCompile Include="extern\imgui\imgui.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <ForcedIncludeFiles />

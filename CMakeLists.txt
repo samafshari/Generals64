@@ -7,6 +7,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # --- Platform and backend options ---
 option(USE_SDL "Use SDL3 for windowing and input" ON)
 
+# Public / ship build. Mirrors the ReleasePublic MSBuild config: strips
+# diagnostic bloat that spams logs or burns CPU (Inspector log window,
+# SQLite telemetry writer, DEBUG_LOG). Controlled by a CMake option so
+# single-config generators (Ninja, Make) can opt in via -DPUBLIC_BUILD=ON;
+# the VS generator users should just pick the ReleasePublic configuration.
+option(PUBLIC_BUILD "Strip diagnostic/telemetry bloat (matches ReleasePublic)" OFF)
+
 if(WIN32)
     option(USE_D3D11 "Build with Direct3D 11 backend" ON)
     option(USE_VULKAN "Build with Vulkan backend" OFF)
@@ -125,6 +132,7 @@ target_include_directories(generalszh PRIVATE
     extern/vulkan/include
     extern/json
     extern/zlib
+    extern/sqlite3
     extern/bink
     extern/lzhl_wrapper
     extern/lzhl_wrapper/CompLibHeader
@@ -176,6 +184,14 @@ target_compile_definitions(generalszh PRIVATE
 
 if(USE_SDL)
     target_compile_definitions(generalszh PRIVATE USE_SDL)
+endif()
+
+if(PUBLIC_BUILD)
+    target_compile_definitions(generalszh PRIVATE
+        RTS_PUBLIC=1
+        GENERALS_TELEMETRY=0
+        DISABLE_DEBUG_LOGGING=1
+    )
 endif()
 
 if(USE_D3D11)

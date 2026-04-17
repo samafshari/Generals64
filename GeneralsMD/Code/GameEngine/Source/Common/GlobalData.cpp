@@ -632,7 +632,12 @@ GlobalData::GlobalData()
 	m_chipSetType = 0;
 	m_headless = FALSE;
 	m_clientServerMode = TRUE;	// Default to client-server topology; host is the packet router.
-	m_windowed = 0;
+	// Default to bordered (titled) windowed-maximized on first run. SDLPlatform
+	// still applies SDL_WINDOW_MAXIMIZED by default, so the effective state is
+	// a resizable maximized window with a title bar — the most discoverable
+	// layout when no Options.ini exists. Options.ini "Windowed=no" and
+	// -fullscreen still flip this to borderless below.
+	m_windowed = 1;
 	m_xResolution = DEFAULT_DISPLAY_WIDTH;
 	m_yResolution = DEFAULT_DISPLAY_HEIGHT;
 	m_explicitDisplayResolution = FALSE;

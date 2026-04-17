@@ -39,7 +39,10 @@ set(GAME_SOURCES
     Core/GameEngine/Source/Common/Audio/GameAudio.cpp
     Core/GameEngine/Source/Common/Audio/GameMusic.cpp
     Core/GameEngine/Source/Common/Audio/GameSounds.cpp
+    Core/GameEngine/Source/Common/CosmeticsCache.cpp
     Core/GameEngine/Source/Common/CRCDebug.cpp
+    Core/GameEngine/Source/Common/Telemetry.cpp
+    extern/sqlite3/sqlite3.c
     Core/GameEngine/Source/Common/FramePacer.cpp
     Core/GameEngine/Source/Common/FrameRateLimit.cpp
     Core/GameEngine/Source/Common/SearchPaths.cpp
@@ -555,6 +558,8 @@ set(GAME_SOURCES
     GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AIGuard.cpp
     GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AIGuardRetaliate.cpp
     GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AIPathfind.cpp
+    GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AIPathfindPrecomputed.cpp
+    GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AIPathfindFlowField.cpp
     GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AIPlayer.cpp
     GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AISkirmishPlayer.cpp
     GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AIStates.cpp
