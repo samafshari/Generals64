@@ -81,3 +81,16 @@ Release
 
 AppxPackages
 /extracted_textures/
+
+.claude
+/GameData/avcodec-61.dll
+/GameData/avdevice-61.dll
+/GameData/avfilter-10.dll
+/GameData/avformat-61.dll
+/GameData/avutil-59.dll
+/GameData/SDL3.dll
+/GameData/swresample-5.dll
+/GameData/swscale-8.dll
+/GameData/telemetry.sqlite
+/GameData/telemetry.sqlite-shm
+/GameData/telemetry.sqlite-wal

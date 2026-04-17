@@ -1,3 +1,28 @@
+# About Generals64
+
+Generals64 is a fork of the original Generals source code. It features:
+
+- A fully 64-bit codebase
+- D3D11 based renderer
+- FFMpeg for video playback
+- XAudio2 for sound playback
+- AI and path-finding optimizations
+  
+It is a work in progress. Visit Generals64.com for more information.
+
+Also features code from https://github.com/TheSuperHackers/GeneralsGameCode
+
+## Compiling
+
+Install Visual Studio 2026. Simply open Generals64.sln and run z_generals. 
+
+## Content Files
+
+This requires the original game's content files. Edit paths.txt and in the order of priority, specify the search paths for content files. You can use this system to set up mods in a modular way.
+
+Original Readme below. Follow me at [x.com/samafshari](https://x.com/samafshari) for updates.
+
+---
 
 # Command & Conquer Generals (inc. Zero Hour) Source Code
 
@@ -57,3 +82,6 @@ This repository is for preservation purposes only and is archived without suppor
 ## License
 
 This repository and its contents are licensed under the GPL v3 license, with additional terms applied. Please see [LICENSE.md](LICENSE.md) for details.
+
+Third-party components redistributed under `extern/` (including an LGPL-3.0
+FFmpeg build) are documented in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).

@@ -321,7 +321,7 @@ UnicodeString Version::getUnicodeBuildUserOrGitCommitAuthorName() const
 UnicodeString Version::getUnicodeProductTitle() const
 {
 	// @todo Make configurable
-	return L"Make Generals Great Again";
+	return L"Generals64";
 }
 
 UnicodeString Version::getUnicodeProductVersion() const
