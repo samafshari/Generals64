@@ -845,9 +845,22 @@ Int parseRelayServer(char *args[], int num)
 // One-shot: cleared by MainMenuUpdate after the push fires.
 Bool g_launchToMpMenu = FALSE;
 
+// Suppress the EA/Westwood/sizzle intros for any launch path that's
+// heading straight into the multiplayer lobby. Matches what -win/-quickstart
+// style flags already do above — the player asked for MP, don't make them
+// sit through three logos first. Single-player launches (no -mpmenu /
+// -joingame / -hostgame) fall through unchanged and still play the intros.
+static void suppressIntrosForMultiplayer()
+{
+	TheWritableGlobalData->m_playIntro = FALSE;
+	TheWritableGlobalData->m_afterIntro = TRUE;
+	TheWritableGlobalData->m_playSizzle = FALSE;
+}
+
 Int parseMpMenu(char *args[], int)
 {
 	g_launchToMpMenu = TRUE;
+	suppressIntrosForMultiplayer();
 	return 1;
 }
 
@@ -875,6 +888,7 @@ Int parseJoinGame(char *args[], int num)
 		// multiplayer lobby, so flip the same flag -mpmenu sets.
 		// Saves the launcher having to pass both.
 		g_launchToMpMenu = TRUE;
+		suppressIntrosForMultiplayer();
 		return 2;
 	}
 	return 1;
@@ -892,6 +906,7 @@ Int parseHostGame(char *args[], int)
 {
 	g_launcherHostGame = TRUE;
 	g_launchToMpMenu = TRUE;
+	suppressIntrosForMultiplayer();
 	return 1;
 }
 
