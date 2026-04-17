@@ -73,7 +73,7 @@ GameData/extern/tools/*.param
 /GameData/*.obj
 obj
 *.bmp
-Debug
+
 Release
 /GameData/game_stderr.txt
 /GameData/game_stdout.txt
@@ -93,3 +93,4 @@ AppxPackages
 /GameData/telemetry.sqlite
 /GameData/telemetry.sqlite-shm
 /GameData/telemetry.sqlite-wal
+/GameData/telemetry*.txt
