@@ -154,22 +154,33 @@ float3 ApplyUnderwaterFade(float3 color, float worldZ)
     return color;
 }
 
-// Procedural value noise for cloud shadows (replaces texture lookup).
-// Uses hash-based smooth noise with two octaves to approximate the
-// original TSCloudMed.tga scrolling cloud pattern.
+// Procedural gradient noise for cloud shadows (Perlin-style).
+// Gradient noise is C2-continuous across cell boundaries, so the grid
+// never shows as visible creases — the value-noise version produced
+// sharp V-shaped edges at high zoom because cubic smoothstep is only
+// C1 and sin-hashed corners produced large jumps between neighbours.
+float2 CloudHash2(float2 i)
+{
+    float2 h = float2(dot(i, float2(127.1, 311.7)),
+                      dot(i, float2(269.5,  183.3)));
+    return frac(sin(h) * 43758.5453) * 2.0 - 1.0; // unit-ish gradient
+}
+
 float CloudNoise(float2 p)
 {
     float2 i = floor(p);
     float2 f = frac(p);
-    float2 u = f * f * (3.0 - 2.0 * f); // smoothstep
+    // Quintic smoothstep (C2-continuous): 6f^5 - 15f^4 + 10f^3
+    float2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
 
-    // Hash corners (fast integer-based)
-    float a = frac(sin(dot(i,                 float2(127.1, 311.7))) * 43758.5453);
-    float b = frac(sin(dot(i + float2(1, 0),  float2(127.1, 311.7))) * 43758.5453);
-    float c = frac(sin(dot(i + float2(0, 1),  float2(127.1, 311.7))) * 43758.5453);
-    float d = frac(sin(dot(i + float2(1, 1),  float2(127.1, 311.7))) * 43758.5453);
+    float a = dot(CloudHash2(i),                  f);
+    float b = dot(CloudHash2(i + float2(1, 0)),   f - float2(1, 0));
+    float c = dot(CloudHash2(i + float2(0, 1)),   f - float2(0, 1));
+    float d = dot(CloudHash2(i + float2(1, 1)),   f - float2(1, 1));
 
-    return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+    // Gradient noise is in ~[-0.7, 0.7]; remap to [0, 1].
+    float n = lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+    return n * 0.7 + 0.5;
 }
 
 // Per-pixel cloud shadow: procedural scrolling noise.
@@ -183,9 +194,12 @@ float3 ApplyCloudShadow(float3 color, float3 worldPos)
     float timeMs = lightingOptions.y;
     float2 cloudUV = worldPos.xy * uvScale + cloudParams.yz * (timeMs * 0.001);
 
-    // Two octaves of noise, matching the look of the original cloud texture
-    float n  = CloudNoise(cloudUV * 8.0) * 0.65;
-    n       += CloudNoise(cloudUV * 16.0) * 0.35;
+    // Three octaves of gradient noise (FBM). Base frequency is lower than
+    // the old value-noise version so cloud blobs are larger than a single
+    // tank — prevents individual units sitting on a sharp shadow edge.
+    float n  = CloudNoise(cloudUV * 3.0)  * 0.55;
+    n       += CloudNoise(cloudUV * 6.0)  * 0.30;
+    n       += CloudNoise(cloudUV * 12.0) * 0.15;
 
     // Remap: 0.55..1.0 range so shadows are subtle (not pitch black)
     float shadow = saturate(n * 0.45 + 0.55);
@@ -193,66 +207,14 @@ float3 ApplyCloudShadow(float3 color, float3 worldPos)
     return color * shadow;
 }
 
-// DEBUG: loud visualization so we can see whether the cbuffer array
-// is actually populated. Toggle behavior via buildingShadowCount.y:
-//   0 = normal soft shadow
-//   1 = CYAN flood-fill if count > 0 (proves cbuffer upload works)
-//   2 = MAGENTA ring around each rect center (proves per-rect data)
-//   3 = RED fill inside each rect (rects visible but full-brightness)
+// Building shadow rects are currently disabled — the shadow-pass work in
+// commit 8da4e13 produced a broken visual (darkened cloud shadows too),
+// so this function short-circuits to a no-op until the pipeline is re-landed.
+// cbuffer fields (buildingShadowCount / Rect / Rot) remain so FrameConstants
+// offsets don't shift for other shaders.
 float3 ApplyBuildingShadow(float3 color, float3 worldPos)
 {
-    int count = (int)buildingShadowCount.x;
-    int dbg = (int)buildingShadowCount.y;
-
-    if (dbg == 1)
-    {
-        // Paint the entire terrain cyan if ANY building shadow was
-        // registered. If the scene stays normal, the cbuffer .x is 0.
-        if (count > 0) return float3(0.0, 1.0, 1.0);
-        return color;
-    }
-
-    if (count <= 0) return color;
-
-    if (dbg == 2)
-    {
-        // Magenta band at |d| ≈ 50 from each rect center. If the user
-        // sees a magenta ring under each building, the xy values reached
-        // the shader correctly.
-        for (int i = 0; i < count; ++i)
-        {
-            float2 d = worldPos.xy - buildingShadowRect[i].xy;
-            float dist = length(d);
-            if (dist > 45.0 && dist < 55.0)
-                return float3(1.0, 0.0, 1.0);
-        }
-        return color;
-    }
-
-    // Only darken ground-level fragments so walls of buildings don't
-    // get painted by other buildings' shadows at wall height.
-    if (worldPos.z > 8.0) return color;
-    float accum = 1.0;
-    [loop]
-    for (int i = 0; i < count; ++i)
-    {
-        float4 rect = buildingShadowRect[i];
-        float4 rot  = buildingShadowRot[i];
-        float2 d = worldPos.xy - rect.xy;
-        float2 local = float2(
-             d.x * rot.x + d.y * rot.y,
-            -d.x * rot.y + d.y * rot.x);
-        if (dbg == 3)
-        {
-            if (abs(local.x) < rect.z && abs(local.y) < rect.w)
-                return float3(1.0, 0.2, 0.2);
-        }
-        float fx = 1.0 - smoothstep(rect.z - 0.75, rect.z + 0.75, abs(local.x));
-        float fy = 1.0 - smoothstep(rect.w - 0.75, rect.w + 0.75, abs(local.y));
-        float inside = fx * fy;
-        accum *= lerp(1.0, 0.45, inside);
-    }
-    return color * accum;
+    return color;
 }
 
 // Per-pixel fog of war: samples shroud grid texture from world position.
@@ -315,43 +277,14 @@ float3 ApplySurfaceSpecular(float3 color, float3 worldPos, float3 N)
 // Second part of g_shader3D (MSVC string literal size limit requires splitting)
 R"HLSL(
 
-// GPU Shadow Map: 3x3 PCF sampling. shadowParams.w is a debug mode:
-//   0 = normal PCF shadow (floor=0.25 for contrast during bring-up)
-//   1 = visualize raw stored shadow-map depth (proves the caster pass
-//       wrote depth — if terrain shows a dark gradient, casters work)
-//   2 = force-darken everything inside the light frustum to 0.3 (proves
-//       the matrix chain maps receivers into [0,1] UV range)
+// GPU shadow map disabled — return full-lit. The shadow-pass bring-up in
+// commit 8da4e13 darkened cloud shadows too and produced visibly wrong
+// output; this no-op restores pre-commit visuals until the pipeline is
+// re-landed correctly. Signature / cbuffer bindings preserved so all
+// PSMain* call sites compile unchanged.
 float ComputeShadow(float3 worldPos)
 {
-    if (shadowParams.x < 0.5) return 1.0;
-    float4 shadowClip = mul(float4(worldPos, 1.0), shadowMapMatrix);
-    float3 shadowUV = shadowClip.xyz;
-    if (shadowUV.x < 0.0 || shadowUV.x > 1.0 || shadowUV.y < 0.0 || shadowUV.y > 1.0) return 1.0;
-
-    int debugMode = (int)shadowParams.w;
-    if (debugMode == 1)
-    {
-        return shadowMapTexture.SampleLevel(linearSampler, shadowUV.xy, 0).r;
-    }
-    if (debugMode == 2)
-    {
-        return 0.3;
-    }
-
-    float depth = shadowUV.z - shadowParams.z;
-    float ts = shadowParams.y;
-    // 2x2 PCF: 4 taps at half-texel offsets for a slightly softened but
-    // still crisp edge. 3x3 was too blurry at the current shadow-map
-    // density. Dropping to 1-tap produces visible jaggies on slopes.
-    float shadow = 0;
-    shadow += shadowMapTexture.SampleCmpLevelZero(shadowSampler, shadowUV.xy + float2(-0.5, -0.5) * ts, depth);
-    shadow += shadowMapTexture.SampleCmpLevelZero(shadowSampler, shadowUV.xy + float2( 0.5, -0.5) * ts, depth);
-    shadow += shadowMapTexture.SampleCmpLevelZero(shadowSampler, shadowUV.xy + float2(-0.5,  0.5) * ts, depth);
-    shadow += shadowMapTexture.SampleCmpLevelZero(shadowSampler, shadowUV.xy + float2( 0.5,  0.5) * ts, depth);
-    shadow *= 0.25;
-    // Floor of 0.15 so shadows on terrain read as clearly dark (not a
-    // faint tint). Tune toward 0 for pitch-black, toward 0.3 for softer.
-    return lerp(0.15, 1.0, shadow);
+    return 1.0;
 }
 
 // --- Vertex shaders ---

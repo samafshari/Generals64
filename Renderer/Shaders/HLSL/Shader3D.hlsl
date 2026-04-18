@@ -140,22 +140,33 @@ float3 ApplyUnderwaterFade(float3 color, float worldZ)
     return color;
 }
 
-// Procedural value noise for cloud shadows (replaces texture lookup).
-// Uses hash-based smooth noise with two octaves to approximate the
-// original TSCloudMed.tga scrolling cloud pattern.
+// Procedural gradient noise for cloud shadows (Perlin-style).
+// Gradient noise is C2-continuous across cell boundaries, so the grid
+// never shows as visible creases — the value-noise version produced
+// sharp V-shaped edges at high zoom because cubic smoothstep is only
+// C1 and sin-hashed corners produced large jumps between neighbours.
+float2 CloudHash2(float2 i)
+{
+    float2 h = float2(dot(i, float2(127.1, 311.7)),
+                      dot(i, float2(269.5,  183.3)));
+    return frac(sin(h) * 43758.5453) * 2.0 - 1.0; // unit-ish gradient
+}
+
 float CloudNoise(float2 p)
 {
     float2 i = floor(p);
     float2 f = frac(p);
-    float2 u = f * f * (3.0 - 2.0 * f); // smoothstep
+    // Quintic smoothstep (C2-continuous): 6f^5 - 15f^4 + 10f^3
+    float2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
 
-    // Hash corners (fast integer-based)
-    float a = frac(sin(dot(i,                 float2(127.1, 311.7))) * 43758.5453);
-    float b = frac(sin(dot(i + float2(1, 0),  float2(127.1, 311.7))) * 43758.5453);
-    float c = frac(sin(dot(i + float2(0, 1),  float2(127.1, 311.7))) * 43758.5453);
-    float d = frac(sin(dot(i + float2(1, 1),  float2(127.1, 311.7))) * 43758.5453);
+    float a = dot(CloudHash2(i),                  f);
+    float b = dot(CloudHash2(i + float2(1, 0)),   f - float2(1, 0));
+    float c = dot(CloudHash2(i + float2(0, 1)),   f - float2(0, 1));
+    float d = dot(CloudHash2(i + float2(1, 1)),   f - float2(1, 1));
 
-    return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+    // Gradient noise is in ~[-0.7, 0.7]; remap to [0, 1].
+    float n = lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+    return n * 0.7 + 0.5;
 }
 
 // Per-pixel cloud shadow: procedural scrolling noise.
@@ -169,9 +180,12 @@ float3 ApplyCloudShadow(float3 color, float3 worldPos)
     float timeMs = lightingOptions.y;
     float2 cloudUV = worldPos.xy * uvScale + cloudParams.yz * (timeMs * 0.001);
 
-    // Two octaves of noise, matching the look of the original cloud texture
-    float n  = CloudNoise(cloudUV * 8.0) * 0.65;
-    n       += CloudNoise(cloudUV * 16.0) * 0.35;
+    // Three octaves of gradient noise (FBM). Base frequency is lower than
+    // the old value-noise version so cloud blobs are larger than a single
+    // tank — prevents individual units sitting on a sharp shadow edge.
+    float n  = CloudNoise(cloudUV * 3.0)  * 0.55;
+    n       += CloudNoise(cloudUV * 6.0)  * 0.30;
+    n       += CloudNoise(cloudUV * 12.0) * 0.15;
 
     // Remap: 0.55..1.0 range so shadows are subtle (not pitch black)
     float shadow = saturate(n * 0.45 + 0.55);
