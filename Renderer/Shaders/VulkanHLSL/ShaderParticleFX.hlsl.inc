@@ -1,3 +1,4 @@
+R"HLSL(
 
 struct VSInput
 {
@@ -100,3 +101,4 @@ float4 PSGlowComposite(PSInput input) : SV_TARGET
     return float4(scene + glow * glowIntensity, 1.0);
 }
 
+)HLSL"

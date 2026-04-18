@@ -976,6 +976,10 @@ bool TryConsumeStep() { return false; }
 void BeginFrame() {}
 void Render() {}
 void SetFrameTooltip(const char*, int, int) {}
+// Log() is provided by Panels.cpp in D3D11 configurations. In VK configs
+// Panels.cpp is excluded from the build (it unconditionally #includes
+// imgui.h which isn't on the include path when Inspector is stubbed),
+// so we need a stub here or the linker drops Inspector::Log symbols.
 void Log(const char*, ...) {}
 
 namespace Camera {
@@ -988,6 +992,14 @@ namespace Camera {
     void   ApplyToEngineCamera() {}
     float& MoveSpeed()        { return s_dummySpeed; }
     float& MouseSensitivity() { return s_dummySens; }
+}
+// DestructionTimeline.cpp is excluded from VK builds (it #includes imgui.h
+// at the top and its panel draw is all ImGui). Engine code in Object::onDie
+// still calls the recorder API, so provide no-op stubs here.
+namespace Destruction {
+    void RecordDeath(int, const char*, unsigned int, const char*, unsigned int, bool, int) {}
+    void Clear() {}
+    int  Count() { return 0; }
 }
 }
 

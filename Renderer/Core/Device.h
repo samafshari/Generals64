@@ -103,8 +103,12 @@ public:
     //
     // Pass nullptr to clear the redirect (engine renders directly to
     // the backbuffer again, current default behavior).
+#ifdef BUILD_WITH_D3D11
     void SetRedirectRTV(ID3D11RenderTargetView* rtv);
     bool IsRedirectActive() const { return m_redirectRTV != nullptr; }
+#else
+    bool IsRedirectActive() const { return false; }
+#endif
 
     // Variants that ALWAYS bind the real swap-chain backbuffer,
     // regardless of redirect state. Used by the inspector to draw

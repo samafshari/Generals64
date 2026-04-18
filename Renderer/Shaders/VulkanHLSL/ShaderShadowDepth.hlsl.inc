@@ -1,3 +1,4 @@
+R"HLSL(
 
 cbuffer FrameConstants : register(b0)
 {
@@ -37,3 +38,4 @@ float4 PSShadowSilhouette() : SV_TARGET
     return float4(0, 0, 0, 1);
 }
 
+)HLSL"

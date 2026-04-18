@@ -148,6 +148,7 @@ void ExtractFrustumFromCamera(CameraClass* camera, FrustumPlanes& out)
             out.planes[i].w /= len;
         }
     }
+
 }
 
 static const float TERRAIN_XY_FACTOR    = 10.0f;

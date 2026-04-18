@@ -341,8 +341,12 @@ void GPUParticleSystem::Render(Device& device, const Float4x4& viewProjection,
 #endif // BUILD_WITH_D3D11
 
 // === Vulkan backend ===
-
-#ifdef BUILD_WITH_VULKAN
+// Gated on !BUILD_WITH_D3D11 because the D3D11 block above already supplies
+// Init/FlushStagingToGPU/Update/Render member bodies. When both backends are
+// enabled (the default Windows build), D3D11 is authoritative — matching the
+// rest of the renderer. Pure-Vulkan builds set USE_D3D11=OFF to activate
+// this block.
+#if defined(BUILD_WITH_VULKAN) && !defined(BUILD_WITH_D3D11)
 
 // Access Device internals
 struct VkDeviceAccess
@@ -356,6 +360,7 @@ struct VkDeviceAccess
     static bool IsRecording(const Device& d) { return d.m_vkRecording; }
     static bool InRenderPass(const Device& d) { return d.m_vkInRenderPass; }
     static void SetInRenderPass(Device& d, bool v) { d.m_vkInRenderPass = v; }
+    static void SetSwapChainLayout(Device& d, VkImageLayout l) { d.m_vkSwapChainImageLayout = l; }
     static void BindSSBO(Device& d, VkBuffer buf, VkDeviceSize size) { d.m_vkBoundSSBO = buf; d.m_vkBoundSSBOSize = size; }
 };
 
@@ -614,12 +619,25 @@ void GPUParticleSystem::Update(Device& device, float deltaTime, const Float3& wi
 
     vkUpdateDescriptorSets(dev, 2, writes, 0, nullptr);
 
-    // End render pass if active (compute can't run inside a render pass)
+    // End render pass if active (compute can't run inside a render pass).
+    //
+    // IMPORTANT: must also update `m_vkSwapChainImageLayout` to match the
+    // ending render pass's finalLayout, otherwise the next `SetBackBuffer`
+    // will trust stale tracking, skip the PRESENT_SRC_KHR→COLOR_ATTACHMENT
+    // transition barrier, and begin the LOAD pass with a layout mismatch.
+    // The validator catches this and invalidates the command buffer, which
+    // silently drops every subsequent draw — producing a black screen even
+    // though engine geometry DOES reach `vkCmdDrawIndexed`.
+    //
+    // Main pass and LOAD pass both have finalLayout=PRESENT_SRC_KHR. The
+    // engine only ends up here mid-backbuffer-render, so that's what we
+    // commit as the new tracked layout.
     bool wasInRenderPass = VkDeviceAccess::InRenderPass(device);
     if (wasInRenderPass)
     {
         vkCmdEndRenderPass(cmd);
         VkDeviceAccess::SetInRenderPass(device, false);
+        VkDeviceAccess::SetSwapChainLayout(device, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     }
 
     // Memory barrier: ensure particle data is available for compute read/write
@@ -648,8 +666,13 @@ void GPUParticleSystem::Update(Device& device, float deltaTime, const Float3& wi
     if (wasInRenderPass)
         device.SetBackBuffer();
 
-    // Free the descriptor set for reuse
-    vkFreeDescriptorSets(dev, m_vkComputeDescPool, 1, &ds);
+    // DO NOT free the descriptor set here — it was just bound at line 641
+    // and the command buffer is still recording the frame. Freeing it now
+    // invalidates every subsequent vkCmd* call with "descriptor set destroyed
+    // without UPDATE_AFTER_BIND", which silently drops draws. The descriptor
+    // pool is reset once per frame (or grown lazily) so leaking individual
+    // sets is cheap and correct.
+    (void)ds;
 }
 
 void GPUParticleSystem::Render(Device& device, const Float4x4& viewProjection,
@@ -696,6 +719,6 @@ void GPUParticleSystem::Render(Device& device, const Float4x4& viewProjection,
     device.DrawIndexed(MAX_PARTICLES * 6, 0, 0);
 }
 
-#endif // BUILD_WITH_VULKAN
+#endif // BUILD_WITH_VULKAN && !BUILD_WITH_D3D11
 
 } // namespace Render

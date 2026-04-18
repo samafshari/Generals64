@@ -1,3 +1,4 @@
+R"HLSL(
 
 struct VSInput
 {
@@ -52,3 +53,4 @@ float4 PSMainGrayscale(PSInput input) : SV_TARGET
     return float4(gray, gray, gray, texColor.a) * input.color;
 }
 
+)HLSL"

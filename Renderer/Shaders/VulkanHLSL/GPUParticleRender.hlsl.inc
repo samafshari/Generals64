@@ -1,3 +1,4 @@
+R"HLSL(
 
 struct Particle
 {
@@ -122,3 +123,4 @@ float4 PSParticle(VSOutput input) : SV_TARGET
     return float4(input.color * alpha, alpha);
 }
 
+)HLSL"

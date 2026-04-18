@@ -1,4 +1,7 @@
-#ifdef BUILD_WITH_VULKAN
+// D3D11 wins when both backends are enabled — the Buffer::* member bodies
+// in Renderer/Core/Buffer.cpp are authoritative in that case. Pure-Vulkan
+// builds (USE_D3D11=OFF) activate this TU.
+#if defined(BUILD_WITH_VULKAN) && !defined(BUILD_WITH_D3D11)
 
 #include "../Buffer.h"
 #include "../Device.h"
@@ -103,15 +106,33 @@ bool VertexBuffer::Create(Device& device, const void* data, uint32_t vertexCount
 
     if (dynamic)
     {
+        // Ring-buffer storage: allocate N * requested-size so each Update()
+        // can write at a fresh offset without clobbering data the GPU hasn't
+        // consumed yet. Caller issues multiple Update()/Draw pairs per frame
+        // (e.g. 2D UI batching, one flush per texture change); the GPU
+        // executes them in command-buffer order, but it reads the VB
+        // lazily when its hw fetch unit reaches each draw. Overwriting
+        // offset 0 between vkCmdDraw calls made the GPU see the LATEST
+        // data for every draw — producing random triangles.
+        //
+        // RING_FACTOR sized for "many 2D flushes per frame"; if it proves
+        // too small, ResetRing asserts / the game shows intermittent
+        // corruption and we bump the factor. 16x is ~8k verts * 20 B * 16 =
+        // ~2.5 MB per dynamic VB — cheap.
+        const VkDeviceSize RING_FACTOR = 16;
+        m_vkRingCapacity = m_vkSize * RING_FACTOR;
+        m_vkRingWriteOffset = 0;
+        m_vkRingLastBindOffset = 0;
+
         // Use raw Vulkan allocation for host-visible buffers to ensure
         // coherent mapping without VMA suballocation issues.
-        if (!CreateRawHostBuffer(dev, physDev, m_vkSize,
+        if (!CreateRawHostBuffer(dev, physDev, m_vkRingCapacity,
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_vkBuffer, m_vkRawMemory))
             return false;
         m_vkAllocation = VK_NULL_HANDLE;
 
         // Persistently map for fast updates
-        vkMapMemory(dev, m_vkRawMemory, 0, m_vkSize, 0, &m_vkMapped);
+        vkMapMemory(dev, m_vkRawMemory, 0, m_vkRingCapacity, 0, &m_vkMapped);
 
         if (data && m_vkMapped)
             memcpy(m_vkMapped, data, m_vkSize);
@@ -153,7 +174,22 @@ void VertexBuffer::Update(Device& device, const void* data, uint32_t size)
 {
     (void)device;
     if (!m_vkBuffer || !data || !m_dynamic || !m_vkMapped) return;
-    memcpy(m_vkMapped, data, size);
+
+    // Ring-buffer write: pick a fresh region so the GPU's pending reads
+    // for earlier draws in this frame see their original data. Wrap when
+    // we hit the end — by the time we wrap, we've gone past the whole
+    // ring in one frame, so earlier data is very likely consumed; if it
+    // isn't (ring too small), the caller sees visual glitches and we need
+    // a larger RING_FACTOR. Alignment to 16 bytes keeps vertex-fetch
+    // happy on any sensible hardware.
+    const VkDeviceSize ALIGN = 16;
+    const VkDeviceSize alignedSize = (size + ALIGN - 1) & ~(ALIGN - 1);
+    if (m_vkRingWriteOffset + alignedSize > m_vkRingCapacity)
+        m_vkRingWriteOffset = 0; // wrap
+
+    m_vkRingLastBindOffset = m_vkRingWriteOffset;
+    memcpy((uint8_t*)m_vkMapped + m_vkRingWriteOffset, data, size);
+    m_vkRingWriteOffset += alignedSize;
     // Raw allocation is host-coherent — no flush needed
 }
 
@@ -161,7 +197,7 @@ void VertexBuffer::Bind(Device& device, uint32_t slot) const
 {
     if (!m_vkBuffer || !VkDeviceAccess::IsRecording(device)) return;
     VkCommandBuffer cmd = VkDeviceAccess::GetCurrentCmd(device);
-    VkDeviceSize offset = 0;
+    VkDeviceSize offset = m_vkRingLastBindOffset;
     vkCmdBindVertexBuffers(cmd, slot, 1, &m_vkBuffer, &offset);
 }
 

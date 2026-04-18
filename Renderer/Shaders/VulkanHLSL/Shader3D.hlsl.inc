@@ -1,3 +1,4 @@
+R"HLSL(
 
 static const int MAX_DIRECTIONAL_LIGHTS = 3;
 static const int MAX_POINT_LIGHTS = 4;
@@ -12,8 +13,19 @@ cbuffer FrameConstants : register(b0)
     float4 lightingOptions; // x = dir light count, y = time (ms), z = point light count, w = water height
     float4 pointLightPositions[MAX_POINT_LIGHTS]; // xyz = position, w = outer radius
     float4 pointLightColors[MAX_POINT_LIGHTS];    // rgb = color * intensity, a = inner radius
+    float4 cloudParams;  // x = UV scale (1/315), y = X scroll speed, z = Y scroll speed, w = enabled (0/1)
     float4 shroudParams; // x = 1/worldWidth, y = 1/worldHeight, z = worldOffsetX, w = worldOffsetY  (0 if disabled)
     float4 atmosphereParams; // x = fog density, y = scatter power, z = specular intensity, w = unused
+    row_major float4x4 shadowMapMatrix; // world -> shadow UV + depth
+    float4 shadowParams;                // x = enabled (0/1), y = texel size, z = bias, w = unused
+
+    // Building shadows — per-caster rotated rectangles darken terrain
+    // fragments whose XY lands inside. buildingShadowCount.x = live count.
+    // Each rect: xy = world center, z = halfWidth, w = halfHeight.
+    // Each rot:  xy = (cos(yaw), sin(yaw)).
+    float4 buildingShadowCount;
+    float4 buildingShadowRect[256];
+    float4 buildingShadowRot[256];
 };
 
 cbuffer ObjectConstants : register(b1)
@@ -70,8 +82,10 @@ Texture2D diffuseTexture : register(t0);
 Texture2D bumpTexture    : register(t1);
 Texture2D depthTexture   : register(t2); // scene depth for water shore foam
 Texture2D shroudTexture  : register(t3);
+Texture2D<float> shadowMapTexture : register(t4);
 SamplerState linearSampler : register(s0);
 SamplerState wrapSampler   : register(s1); // always WRAP mode, for tiling textures
+SamplerComparisonState shadowSampler : register(s2);
 
 // --- Shared lighting functions ---
 
@@ -129,6 +143,69 @@ float3 ApplyUnderwaterFade(float3 color, float worldZ)
         float depthScale = saturate((waterZ - worldZ) / waterZ);
         color *= 1.0 - depthScale * (1.0 - depthFade);
     }
+    return color;
+}
+
+// Procedural gradient noise for cloud shadows (Perlin-style).
+// Gradient noise is C2-continuous across cell boundaries, so the grid
+// never shows as visible creases — the value-noise version produced
+// sharp V-shaped edges at high zoom because cubic smoothstep is only
+// C1 and sin-hashed corners produced large jumps between neighbours.
+float2 CloudHash2(float2 i)
+{
+    float2 h = float2(dot(i, float2(127.1, 311.7)),
+                      dot(i, float2(269.5,  183.3)));
+    return frac(sin(h) * 43758.5453) * 2.0 - 1.0; // unit-ish gradient
+}
+
+float CloudNoise(float2 p)
+{
+    float2 i = floor(p);
+    float2 f = frac(p);
+    // Quintic smoothstep (C2-continuous): 6f^5 - 15f^4 + 10f^3
+    float2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+
+    float a = dot(CloudHash2(i),                  f);
+    float b = dot(CloudHash2(i + float2(1, 0)),   f - float2(1, 0));
+    float c = dot(CloudHash2(i + float2(0, 1)),   f - float2(0, 1));
+    float d = dot(CloudHash2(i + float2(1, 1)),   f - float2(1, 1));
+
+    // Gradient noise is in ~[-0.7, 0.7]; remap to [0, 1].
+    float n = lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+    return n * 0.7 + 0.5;
+}
+
+// Per-pixel cloud shadow: procedural scrolling noise.
+// Returns darkening multiplier (1.0 = no shadow, <1.0 = shadowed).
+float3 ApplyCloudShadow(float3 color, float3 worldPos)
+{
+    if (cloudParams.w < 0.5)
+        return color;
+
+    float uvScale = cloudParams.x;
+    float timeMs = lightingOptions.y;
+    float2 cloudUV = worldPos.xy * uvScale + cloudParams.yz * (timeMs * 0.001);
+
+    // Three octaves of gradient noise (FBM). Base frequency is lower than
+    // the old value-noise version so cloud blobs are larger than a single
+    // tank — prevents individual units sitting on a sharp shadow edge.
+    float n  = CloudNoise(cloudUV * 3.0)  * 0.55;
+    n       += CloudNoise(cloudUV * 6.0)  * 0.30;
+    n       += CloudNoise(cloudUV * 12.0) * 0.15;
+
+    // Remap: 0.55..1.0 range so shadows are subtle (not pitch black)
+    float shadow = saturate(n * 0.45 + 0.55);
+
+    return color * shadow;
+}
+
+// Building shadow rects are currently disabled — the shadow-pass work in
+// commit 8da4e13 produced a broken visual (darkened cloud shadows too),
+// so this function short-circuits to a no-op until the pipeline is re-landed.
+// cbuffer fields (buildingShadowCount / Rect / Rot) remain so FrameConstants
+// offsets don't shift for other shaders.
+float3 ApplyBuildingShadow(float3 color, float3 worldPos)
+{
     return color;
 }
 
@@ -339,6 +416,8 @@ float3 ApplyShaderEffect(float3 inColor, float3 worldPos, float3 N, float4 objCo
     {
         return HueRotate(inColor, t * 1.5);
     }
+)HLSL"
+R"HLSL(
     if (variant == 3) // Shimmer — bright sparkles
     {
         float sparkle = Hash12(worldPos.xy * 30.0 + t * 8.0);
@@ -672,6 +751,8 @@ float4 PSMainWaterBump(PSInput input) : SV_TARGET
     if (useEnhanced < 0.5)
     {
         // CLASSIC: single bump sample, gentle scaled normal, simple spec.
+)HLSL"
+R"HLSL(
         float2 bumpUV = input.texcoord * 3.0 + float2(timeMs * 0.0001, timeMs * 0.00007);
         float4 bumpSample = bumpTexture.Sample(wrapSampler, bumpUV);
         float3 bumpNormal = float3((bumpSample.r - 0.5) * 0.12, (bumpSample.g - 0.5) * 0.12, 1.0);
@@ -742,3 +823,4 @@ float4 PSMainWaterBump(PSInput input) : SV_TARGET
     return finalColor;
 }
 
+)HLSL"

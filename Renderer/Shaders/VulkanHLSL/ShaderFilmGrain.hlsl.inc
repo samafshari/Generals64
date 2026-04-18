@@ -1,3 +1,4 @@
+R"HLSL(
 
 struct VSInput { float2 position : POSITION; float2 texcoord : TEXCOORD; };
 struct PSInput { float4 position : SV_POSITION; float2 texcoord : TEXCOORD; };
@@ -42,3 +43,4 @@ float4 PSFilmGrain(PSInput input) : SV_TARGET
     return float4(max(color, 0.0), 1.0);
 }
 
+)HLSL"

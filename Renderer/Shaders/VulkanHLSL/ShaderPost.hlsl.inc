@@ -1,3 +1,4 @@
+R"HLSL(
 
 struct VSInput
 {
@@ -64,3 +65,4 @@ float4 PSComposite(PSInput input) : SV_TARGET
     return float4(result, 1.0);
 }
 
+)HLSL"

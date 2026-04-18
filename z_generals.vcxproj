@@ -1240,22 +1240,27 @@ xcopy /Y /D "$(SolutionDir)extern\sdl3\bin\*.dll" "$(OutDir)"</Command>
     <ClCompile Include="Inspector\Panels.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <ForcedIncludeFiles />
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugVK' Or '$(Configuration)'=='ReleaseVK'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="Inspector\HudPanels.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <ForcedIncludeFiles />
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugVK' Or '$(Configuration)'=='ReleaseVK'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="Inspector\AIPanels.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <ForcedIncludeFiles />
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugVK' Or '$(Configuration)'=='ReleaseVK'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="Inspector\ScriptPanel.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <ForcedIncludeFiles />
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugVK' Or '$(Configuration)'=='ReleaseVK'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="Inspector\DestructionTimeline.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <ForcedIncludeFiles />
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugVK' Or '$(Configuration)'=='ReleaseVK'">true</ExcludedFromBuild>
     </ClCompile>
   </ItemGroup>
   <!-- Dear ImGui sources: only compiled for D3D11 configurations.
@@ -2298,4 +2303,31 @@ xcopy /Y /D "$(SolutionDir)extern\sdl3\bin\*.dll" "$(OutDir)"</Command>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+
+  <!-- Shader unification build step.
+       generate_inc.py turns each Renderer/Shaders/VulkanHLSL/*.hlsl into a
+       sibling *.hlsl.inc that ShaderSource.h / GPUParticleShaders.h include
+       as raw-string-literal initializers for the D3D11 runtime-compile path.
+       Runs BeforeTargets="ClCompile" so the .inc files exist before any
+       translation unit including ShaderSource.h is compiled. Runs in every
+       configuration (DX11 + VK) because both need the .inc files up to date.
+       -->
+  <Target Name="GenerateShaderIncludes" BeforeTargets="ClCompile">
+    <Exec Command="python &quot;$(SolutionDir)Renderer\Shaders\scripts\generate_inc.py&quot; &quot;$(SolutionDir)Renderer\Shaders\VulkanHLSL&quot;"
+          WorkingDirectory="$(SolutionDir)" />
+  </Target>
+
+  <!-- Vulkan SPIR-V compilation.
+       compile_spirv.py invokes dxc.exe (from $(VULKAN_SDK)\Bin) for every
+       entry in its hardcoded manifest, writing .spv blobs into
+       $(OutDir)Shaders\spirv\ so the Vulkan runtime loader's
+       fopen("Shaders/spirv/*.spv") resolves at launch. DX11 configurations
+       skip this (they compile HLSL strings at runtime via D3DCompile). -->
+  <Target Name="CompileShadersSpirv"
+          BeforeTargets="ClCompile"
+          DependsOnTargets="GenerateShaderIncludes"
+          Condition="'$(Configuration)'=='DebugVK' Or '$(Configuration)'=='ReleaseVK'">
+    <Exec Command="python &quot;$(SolutionDir)Renderer\Shaders\scripts\compile_spirv.py&quot; --hlsl-dir &quot;$(SolutionDir)Renderer\Shaders\VulkanHLSL&quot; --out-dir &quot;$(OutDir)Shaders\spirv&quot;"
+          WorkingDirectory="$(SolutionDir)" />
+  </Target>
 </Project>

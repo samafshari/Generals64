@@ -94,3 +94,7 @@ AppxPackages
 /GameData/telemetry.sqlite-shm
 /GameData/telemetry.sqlite-wal
 /GameData/telemetry*.txt
+
+/build-*
+/GameData/run_*.txt
+/GameData/Shaders/spirv/*.spv

@@ -766,6 +766,15 @@ void Renderer::BeginFrame()
     m_objectCBBound = false;
     m_lastBoundTexture = nullptr;
 
+#ifdef BUILD_WITH_VULKAN
+    // Rewind dynamic-buffer ring cursors. The Vulkan renderer allocates
+    // dynamic VBs (e.g. the 2D UI batch) 16x oversized so Update/Bind/Draw
+    // cycles within one frame write to fresh offsets — avoids GPU reading
+    // stale data when the CPU overwrites offset 0 between draws. Safe to
+    // snap back to 0 here because Device::BeginFrame's in-flight fence
+    // already guaranteed the previous frame's GPU reads completed.
+    m_vb2D.ResetRing();
+#endif
 }
 
 void Renderer::EndFrame()

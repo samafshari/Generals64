@@ -1,3 +1,4 @@
+R"HLSL(
 
 cbuffer FrameConstants : register(b0)
 {
@@ -88,3 +89,4 @@ float4 PSSnow(PSInput input) : SV_TARGET
     return tex * float4(1, 1, 1, 0.7);
 }
 
+)HLSL"

@@ -40,6 +40,7 @@ public:
 
     friend struct VkDeviceAccess;
     friend class VulkanPipelineManager;
+    friend class Device;
 
 private:
 #ifdef BUILD_WITH_D3D11
@@ -75,6 +76,7 @@ private:
     CullMode m_vkCull = CullMode::Back;
     bool m_vkFrontCCW = true;
     int m_vkDepthBias = 0;
+    float m_vkSlopeScaledDepthBias = 0.0f;
 #endif
 };
 

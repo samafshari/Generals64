@@ -1,3 +1,4 @@
+R"HLSL(
 
 cbuffer FrameConstants : register(b0)
 {
@@ -90,3 +91,4 @@ float4 PSDecal(PSInput input) : SV_TARGET
     return result;
 }
 
+)HLSL"

@@ -39,11 +39,23 @@ private:
     ComPtr<ID3D11Buffer> m_buffer;
 #endif
 #ifdef BUILD_WITH_VULKAN
+public:
+    // Snap the per-frame ring write offset back to 0. Safe to call only
+    // after the GPU has completed its reads for the previous frame — the
+    // Renderer does this in BeginFrame, synchronized by the swapchain's
+    // in-flight fence. No-op on non-dynamic VBs.
+    void ResetRing() { m_vkRingLastBindOffset = 0; m_vkRingWriteOffset = 0; }
+private:
     VkBuffer m_vkBuffer = VK_NULL_HANDLE;
     VmaAllocation m_vkAllocation = VK_NULL_HANDLE;
     VkDeviceSize m_vkSize = 0;
     void* m_vkMapped = nullptr;         // Persistently mapped for dynamic buffers
     VkDeviceMemory m_vkRawMemory = VK_NULL_HANDLE; // Raw allocation (when m_vkAllocation is null)
+    // Ring-buffer tracking for dynamic buffers (avoid GPU reading stale
+    // data when CPU overwrites the same offset between draws in one frame).
+    VkDeviceSize m_vkRingCapacity = 0;
+    VkDeviceSize m_vkRingWriteOffset = 0;
+    VkDeviceSize m_vkRingLastBindOffset = 0;
 #endif
     uint32_t m_vertexCount = 0;
     uint32_t m_stride = 0;

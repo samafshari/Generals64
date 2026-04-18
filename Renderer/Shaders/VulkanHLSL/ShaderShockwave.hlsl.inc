@@ -1,3 +1,4 @@
+R"HLSL(
 
 struct VSInput { float2 position : POSITION; float2 texcoord : TEXCOORD; };
 struct PSInput { float4 position : SV_POSITION; float2 texcoord : TEXCOORD; };
@@ -54,3 +55,4 @@ float4 PSShockwave(PSInput input) : SV_TARGET
     return sceneTexture.Sample(linearSampler, uv + totalOffset);
 }
 
+)HLSL"

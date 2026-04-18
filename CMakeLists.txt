@@ -67,6 +67,28 @@ if(USE_VULKAN)
 endif()
 
 # --- Shader compilation ---
+
+# Step 1: generate_inc.py — every Renderer/Shaders/VulkanHLSL/*.hlsl becomes
+# a sibling *.hlsl.inc that ShaderSource.h / GPUParticleShaders.h consume as
+# raw-string-literal initializers for the D3D11 runtime-compile path.
+# Uses a custom_target with ALL so it runs every configure; the script itself
+# skips unchanged files.
+find_program(PYTHON_EXECUTABLE NAMES python3 python)
+if(PYTHON_EXECUTABLE)
+    add_custom_target(generate_shader_includes ALL
+        COMMAND "${PYTHON_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Renderer/Shaders/scripts/generate_inc.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Renderer/Shaders/VulkanHLSL"
+        COMMENT "Generating shader .inc files from .hlsl sources"
+        VERBATIM
+    )
+else()
+    message(WARNING "Python not found — shader .inc files will not be regenerated automatically. Edit .hlsl files and run Renderer/Shaders/scripts/generate_inc.py manually.")
+endif()
+
+# Step 2: compile_shaders.cmake — dxc invocations that produce the Vulkan
+# SPIR-V blobs. Separate from step 1 because DX11 builds also need step 1
+# to keep ShaderSource.h's includes fresh.
 find_program(DXC_EXECUTABLE dxc HINTS "${VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/Bin")
 if(DXC_EXECUTABLE)
     include(Renderer/Shaders/compile_shaders.cmake)
@@ -86,6 +108,19 @@ if(NOT WIN32)
     list(FILTER GAME_SOURCES EXCLUDE REGEX ".*wwmemlog.*")
 endif()
 
+# Inspector panels are ImGui-dependent and assume the D3D11 ImGui backend.
+# In a pure-Vulkan build (USE_D3D11=OFF), Inspector.cpp's #else branch
+# compiles to no-op stubs, so we drop the panel sources too (they'd
+# collide with the stubs at link time). Mirrors the ExcludedFromBuild
+# conditions on these files in the DebugVK/ReleaseVK vcxproj configs.
+if(NOT USE_D3D11)
+    list(FILTER GAME_SOURCES EXCLUDE REGEX "Inspector/Panels\\.cpp$")
+    list(FILTER GAME_SOURCES EXCLUDE REGEX "Inspector/HudPanels\\.cpp$")
+    list(FILTER GAME_SOURCES EXCLUDE REGEX "Inspector/AIPanels\\.cpp$")
+    list(FILTER GAME_SOURCES EXCLUDE REGEX "Inspector/ScriptPanel\\.cpp$")
+    list(FILTER GAME_SOURCES EXCLUDE REGEX "Inspector/DestructionTimeline\\.cpp$")
+endif()
+
 # --- Create executable ---
 add_executable(generalszh ${GAME_SOURCES})
 
@@ -94,6 +129,9 @@ target_precompile_headers(generalszh PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:pch.h>")
 
 if(TARGET compile_shaders)
     add_dependencies(generalszh compile_shaders)
+endif()
+if(TARGET generate_shader_includes)
+    add_dependencies(generalszh generate_shader_includes)
 endif()
 
 # --- Include directories ---

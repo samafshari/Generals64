@@ -1168,6 +1168,11 @@ void W3DDisplay::draw()
 
 	// dark_frames.log detector removed
 
+	// Stage-3 Vulkan probe: skip the entire post-process chain. If the
+	// engine's video+UI draws are producing valid pixels but post-process
+	// is stomping them, this test will make the video/menu visible. Put
+	// this back once the real issue is isolated.
+#if 0
 	// Begin post-UI post-processing chain (single backbuffer copy for all effects)
 	renderer.BeginPostChain();
 
@@ -1191,6 +1196,7 @@ void W3DDisplay::draw()
 	renderer.ApplySharpen();
 
 	renderer.EndPostChain();
+#endif
 
 	// Film grain removed
 

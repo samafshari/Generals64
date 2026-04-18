@@ -1,3 +1,4 @@
+R"HLSL(
 
 struct Particle
 {
@@ -92,3 +93,4 @@ void CSUpdate(uint3 id : SV_DispatchThreadID)
     particles[id.x] = p;
 }
 
+)HLSL"

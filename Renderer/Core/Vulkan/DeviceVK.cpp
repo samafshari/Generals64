@@ -1,6 +1,10 @@
-#ifdef BUILD_WITH_VULKAN
+// D3D11 wins when both backends are enabled — the Device::* member bodies
+// in Renderer/Core/Device.cpp are authoritative in that case. Pure-Vulkan
+// builds (USE_D3D11=OFF) activate this TU.
+#if defined(BUILD_WITH_VULKAN) && !defined(BUILD_WITH_D3D11)
 
 #include "../Device.h"
+#include "../Shader.h"
 #include "../Texture.h"
 #include "../ShaderCompiler.h"
 #include "VulkanUtil.h"
@@ -23,6 +27,7 @@ static void VkLog(const char* fmt, ...)
     vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
     fprintf(stderr, "%s", buf);
+    fflush(stderr);
 #ifdef _WIN32
     OutputDebugStringA(buf);
 #endif
@@ -54,10 +59,17 @@ bool Device::Init(const DeviceConfig& config)
     m_width = config.width > 0 ? config.width : 800;
     m_height = config.height > 0 ? config.height : 600;
 
-    if (!CreateVkInstance(config.debug)) return false;
-    if (!CreateVkSurface(config.nativeWindowHandle)) return false;
-    if (!PickPhysicalDevice()) return false;
-    if (!CreateLogicalDevice()) return false;
+    // Stage-3 bring-up: force-enable validation to surface what's wrong with
+    // engine-level draws (post-process works; mesh draws fire but produce
+    // nothing visible). Remove the override once the root cause is fixed.
+    bool debug = true;
+    VkLog("[Vulkan] Init: cfg %dx%d vsync=%d debug=%d (forced) hwnd=%p\n",
+          m_width, m_height, (int)config.vsync, (int)debug, config.nativeWindowHandle);
+
+    if (!CreateVkInstance(debug))         { VkLog("[Vulkan] Init FAIL: CreateVkInstance\n"); return false; }
+    if (!CreateVkSurface(config.nativeWindowHandle)) { VkLog("[Vulkan] Init FAIL: CreateVkSurface\n"); return false; }
+    if (!PickPhysicalDevice())           { VkLog("[Vulkan] Init FAIL: PickPhysicalDevice\n"); return false; }
+    if (!CreateLogicalDevice())          { VkLog("[Vulkan] Init FAIL: CreateLogicalDevice\n"); return false; }
 
     // Create VMA allocator — must be done right after device creation, before any resource allocation
     {
@@ -67,25 +79,26 @@ bool Device::Init(const DeviceConfig& config)
         allocatorInfo.instance = m_vkInstance;
         allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_1;
         if (vmaCreateAllocator(&allocatorInfo, &m_vmaAllocator) != VK_SUCCESS)
-            return false;
+        { VkLog("[Vulkan] Init FAIL: vmaCreateAllocator\n"); return false; }
     }
 
-    if (!CreateSwapChainVK()) return false;
-    if (!CreateDepthResources()) return false;
-    if (!CreateRenderPass()) return false;
-    if (!CreateFramebuffers()) return false;
-    if (!CreateCommandPool()) return false;
-    if (!CreateSyncObjects()) return false;
+    if (!CreateSwapChainVK())     { VkLog("[Vulkan] Init FAIL: CreateSwapChainVK\n"); return false; }
+    if (!CreateDepthResources())  { VkLog("[Vulkan] Init FAIL: CreateDepthResources\n"); return false; }
+    if (!CreateRenderPass())      { VkLog("[Vulkan] Init FAIL: CreateRenderPass\n"); return false; }
+    if (!CreateFramebuffers())    { VkLog("[Vulkan] Init FAIL: CreateFramebuffers\n"); return false; }
+    if (!CreateCommandPool())     { VkLog("[Vulkan] Init FAIL: CreateCommandPool\n"); return false; }
+    if (!CreateSyncObjects())     { VkLog("[Vulkan] Init FAIL: CreateSyncObjects\n"); return false; }
 
     // Initialize pipeline manager (descriptor layouts, pool, pipeline cache)
     m_vkPipelineManager = new VulkanPipelineManager();
     if (!m_vkPipelineManager->Init(m_vkDevice, m_vkPhysicalDevice, m_vkRenderPass))
-        return false;
+    { VkLog("[Vulkan] Init FAIL: VulkanPipelineManager::Init\n"); return false; }
 
     if (!CreateDefaultResources())
-        return false;
+    { VkLog("[Vulkan] Init FAIL: CreateDefaultResources\n"); return false; }
 
     m_initialized = true;
+    VkLog("[Vulkan] Init OK: swapchain %ux%u\n", m_vkSwapChainExtent.width, m_vkSwapChainExtent.height);
     return true;
 }
 
@@ -858,25 +871,12 @@ void Device::BeginFrame(float clearR, float clearG, float clearB, float clearA)
     m_vkInRenderPass = true;
     m_vkActiveRenderPass = m_vkRenderPass;
     m_vkSwapChainImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    // DEBUG: Clear to CYAN at start of frame. If game draws work, they'll overwrite this.
-    // If screen stays cyan, game draws produce zero output.
-    // If screen is BLACK, the render pass clear itself doesn't work.
-    // If screen is MAGENTA, the render pass clear works but vkCmdClearAttachments doesn't.
-    {
-        VkClearAttachment ca = {};
-        ca.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        ca.clearValue.color = {{ 0, 1, 1, 1 }};
-        VkClearRect cr = {};
-        cr.rect = { {0,0}, m_vkSwapChainExtent };
-        cr.layerCount = 1;
-        vkCmdClearAttachments(cmd, 1, &ca, 1, &cr);
-    }
 }
 
 void Device::EndFrame()
 {
     s_vkFrameNumber++;
+    int frameDraws = s_vkFrameDrawCount;
     s_vkFrameDrawCount = 0;
 
     if (!m_vkRecording)
@@ -953,8 +953,8 @@ void Device::EndFrame()
               presentResult, s_vkFrameNumber, m_vkImageIndex);
 
     if (s_vkFrameNumber < 5)
-        VkLog("[Vulkan] EndFrame #%d: submit=%d present=%d recording=%d inRP=%d imageIdx=%u\n",
-              s_vkFrameNumber, submitResult, presentResult,
+        VkLog("[Vulkan] EndFrame #%d: submit=%d present=%d draws=%d recording=%d inRP=%d imageIdx=%u\n",
+              s_vkFrameNumber, submitResult, presentResult, frameDraws,
               (int)m_vkRecording, (int)m_vkInRenderPass, m_vkImageIndex);
 
     m_vkCurrentFrame = (m_vkCurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
@@ -1010,6 +1010,7 @@ void Device::BindCurrentPipeline()
 {
     if (!m_vkPipelineManager || !m_vkCurrentShader)
         return;
+
 
     VkCommandBuffer cmd = m_vkCommandBuffers[m_vkCurrentFrame];
 

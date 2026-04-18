@@ -1,4 +1,7 @@
-#ifdef BUILD_WITH_VULKAN
+// D3D11 wins when both backends are enabled — the Texture::* member bodies
+// in Renderer/Core/Texture.cpp are authoritative in that case. Pure-Vulkan
+// builds (USE_D3D11=OFF) activate this TU.
+#if defined(BUILD_WITH_VULKAN) && !defined(BUILD_WITH_D3D11)
 
 #include "../Texture.h"
 #include "../Device.h"
@@ -355,46 +358,117 @@ bool Texture::CreateFromDDS(Device& device, const void* data, size_t size)
     m_height = header->height;
 
     const uint32_t DDPF_FOURCC = 0x4;
-    if ((header->pfFlags & DDPF_FOURCC) && header->pfFourCC == '1TXD')
+    const bool isFourCC = (header->pfFlags & DDPF_FOURCC) != 0;
+
+    // Decompress DXT1 (BC1) / DXT3 (BC2) / DXT5 (BC3) on the CPU to RGBA8
+    // and then let CreateFromRGBA handle the upload + mip generation.
+    // This matches the D3D11 fallback path and keeps the texture descriptor
+    // format uniform (VK_FORMAT_R8G8B8A8_UNORM) across all game textures —
+    // without it every non-DXT1 texture silently loads as default white,
+    // which made terrain render as white × cloud-shadow noise.
+    const bool isDXT1 = isFourCC && header->pfFourCC == '1TXD';
+    const bool isDXT3 = isFourCC && header->pfFourCC == '3TXD';
+    const bool isDXT5 = isFourCC && header->pfFourCC == '5TXD';
+
+    if (isDXT1 || isDXT3 || isDXT5)
     {
-        // DXT1 — decompress to RGBA8 (same as D3D11 path)
-        uint32_t w = header->width, h = header->height;
+        const uint32_t w = header->width;
+        const uint32_t h = header->height;
+        const uint32_t blockSize = isDXT1 ? 8u : 16u;
         const uint8_t* src = (const uint8_t*)data + 128;
         std::vector<uint32_t> pixels(w * h);
 
-        uint32_t bw = (w + 3) / 4, bh = (h + 3) / 4;
+        const uint32_t bw = (w + 3) / 4;
+        const uint32_t bh = (h + 3) / 4;
         for (uint32_t by = 0; by < bh; ++by)
         {
             for (uint32_t bx = 0; bx < bw; ++bx)
             {
-                const uint8_t* block = src + (by * bw + bx) * 8;
-                uint16_t c0 = block[0] | (block[1] << 8);
-                uint16_t c1 = block[2] | (block[3] << 8);
+                const uint8_t* block = src + (by * bw + bx) * blockSize;
+
+                // BC3/DXT5 alpha block is the first 8 bytes: 2 anchors + 48 bits of 3-bit indices.
+                // BC2/DXT3 alpha block is the first 8 bytes: 16 explicit 4-bit alpha values.
+                // BC1/DXT1 has no alpha block; the color block decides alpha based on c0 vs c1.
+                uint8_t alphaPalette[8] = {};
+                uint64_t alphaLookup = 0;
+                if (isDXT5)
+                {
+                    alphaPalette[0] = block[0];
+                    alphaPalette[1] = block[1];
+                    if (alphaPalette[0] > alphaPalette[1])
+                    {
+                        // 8-stop palette: fully interpolated.
+                        for (int i = 1; i <= 6; ++i)
+                            alphaPalette[i + 1] = (uint8_t)(((7 - i) * alphaPalette[0] + i * alphaPalette[1]) / 7);
+                    }
+                    else
+                    {
+                        // 6-stop palette + 0 and 255.
+                        for (int i = 1; i <= 4; ++i)
+                            alphaPalette[i + 1] = (uint8_t)(((5 - i) * alphaPalette[0] + i * alphaPalette[1]) / 5);
+                        alphaPalette[6] = 0;
+                        alphaPalette[7] = 255;
+                    }
+                    for (int i = 0; i < 6; ++i)
+                        alphaLookup |= (uint64_t)block[2 + i] << (i * 8);
+                }
+                uint64_t explicitAlpha = 0;
+                if (isDXT3)
+                {
+                    for (int i = 0; i < 8; ++i)
+                        explicitAlpha |= (uint64_t)block[i] << (i * 8);
+                }
+
+                // Color block starts at offset 0 (DXT1) or 8 (DXT3/DXT5).
+                const uint8_t* color = isDXT1 ? block : block + 8;
+                const uint16_t c0 = color[0] | (color[1] << 8);
+                const uint16_t c1 = color[2] | (color[3] << 8);
 
                 uint8_t r[4], g[4], b[4];
                 r[0] = ((c0 >> 11) & 0x1F) * 255 / 31;
-                g[0] = ((c0 >> 5)  & 0x3F) * 255 / 63;
-                b[0] = (c0         & 0x1F) * 255 / 31;
+                g[0] = ((c0 >>  5) & 0x3F) * 255 / 63;
+                b[0] = ( c0        & 0x1F) * 255 / 31;
                 r[1] = ((c1 >> 11) & 0x1F) * 255 / 31;
-                g[1] = ((c1 >> 5)  & 0x3F) * 255 / 63;
-                b[1] = (c1         & 0x1F) * 255 / 31;
+                g[1] = ((c1 >>  5) & 0x3F) * 255 / 63;
+                b[1] = ( c1        & 0x1F) * 255 / 31;
 
-                if (c0 > c1) {
-                    r[2] = (2*r[0]+r[1])/3; g[2] = (2*g[0]+g[1])/3; b[2] = (2*b[0]+b[1])/3;
-                    r[3] = (r[0]+2*r[1])/3; g[3] = (g[0]+2*g[1])/3; b[3] = (b[0]+2*b[1])/3;
-                } else {
-                    r[2] = (r[0]+r[1])/2; g[2] = (g[0]+g[1])/2; b[2] = (b[0]+b[1])/2;
+                // DXT1 only: if c0<=c1, color index 3 is fully transparent.
+                // DXT3/DXT5 always use the 4-stop interpolated palette.
+                const bool dxt1Punch = isDXT1 && (c0 <= c1);
+                if (!dxt1Punch)
+                {
+                    r[2] = (2 * r[0] + r[1]) / 3; g[2] = (2 * g[0] + g[1]) / 3; b[2] = (2 * b[0] + b[1]) / 3;
+                    r[3] = (r[0] + 2 * r[1]) / 3; g[3] = (g[0] + 2 * g[1]) / 3; b[3] = (b[0] + 2 * b[1]) / 3;
+                }
+                else
+                {
+                    r[2] = (r[0] + r[1]) / 2; g[2] = (g[0] + g[1]) / 2; b[2] = (b[0] + b[1]) / 2;
                     r[3] = g[3] = b[3] = 0;
                 }
 
-                uint32_t lookup = block[4]|(block[5]<<8)|(block[6]<<16)|(block[7]<<24);
+                const uint32_t colorLookup = color[4] | (color[5] << 8) | (color[6] << 16) | (color[7] << 24);
                 for (int i = 0; i < 16; ++i)
                 {
-                    uint32_t px = bx*4+(i%4), py = by*4+(i/4);
+                    const uint32_t px = bx * 4 + (i % 4);
+                    const uint32_t py = by * 4 + (i / 4);
                     if (px >= w || py >= h) continue;
-                    int idx = (lookup >> (i*2)) & 3;
-                    uint8_t pa = (c0 <= c1 && idx == 3) ? 0 : 255;
-                    pixels[py*w+px] = r[idx]|(g[idx]<<8)|(b[idx]<<16)|(pa<<24);
+
+                    const int idx = (colorLookup >> (i * 2)) & 3;
+                    uint8_t pa;
+                    if (isDXT1)
+                        pa = (dxt1Punch && idx == 3) ? 0 : 255;
+                    else if (isDXT3)
+                    {
+                        const uint8_t a4 = (explicitAlpha >> (i * 4)) & 0xF;
+                        pa = (uint8_t)((a4 << 4) | a4); // 4-bit → 8-bit
+                    }
+                    else // DXT5
+                    {
+                        const int ai = (int)((alphaLookup >> (i * 3)) & 7);
+                        pa = alphaPalette[ai];
+                    }
+
+                    pixels[py * w + px] = r[idx] | (g[idx] << 8) | (b[idx] << 16) | (pa << 24);
                 }
             }
         }
@@ -402,7 +476,38 @@ bool Texture::CreateFromDDS(Device& device, const void* data, size_t size)
         return CreateFromRGBA(device, pixels.data(), w, h, true);
     }
 
-    // For other formats, upload as RGBA8 (simplified — full BC2/BC3 support deferred)
+    // Uncompressed DDS with an explicit pixel format — upload the pixel data
+    // directly. Only the common 32-bit A8R8G8B8 / X8R8G8B8 layout is handled;
+    // rarer formats (A4R4G4B4, A1R5G5B5, L8A8, etc.) fall through as failure.
+    if (!isFourCC && header->pfRGBBitCount == 32)
+    {
+        const uint32_t w = header->width, h = header->height;
+        const uint8_t* src = (const uint8_t*)data + 128;
+        std::vector<uint32_t> pixels(w * h);
+        // DDS stores pixels with the R/G/B/A masks from the header; Generals'
+        // files use the standard A8R8G8B8 (A=0xFF000000, R=0x00FF0000, ...)
+        // which decodes cleanly via bitwise extraction — no endianness dance.
+        const uint32_t rMask = header->pfRBitMask;
+        const uint32_t gMask = header->pfGBitMask;
+        const uint32_t bMask = header->pfBBitMask;
+        const uint32_t aMask = header->pfABitMask;
+        auto firstBit = [](uint32_t m) { int n = 0; while (m && !(m & 1)) { m >>= 1; n++; } return n; };
+        const int rShift = firstBit(rMask);
+        const int gShift = firstBit(gMask);
+        const int bShift = firstBit(bMask);
+        const int aShift = firstBit(aMask);
+        for (uint32_t i = 0; i < w * h; ++i)
+        {
+            const uint32_t v = ((const uint32_t*)src)[i];
+            const uint8_t r = (uint8_t)((v & rMask) >> rShift);
+            const uint8_t g = (uint8_t)((v & gMask) >> gShift);
+            const uint8_t b = (uint8_t)((v & bMask) >> bShift);
+            const uint8_t a = aMask ? (uint8_t)((v & aMask) >> aShift) : 0xFF;
+            pixels[i] = r | (g << 8) | (b << 16) | (a << 24);
+        }
+        return CreateFromRGBA(device, pixels.data(), w, h, true);
+    }
+
     return false;
 }
 

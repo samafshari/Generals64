@@ -1481,6 +1481,11 @@ int main(int argc, char* argv[])
 	(void)argc;
 	(void)argv;
 
+	// Force unbuffered stderr/stdout so stage-3 diagnostics interleave in
+	// true chronological order even when redirected to a file.
+	setvbuf(stderr, nullptr, _IONBF, 0);
+	setvbuf(stdout, nullptr, _IONBF, 0);
+
 #ifdef _WIN32
 	// Get HINSTANCE for Win32 APIs that still need it
 	ApplicationHInstance = GetModuleHandle(nullptr);

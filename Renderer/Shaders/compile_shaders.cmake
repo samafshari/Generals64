@@ -21,6 +21,8 @@ set(SHADER_ENTRIES
     "Shader3D.hlsl|VSMain|PSMainAlphaTest"
     "Shader3D.hlsl|VSMain|PSMeshDecal"
     "Shader3D.hlsl|VSMain|PSMainAlphaTestEdge"
+    "Shader3D.hlsl|VSMain|PSMainSmudge"
+    "Shader3D.hlsl|VSMain|PSGhost"
     "Shader3D.hlsl|VSMainTwoTex|PSMainTerrainMaskBase"
     "Shader3D.hlsl|VSMainWater|PSMainWaterBump"
     "Shader3D.hlsl|VSMainSkybox|PSMainSkybox"
@@ -57,12 +59,15 @@ set(SHADER_ENTRIES
     "ShaderSharpen.hlsl|VSPost|PSSharpen"
     # Tilt shift
     "ShaderTiltShift.hlsl|VSPost|PSTiltShift"
-    # Shadow depth
+    # Shadow depth + silhouette bake
     "ShaderShadowDepth.hlsl|VSShadowDepth|PSShadowDepth"
+    "ShaderShadowDepth.hlsl|VSShadowDepth|PSShadowSilhouette"
     # Volumetric
     "ShaderVolumetric.hlsl|VSPost|PSVolumetric"
     # Lens flare
     "ShaderLensFlare.hlsl|VSPost|PSLensFlare"
+    # Debug line overlays (Render::Debug)
+    "ShaderDebug.hlsl|VSMain|PSMain"
     # GPU particles (compute)
     "GPUParticleUpdate.hlsl|CSUpdate|_"
     # GPU particles (render)

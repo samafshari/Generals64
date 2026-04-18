@@ -1,4 +1,7 @@
-#ifdef BUILD_WITH_VULKAN
+// D3D11 wins when both backends are enabled — the Shader/state member
+// bodies in Renderer/Core/Shader.cpp are authoritative in that case.
+// Pure-Vulkan builds (USE_D3D11=OFF) activate this TU.
+#if defined(BUILD_WITH_VULKAN) && !defined(BUILD_WITH_D3D11)
 
 #include "../Shader.h"
 #include "../Device.h"
@@ -89,12 +92,13 @@ void Shader::Bind(Device& device) const
 
 // --- RasterizerState ---
 
-bool RasterizerState::Create(Device& /*device*/, FillMode fill, CullMode cull, bool frontCCW, int depthBias, bool /*scissorEnable*/)
+bool RasterizerState::Create(Device& /*device*/, FillMode fill, CullMode cull, bool frontCCW, int depthBias, bool /*scissorEnable*/, float slopeScaledDepthBias)
 {
     m_vkFill = fill;
     m_vkCull = cull;
     m_vkFrontCCW = frontCCW;
     m_vkDepthBias = depthBias;
+    m_vkSlopeScaledDepthBias = slopeScaledDepthBias;
     return true;
 }
 

@@ -358,7 +358,7 @@ VkPipeline VulkanPipelineManager::CreateGraphicsPipeline(
     }
 
     static int s_pipelineLogCount = 0;
-    if (s_pipelineLogCount < 20)
+    if (s_pipelineLogCount < 200)
     {
         fprintf(stderr, "[Vulkan] Pipeline OK: VS=%s PS=%s blend=%d writeMask=0x%X depth=%d cull=%d stride=%u attrs=%u\n",
             stages[0].pName, stages[1].pName,
