@@ -908,7 +908,6 @@ void SidesList::loadPostProcess()
 BuildListInfo::BuildListInfo() :
 m_nextBuildList(nullptr),
 m_renderObj(nullptr),
-m_shadowObj(nullptr),
 m_isInitiallyBuilt(false),
 m_numRebuilds(0),
 m_angle(0),
@@ -1037,7 +1036,6 @@ void BuildListInfo::xfer( Xfer *xfer )
 	xfer->xferBool( &m_repairable );
 	xfer->xferBool( &m_automaticallyBuild );
 	// m_renderObj we don't need to xfer this, its for the editor only
-	// m_shadowObj we don't need to xfer this, its for the editor only
 	// m_selected we don't need to xfer this, its for the editor only
 	xfer->xferObjectID( &m_objectID );
 	xfer->xferUnsignedInt( &m_objectTimestamp );

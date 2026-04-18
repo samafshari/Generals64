@@ -31,24 +31,15 @@ public:
 
     void BuildMesh(WorldHeightMap* heightMap);
     void Render(CameraClass* camera, WorldHeightMap* heightMap = nullptr);
-    // Depth-only terrain pass for the GPU shadow map. Caller (W3DDisplay)
-    // must have already called Renderer::BeginShadowPass which switched the
-    // render target to the shadow depth and set the cbuffer's viewProjection
-    // to the light-space VP. This function deliberately does NOT call
-    // ApplyW3DCamera (which would override lightVP). It just submits the
-    // terrain VB/IB so the vertex shader writes light-space depth.
-    void RenderShadowDepth();
     void RenderSkyBox(CameraClass* camera);
     void RenderWater(CameraClass* camera);
     void RenderRoads(CameraClass* camera);
     void RenderBridges(CameraClass* camera);
     void RenderShroud(CameraClass* camera);
-    void RenderCloudShadows(CameraClass* camera);
     void Shutdown();
 
     bool IsReady() const { return m_ready; }
     float GetMaxWaterHeight() const { return m_maxWaterHeight; }
-    const Texture* GetCloudTexture();  // returns cloud texture if loaded, else nullptr
     void Invalidate();
 
     void BuildRoadMesh(WorldHeightMap* heightMap);
@@ -65,7 +56,6 @@ private:
     void BuildTerrainTextureAtlas(WorldHeightMap* heightMap);
     void BuildEdgeTextureAtlas(WorldHeightMap* heightMap);
     void BuildWaterMesh();
-    void EnsureCloudTextureLoaded();
     void BuildSkyBoxMesh();
     void BuildShroudMesh();
     void UpdateShroudTexture();
@@ -81,8 +71,6 @@ private:
     std::vector<Vertex3D> m_waterVerticesCPU; // CPU-side copy for UV animation
     Texture      m_terrainTexture;
     Texture      m_waterFallbackTexture;
-    Texture      m_cloudTexture;
-    bool         m_cloudTextureLoaded = false;
 
     // Water reflection render target (256x256)
     Texture      m_reflectionRT;

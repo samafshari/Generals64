@@ -49,7 +49,6 @@ class ClientUpdateModule;
 class View;
 class Locomotor;
 class Anim2D;
-class Shadow;
 class ModuleInfo;
 class Anim2DTemplate;
 class Image;
@@ -231,7 +230,7 @@ enum DrawableStatus : DrawableStatusBits
 {
 	DRAWABLE_STATUS_NONE									= 0x00000000,		///< no status
 	DRAWABLE_STATUS_DRAWS_IN_MIRROR				=	0x00000001,		///< drawable can reflect
-	DRAWABLE_STATUS_SHADOWS								=	0x00000002,		///< use setShadowsEnabled() access method
+	DRAWABLE_STATUS_SHADOWS								=	0x00000002,		///< reserved bit (legacy shadow toggle, currently unused)
 	DRAWABLE_STATUS_NO_STATE_PARTICLES		= 0x00000008,		///< do *not* auto-create particle systems based on model condition
 	DRAWABLE_STATUS_NO_SAVE								= 0x00000010,		///< do *not* save this drawable (UI fluff only). ignored (error, actually) if attached to an object
 
@@ -378,12 +377,6 @@ public:
 
 	void setShroudClearFrame( UnsignedInt frame )  { m_shroudClearFrame = frame; }
 	UnsignedInt getShroudClearFrame() { return m_shroudClearFrame; }
-
-	void setShadowsEnabled(Bool enable);
-	Bool getShadowsEnabled() const { return BitIsSet(m_status, DRAWABLE_STATUS_SHADOWS); }
-
-	void releaseShadows();	///< frees all shadow resources used by this module - used by Options screen.
-	void allocateShadows(); ///< create shadow resources if not already present. Used by Options screen.
 
 	void setFullyObscuredByShroud(Bool fullyObscured);
 	Bool getFullyObscuredByShroud() {return m_drawableFullyObscuredByShroud;}

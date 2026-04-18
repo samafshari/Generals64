@@ -143,9 +143,6 @@ public:
 
 	virtual void setTextureLOD( Int level ) = 0;
 
-	virtual void releaseShadows();	///< frees all shadow resources used by this module - used by Options screen.
-	virtual void allocateShadows(); ///< create shadow resources if not already present. Used by Options screen.
-
   virtual void preloadAssets( TimeOfDay timeOfDay );									///< preload assets
 
 	virtual Drawable *getDrawableList() { return m_drawableList; }
@@ -287,7 +284,6 @@ extern GameClient *TheGameClient;
 //			TheIMEManager = nullptr
 //			TheTerrainVisual is partially disabled:
 //				TheTerrainTracksRenderObjClassSystem = nullptr
-//				TheW3DShadowManager = nullptr
 //				TheWaterRenderObj = nullptr
 //				TheSmudgeManager = nullptr
 //				TheTerrainRenderObject is partially disabled:

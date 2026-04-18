@@ -59,9 +59,6 @@ set(SHADER_ENTRIES
     "ShaderSharpen.hlsl|VSPost|PSSharpen"
     # Tilt shift
     "ShaderTiltShift.hlsl|VSPost|PSTiltShift"
-    # Shadow depth + silhouette bake
-    "ShaderShadowDepth.hlsl|VSShadowDepth|PSShadowDepth"
-    "ShaderShadowDepth.hlsl|VSShadowDepth|PSShadowSilhouette"
     # Volumetric
     "ShaderVolumetric.hlsl|VSPost|PSVolumetric"
     # Lens flare

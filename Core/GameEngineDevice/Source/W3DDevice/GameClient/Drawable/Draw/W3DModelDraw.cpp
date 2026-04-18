@@ -51,7 +51,6 @@
 #include "Common/Xfer.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/FXList.h"
-#include "GameClient/Shadow.h"
 #include "GameLogic/GameLogic.h"		// for real-time frame
 #include "GameLogic/Object.h"
 #include "GameLogic/WeaponSet.h"
@@ -62,7 +61,6 @@
 #include "W3DDevice/GameClient/W3DAssetManager.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/W3DScene.h"
-#include "W3DDevice/GameClient/W3DShadow.h"
 #include "W3DDevice/GameClient/W3DTerrainTracks.h"
 #include "W3DDevice/GameClient/WorldHeightMap.h"
 #include "WW3D2/hanim.h"
@@ -1804,9 +1802,6 @@ W3DModelDraw::W3DModelDraw(Thing *thing, const ModuleData* moduleData) : DrawMod
 	m_curState = nullptr;
 	m_hexColor = 0;
 	m_renderObject = nullptr;
-	m_shadow = nullptr;
-	m_shadowEnabled = TRUE;
-	m_terrainDecal = nullptr;
 	m_trackRenderObject = nullptr;
 	m_whichAnimInCurState = -1;
 	m_nextState = nullptr;
@@ -1913,14 +1908,6 @@ void W3DModelDraw::setHidden(Bool hidden)
 	if (m_renderObject)
 		m_renderObject->Set_Hidden(hidden);
 
-	if (m_shadow)
-		m_shadow->enableShadowRender(!hidden);
-
-	m_shadowEnabled = hidden;
-
-	if (m_terrainDecal)
-		m_terrainDecal->enableShadowRender(!hidden);
-
 	if (m_trackRenderObject && hidden)
 	{	const Coord3D* pos = getDrawable()->getPosition();
 		m_trackRenderObject->addCapEdgeToTrack(pos->x,pos->y);
@@ -1929,56 +1916,11 @@ void W3DModelDraw::setHidden(Bool hidden)
 	doStartOrStopParticleSys();
 }
 
-/**Free all data used by this model's shadow.  This is used to dynamically enable/disable shadows by the options screen*/
-void W3DModelDraw::releaseShadows()	///< frees all shadow resources used by this module - used by Options screen.
-{
-	if (m_shadow)
-		m_shadow->release();
-	m_shadow = nullptr;
-}
-
-/** Create shadow resources if not already present. This is used to dynamically enable/disable shadows by the options screen*/
-void W3DModelDraw::allocateShadows()
-{
-	const ThingTemplate *tmplate=getDrawable()->getTemplate();
-
-	//Check if we don't already have a shadow but need one for this type of model.
-	if (m_shadow == nullptr && m_renderObject && TheW3DShadowManager && tmplate->getShadowType() != SHADOW_NONE)
-	{
-		Shadow::ShadowTypeInfo shadowInfo;
-		strlcpy(shadowInfo.m_ShadowName, tmplate->getShadowTextureName().str(), ARRAY_SIZE(shadowInfo.m_ShadowName));
-		DEBUG_ASSERTCRASH(shadowInfo.m_ShadowName[0] != '\0', ("this should be validated in ThingTemplate now"));
-		shadowInfo.allowUpdates			= FALSE;		//shadow image will never update
-		shadowInfo.allowWorldAlign	= TRUE;	//shadow image will wrap around world objects
-		shadowInfo.m_type						= (ShadowType)tmplate->getShadowType();
-		shadowInfo.m_sizeX					= tmplate->getShadowSizeX();
-		shadowInfo.m_sizeY					= tmplate->getShadowSizeY();
-		shadowInfo.m_offsetX				= tmplate->getShadowOffsetX();
-		shadowInfo.m_offsetY				= tmplate->getShadowOffsetY();
-  		m_shadow = TheW3DShadowManager->addShadow(m_renderObject, &shadowInfo);
-		if (m_shadow)
-		{	m_shadow->enableShadowInvisible(m_fullyObscuredByShroud);
-			if (m_renderObject->Is_Hidden() || !m_shadowEnabled)
-				m_shadow->enableShadowRender(FALSE);
-		}
-	}
-}
-
-//-------------------------------------------------------------------------------------------------
-void W3DModelDraw::setShadowsEnabled(Bool enable)
-{
-	if (m_shadow)
-		m_shadow->enableShadowRender(enable);
-	m_shadowEnabled = enable;
-}
-
 /**collect some stats about the rendering cost of this draw module */
 #if defined(RTS_DEBUG)
 void W3DModelDraw::getRenderCost(RenderCost & rc) const
 {
 	getRenderCostRecursive(rc,m_renderObject);
-	if (m_shadow)
-		m_shadow->getRenderCost(rc);
 }
 #endif //RTS_DEBUG
 
@@ -2029,12 +1971,6 @@ void W3DModelDraw::setFullyObscuredByShroud(Bool fullyObscured)
 	if (m_fullyObscuredByShroud != fullyObscured)
 	{
 		m_fullyObscuredByShroud = fullyObscured;
-
-		if (m_shadow)
-			m_shadow->enableShadowInvisible(m_fullyObscuredByShroud);
-		if (m_terrainDecal)
-			m_terrainDecal->enableShadowInvisible(m_fullyObscuredByShroud);
-
 		doStartOrStopParticleSys();
 	}
 }
@@ -2807,58 +2743,17 @@ Bool W3DModelDraw::updateBonesForClientParticleSystems()
 
 
 //-------------------------------------------------------------------------------------------------
-void W3DModelDraw::setTerrainDecal(TerrainDecalType type)
+void W3DModelDraw::setTerrainDecal(TerrainDecalType /*type*/)
 {
-	if (m_terrainDecal)
-		m_terrainDecal->release();
-
-	m_terrainDecal = nullptr;
-
-	if (type == TERRAIN_DECAL_NONE || type >= TERRAIN_DECAL_MAX)
-		//turning off decals on this object. (or bad value.)
-		return;
-
-	const ThingTemplate *tmplate=getDrawable()->getTemplate();
-
-	//create a new terrain decal
-	Shadow::ShadowTypeInfo decalInfo;
-	decalInfo.allowUpdates = FALSE;	//shadow image will never update
-	decalInfo.allowWorldAlign = TRUE;	//shadow image will wrap around world objects
-	decalInfo.m_type = SHADOW_ALPHA_DECAL;
-
-	//decalInfo.m_type = SHADOW_ADDITIVE_DECAL;//temporary kluge to test graphics
-
-	if (type == TERRAIN_DECAL_SHADOW_TEXTURE)
-		strlcpy(decalInfo.m_ShadowName, tmplate->getShadowTextureName().str(), ARRAY_SIZE(decalInfo.m_ShadowName));
-	else
-		strlcpy(decalInfo.m_ShadowName, TerrainDecalTextureName[type], ARRAY_SIZE(decalInfo.m_ShadowName));
-	decalInfo.m_sizeX = tmplate->getShadowSizeX();
-	decalInfo.m_sizeY = tmplate->getShadowSizeY();
-	decalInfo.m_offsetX = tmplate->getShadowOffsetX();
-	decalInfo.m_offsetY = tmplate->getShadowOffsetY();
-	if (TheProjectedShadowManager)
-		m_terrainDecal = TheProjectedShadowManager->addDecal(m_renderObject,&decalInfo);
-	if (m_terrainDecal)
-	{	m_terrainDecal->enableShadowInvisible(m_fullyObscuredByShroud);
-		m_terrainDecal->enableShadowRender(m_shadowEnabled);
-	}
 }
 
 //-------------------------------------------------------------------------------------------------
-void W3DModelDraw::setTerrainDecalSize(Real x, Real y)
+void W3DModelDraw::setTerrainDecalSize(Real /*x*/, Real /*y*/)
 {
-	if (m_terrainDecal)
-	{
-		m_terrainDecal->setSize(x,y);
-	}
 }
 //-------------------------------------------------------------------------------------------------
-void W3DModelDraw::setTerrainDecalOpacity(Real o)
+void W3DModelDraw::setTerrainDecalOpacity(Real /*o*/)
 {
-	if (m_terrainDecal)
-	{
-		m_terrainDecal->setOpacity((Int)(255.0f * o));
-	}
 }
 
 
@@ -2867,15 +2762,6 @@ void W3DModelDraw::nukeCurrentRender(Matrix3D* xform)
 {
 	// this needs to be "dirtied" so that the new pausing of the animation will be triggered.
 	m_pauseAnimation = false;
-
-	// changing geometry, so we need to remove shadow if present
-	if (m_shadow)
-		m_shadow->release();
-	m_shadow = nullptr;
-
-	if(m_terrainDecal)
-		m_terrainDecal->release();
-	m_terrainDecal = nullptr;
 
 	// remove existing render object from the scene
 	if (m_renderObject)
@@ -3191,39 +3077,6 @@ void W3DModelDraw::setModelState(const ModelConditionInfo* newState)
 				m_trackRenderObject->setOwnerDrawable(draw);
 		}
 
-		// set up shadows
-		{
-			static bool s_logged = false;
-			if (!s_logged) {
-				Inspector::Log(
-					"[SHADOW] setModelState shadow-eligibility: robj=%p mgr=%p shadowType=%d model=%s",
-					(void*)m_renderObject, (void*)TheW3DShadowManager,
-					tmplate ? (int)tmplate->getShadowType() : -1,
-					newState->m_modelName.str());
-				s_logged = true;
-			}
-		}
-		if (m_renderObject && TheW3DShadowManager && tmplate->getShadowType() != SHADOW_NONE)
-		{
-			Shadow::ShadowTypeInfo shadowInfo;
-			strlcpy(shadowInfo.m_ShadowName, tmplate->getShadowTextureName().str(), ARRAY_SIZE(shadowInfo.m_ShadowName));
-			DEBUG_ASSERTCRASH(shadowInfo.m_ShadowName[0] != '\0', ("this should be validated in ThingTemplate now"));
-			shadowInfo.allowUpdates			= FALSE;		//shadow image will never update
-			shadowInfo.allowWorldAlign	= TRUE;	//shadow image will wrap around world objects
-			shadowInfo.m_type						= (ShadowType)tmplate->getShadowType();
-			shadowInfo.m_sizeX					= tmplate->getShadowSizeX();
-			shadowInfo.m_sizeY					= tmplate->getShadowSizeY();
-			shadowInfo.m_offsetX				= tmplate->getShadowOffsetX();
-			shadowInfo.m_offsetY				= tmplate->getShadowOffsetY();
-
-			DEBUG_ASSERTCRASH(m_shadow == nullptr, ("m_shadow is not null"));
-			m_shadow = TheW3DShadowManager->addShadow(m_renderObject, &shadowInfo, draw);
-			if (m_shadow)
-			{	m_shadow->enableShadowInvisible(m_fullyObscuredByShroud);
-				m_shadow->enableShadowRender(m_shadowEnabled);
-			}
-		}
-
 		if( m_renderObject )
 		{
 			// set collision type for render object.  Used by WW3D2 collision code.
@@ -3283,9 +3136,6 @@ void W3DModelDraw::setModelState(const ModelConditionInfo* newState)
 			if (draw->isDrawableEffectivelyHidden())
 			{
 				m_renderObject->Set_Hidden(TRUE);
-				if (m_shadow)
-					m_shadow->enableShadowRender(FALSE);
-				m_shadowEnabled = FALSE;
 			}
 
 			//

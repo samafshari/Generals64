@@ -46,7 +46,6 @@
 #include "W3DDevice/GameClient/W3DAssetManager.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/W3DScene.h"
-#include "W3DDevice/GameClient/W3DShadow.h"
 
 extern RenderObjClass* CreateRenderObjCompat(const char* name, float scale, int color, const char* oldTexture, const char* newTexture);
 
@@ -60,7 +59,6 @@ W3DDebrisDraw::W3DDebrisDraw(Thing *thing, const ModuleData* moduleData) : DrawM
 	m_fxFinal = nullptr;
 	m_state = INITIAL;
 	m_frames = 0;
-	m_shadow = nullptr;
 	m_finalStop = false;
 }
 
@@ -68,11 +66,6 @@ W3DDebrisDraw::W3DDebrisDraw(Thing *thing, const ModuleData* moduleData) : DrawM
 //-------------------------------------------------------------------------------------------------
 W3DDebrisDraw::~W3DDebrisDraw()
 {
-	if (TheW3DShadowManager && m_shadow)
-	{
-		TheW3DShadowManager->removeShadow(m_shadow);
-		m_shadow = nullptr;
-	}
 	if (m_renderObject)
 	{
 		if (W3DDisplay::m_3DScene != nullptr)
@@ -88,17 +81,8 @@ W3DDebrisDraw::~W3DDebrisDraw()
 }
 
 //-------------------------------------------------------------------------------------------------
-void W3DDebrisDraw::setShadowsEnabled(Bool enable)
-{
-	if (m_shadow)
-		m_shadow->enableShadowRender(enable);
-}
-
-//-------------------------------------------------------------------------------------------------
 void W3DDebrisDraw::setFullyObscuredByShroud(Bool fullyObscured)
 {
-	if (m_shadow)
-		m_shadow->enableShadowInvisible(fullyObscured);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -124,21 +108,6 @@ void W3DDebrisDraw::setModelName(AsciiString name, Color color, ShadowType t)
 //			transform.Set(Vector3(0,0,9999));
 			transform.Set(Vector3(0,0,0));
 			m_renderObject->Set_Transform(transform);
-		}
-
-		if (t != SHADOW_NONE)
-		{
-			Shadow::ShadowTypeInfo shadowInfo;
-			shadowInfo.m_type = t;
-  		m_shadow = TheW3DShadowManager->addShadow(m_renderObject, &shadowInfo);
-		}
-		else
-		{
-			if (TheW3DShadowManager && m_shadow)
-			{
-				TheW3DShadowManager->removeShadow(m_shadow);
-				m_shadow = nullptr;
-			}
 		}
 
 		// save the model name and color

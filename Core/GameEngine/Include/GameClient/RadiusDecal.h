@@ -33,7 +33,6 @@
 
 enum ShadowType : Int;
 class Player;
-class Shadow;
 class RadiusDecalTemplate;
 
 // ------------------------------------------------------------------------------------------------
@@ -42,7 +41,6 @@ class RadiusDecal
 	friend class RadiusDecalTemplate;
 private:
 	const RadiusDecalTemplate*	m_template;
-	Shadow*											m_decal;
 	Bool												m_empty;
 public:
 	RadiusDecal();

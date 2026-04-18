@@ -489,11 +489,6 @@ void NeutronMissileSlowDeathBehavior::doScorchBlast( const BlastInfo *blastInfo 
 			// remove the shadows from trees
 			if( other->isKindOf( KINDOF_SHRUBBERY ) )
 			{
-				Drawable *draw = other->getDrawable();
-
-				if( draw )
-					draw->setShadowsEnabled( FALSE );
-
 			}
 
 		}

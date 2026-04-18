@@ -55,7 +55,6 @@
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/W3DDebugIcons.h"
 #include "W3DDevice/GameClient/W3DTerrainTracks.h"
-#include "W3DDevice/GameClient/W3DShadow.h"
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "W3DDevice/GameClient/FlatHeightMap.h"
 #include "W3DDevice/GameClient/W3DSmudge.h"
@@ -185,9 +184,6 @@ W3DTerrainVisual::~W3DTerrainVisual()
 	delete TheTerrainTracksRenderObjClassSystem;
 	TheTerrainTracksRenderObjClassSystem=nullptr;
 
-	delete TheW3DShadowManager;
-	TheW3DShadowManager=nullptr;
-
 	delete TheSmudgeManager;
 	TheSmudgeManager=nullptr;
 
@@ -219,10 +215,6 @@ void W3DTerrainVisual::init()
 		// initialize track drawing system
 		TheTerrainTracksRenderObjClassSystem = NEW TerrainTracksRenderObjClassSystem;
 		TheTerrainTracksRenderObjClassSystem->init(W3DDisplay::m_3DScene);
-
-		// initialize object shadow drawing system
-		TheW3DShadowManager = NEW W3DShadowManager;
- 		TheW3DShadowManager->init();
 
 		// create a water plane render object
 		TheWaterRenderObj=m_waterRenderObject = NEW_REF( WaterRenderObjClass, () );
@@ -288,9 +280,6 @@ void W3DTerrainVisual::reset()
 	TerrainVisual::reset();
 
 	m_terrainRenderObject->reset();
-
-	if (TheW3DShadowManager)
-		TheW3DShadowManager->Reset();
 
 	if (TheSmudgeManager)
 		TheSmudgeManager->reset();

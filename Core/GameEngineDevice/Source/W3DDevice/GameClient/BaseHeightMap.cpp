@@ -79,7 +79,6 @@
 #include "W3DDevice/GameClient/W3DCustomEdging.h"
 #include "W3DDevice/GameClient/WorldHeightMap.h"
 #include "W3DDevice/GameClient/W3DShaderManager.h"
-#include "W3DDevice/GameClient/W3DShadow.h"
 #include "W3DDevice/GameClient/W3DWater.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
 #include "WW3D2/dx8wrapper.h"
@@ -409,8 +408,6 @@ void BaseHeightMapRenderObjClass::ReleaseResources()
 		TheWaterRenderObj->ReleaseResources();
 	if (TheTerrainTracksRenderObjClassSystem)
 		TheTerrainTracksRenderObjClassSystem->ReleaseResources();
-	if (TheW3DShadowManager)
-		TheW3DShadowManager->ReleaseResources();
 	if (m_shroud)
 	{	m_shroud->reset();
 		m_shroud->ReleaseResources();
@@ -446,8 +443,6 @@ void BaseHeightMapRenderObjClass::ReAcquireResources()
 	if (TheTerrainTracksRenderObjClassSystem)
 		TheTerrainTracksRenderObjClassSystem->ReAcquireResources();
 
-	if (TheW3DShadowManager)
-		TheW3DShadowManager->ReAcquireResources();
 	if (m_shroud)
 		m_shroud->ReAcquireResources();
 

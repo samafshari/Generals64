@@ -166,15 +166,6 @@ static GameWindow *   sliderTextureResolution = nullptr;
 static NameKeyType    sliderParticleCapID = NAMEKEY_INVALID;
 static GameWindow *   sliderParticleCap = nullptr;
 
-static NameKeyType    check3DShadowsID = NAMEKEY_INVALID;
-static GameWindow *   check3DShadows   = nullptr;
-
-static NameKeyType    check2DShadowsID = NAMEKEY_INVALID;
-static GameWindow *   check2DShadows   = nullptr;
-
-static NameKeyType    checkCloudShadowsID = NAMEKEY_INVALID;
-static GameWindow *   checkCloudShadows   = nullptr;
-
 static NameKeyType    checkGroundLightingID = NAMEKEY_INVALID;
 static GameWindow *   checkGroundLighting   = nullptr;
 
@@ -316,21 +307,6 @@ static void setDefaults()
 		GadgetSliderSetPosition( sliderTextureResolution, 2-txtFact);
 
 		//-------------------------------------------------------------------------------------------------
- 		// 3D Shadows checkbox
-		//
-		GadgetCheckBoxSetChecked( check3DShadows, TheGlobalData->m_useShadowVolumes);
-
-		//-------------------------------------------------------------------------------------------------
- 		// 2D Shadows checkbox
-		//
-		GadgetCheckBoxSetChecked( check2DShadows, TheGlobalData->m_useShadowDecals);
-
-		//-------------------------------------------------------------------------------------------------
- 		// Cloud Shadows checkbox
-		//
-		GadgetCheckBoxSetChecked( checkCloudShadows, TheGlobalData->m_useCloudMap);
-
-		//-------------------------------------------------------------------------------------------------
  		// Ground Lighting (lightmap) checkbox
 		//
 		GadgetCheckBoxSetChecked( checkGroundLighting, TheGlobalData->m_useLightMap);
@@ -441,15 +417,6 @@ static void saveOptions()
 				TheWritableGlobalData->m_textureReductionFactor = val;
 				TheGameClient->setTextureLOD(val);
 		}
-
-		TheWritableGlobalData->m_useShadowVolumes = GadgetCheckBoxIsChecked( check3DShadows );
-		(*pref)["UseShadowVolumes"] = TheWritableGlobalData->m_useShadowVolumes ? "yes" : "no";
-
-		TheWritableGlobalData->m_useShadowDecals = GadgetCheckBoxIsChecked( check2DShadows );
-		(*pref)["UseShadowDecals"] = TheWritableGlobalData->m_useShadowDecals ? "yes" : "no";
-
-		TheWritableGlobalData->m_useCloudMap = GadgetCheckBoxIsChecked( checkCloudShadows );
-		(*pref)["UseCloudMap"] = TheGlobalData->m_useCloudMap ? "yes" : "no";
 
 		TheWritableGlobalData->m_useLightMap = GadgetCheckBoxIsChecked( checkGroundLighting );
 		(*pref)["UseLightMap"] = TheGlobalData->m_useLightMap ? "yes" : "no";
@@ -1113,15 +1080,6 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 	sliderTextureResolutionID = TheNameKeyGenerator->nameToKey( "OptionsMenu.wnd:LowResSlider" );
 	sliderTextureResolution = TheWindowManager->winGetWindowFromId( nullptr, sliderTextureResolutionID );
 
-	check3DShadowsID = TheNameKeyGenerator->nameToKey( "OptionsMenu.wnd:Check3DShadows" );
-	check3DShadows   = TheWindowManager->winGetWindowFromId( nullptr, check3DShadowsID);
-
-	check2DShadowsID = TheNameKeyGenerator->nameToKey( "OptionsMenu.wnd:Check2DShadows" );
-	check2DShadows   = TheWindowManager->winGetWindowFromId( nullptr, check2DShadowsID);
-
-	checkCloudShadowsID = TheNameKeyGenerator->nameToKey( "OptionsMenu.wnd:CheckCloudShadows" );
-	checkCloudShadows   = TheWindowManager->winGetWindowFromId( nullptr, checkCloudShadowsID);
-
 	checkGroundLightingID = TheNameKeyGenerator->nameToKey( "OptionsMenu.wnd:CheckGroundLighting" );
 	checkGroundLighting   = TheWindowManager->winGetWindowFromId( nullptr, checkGroundLightingID);
 
@@ -1394,12 +1352,6 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 	GadgetComboBoxSetSelectedPos(comboBoxDetail, (Int)TheGameLODManager->getStaticLODLevel());
 
 	GadgetSliderSetPosition( sliderTextureResolution, 2-WW3D::Get_Texture_Reduction());
-
-	GadgetCheckBoxSetChecked( check3DShadows, TheGlobalData->m_useShadowVolumes);
-
-	GadgetCheckBoxSetChecked( check2DShadows, TheGlobalData->m_useShadowDecals);
-
-	GadgetCheckBoxSetChecked( checkCloudShadows, TheGlobalData->m_useCloudMap);
 
 	GadgetCheckBoxSetChecked( checkGroundLighting, TheGlobalData->m_useLightMap);
 

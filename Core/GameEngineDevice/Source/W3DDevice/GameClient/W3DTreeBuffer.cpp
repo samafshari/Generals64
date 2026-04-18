@@ -78,9 +78,7 @@ enum
 #include "W3DDevice/GameClient/W3DDynamicLight.h"
 #include "W3DDevice/GameClient/Module/W3DTreeDraw.h"
 #include "W3DDevice/GameClient/W3DShaderManager.h"
-#include "W3DDevice/GameClient/W3DShadow.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
-#include "W3DDevice/GameClient/W3DProjectedShadow.h"
 #include "WW3D2/camera.h"
 #include "WW3D2/dx8wrapper.h"
 #include "WW3D2/dx8renderer.h"
@@ -695,16 +693,6 @@ void W3DTreeBuffer::loadTreesInVertexAndIndexBuffers(RefRenderObjListIterator *p
 		return;
 	}
 
-	if (m_shadow == nullptr && TheW3DProjectedShadowManager) {
-		Shadow::ShadowTypeInfo shadowInfo;
-		shadowInfo.allowUpdates=FALSE;	//shadow image will never update
-		shadowInfo.allowWorldAlign=TRUE;	//shadow image will wrap around world objects
-		shadowInfo.m_type = (ShadowType)SHADOW_DECAL;
-		shadowInfo.m_sizeX=20;
-		shadowInfo.m_sizeY=20;
-		m_shadow = TheW3DProjectedShadowManager->createDecalShadow(&shadowInfo);
-	}
-
 	m_anythingChanged = false;
 	Int curTree=0;
 	Int bNdx;
@@ -1074,9 +1062,6 @@ W3DTreeBuffer::~W3DTreeBuffer()
 	for (i=0; i<MAX_TYPES; i++) {
 		REF_PTR_RELEASE(m_treeTypes[i].m_mesh);
 	}
-
-	delete m_shadow;
-	m_shadow = nullptr;
 }
 
 //=============================================================================
@@ -1102,9 +1087,6 @@ W3DTreeBuffer::W3DTreeBuffer()
 	allocateTreeBuffers();
 	m_initialized = true;
 	m_curSwayVersion = -1;
-
-	m_shadow = nullptr;
-
 }
 
 
@@ -1570,27 +1552,6 @@ void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pD
 	}
 
 	Int curTree;
-	// Draw tree shadows.
-	if (m_shadow && TheW3DProjectedShadowManager && TheGlobalData->m_useShadowDecals) {
-		for (curTree=0; curTree<m_numTrees; curTree++) {
-			Int type = m_trees[curTree].treeType;
-			if (type<0) { // deleted.
-				continue;
-			}
-			if (!m_trees[curTree].visible || !m_treeTypes[type].m_doShadow) {
-				continue;
-			}
-
-			if (m_trees[curTree].m_toppleState == TOPPLE_FALLING ||
-					m_trees[curTree].m_toppleState == TOPPLE_DOWN) {
-				continue;
-			}
-			m_shadow->setSize(m_treeTypes[type].m_shadowSize, m_treeTypes[type].m_shadowSize);
-			m_shadow->setPosition(m_trees[curTree].location.X, m_trees[curTree].location.Y, m_trees[curTree].location.Z);
-			TheW3DProjectedShadowManager->queueDecal(m_shadow);
-		}
-		TheW3DProjectedShadowManager->flushDecals(m_shadow->getTexture(0), SHADOW_DECAL);
-	}
 
 	// Update pushed aside and toppling trees.
 	for (curTree=0; curTree<m_numTrees; curTree++) {

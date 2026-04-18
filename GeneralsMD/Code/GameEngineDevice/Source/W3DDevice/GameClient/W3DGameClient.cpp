@@ -15,7 +15,6 @@
 
 #include "Common/ThingTemplate.h"
 #include "Common/ThingFactory.h"
-#include "W3DDevice/GameClient/W3DShadow.h"
 #include "Inspector/Inspector.h"
 #include "Common/ModuleFactory.h"
 #include "Common/GlobalData.h"
@@ -378,19 +377,6 @@ public:
 	void init() override
 	{
 		TerrainVisual::init();
-
-		// Critical: the D3D11 port must explicitly bring up the shadow
-		// manager here. The legacy W3DTerrainVisual did this too, but
-		// that class isn't in our build; D3D11TerrainVisual was missing
-		// the override, which meant TheW3DShadowManager stayed null and
-		// no drawable ever got a shadow attached via addShadow().
-		if (TheW3DShadowManager == nullptr)
-		{
-			TheW3DShadowManager = new W3DShadowManager();
-			TheW3DShadowManager->init();
-			Inspector::Log("[SHADOW] D3D11TerrainVisual::init created TheW3DShadowManager=%p",
-				(void*)TheW3DShadowManager);
-		}
 	}
 
 	~D3D11TerrainVisual() override {

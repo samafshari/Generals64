@@ -35,7 +35,6 @@
 #include "Common/Xfer.h"
 #include "GameClient/Drawable.h"
 #include "GameLogic/Object.h"
-#include "GameClient/Shadow.h"
 #include "GameClient/FXList.h"
 #include "GameLogic/TerrainLogic.h"
 
@@ -46,7 +45,6 @@
 #include "W3DDevice/GameClient/W3DAssetManager.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/W3DScene.h"
-#include "W3DDevice/GameClient/W3DShadow.h"
 
 
 //-------------------------------------------------------------------------------------------------
@@ -55,15 +53,9 @@ W3DDefaultDraw::W3DDefaultDraw(Thing *thing, const ModuleData* moduleData) : Dra
 {
 #ifdef LOAD_TEST_ASSETS
 	m_renderObject = nullptr;
-	m_shadow = nullptr;
 	if (!getDrawable()->getTemplate()->getLTAName().isEmpty())
 	{
 		m_renderObject = W3DDisplay::m_assetManager->Create_Render_Obj(getDrawable()->getTemplate()->getLTAName().str(), getDrawable()->getScale(), 0);
-
-		Shadow::ShadowTypeInfo shadowInfo;
-		shadowInfo.m_type=(ShadowType)SHADOW_VOLUME;
-  		m_shadow = TheW3DShadowManager->addShadow(m_renderObject, &shadowInfo);
-
 
 		DEBUG_ASSERTCRASH(m_renderObject, ("Test asset %s not found", getDrawable()->getTemplate()->getLTAName().str()));
 		if (m_renderObject)
@@ -101,11 +93,6 @@ void W3DDefaultDraw::reactToTransformChange( const Matrix3D *oldMtx,
 W3DDefaultDraw::~W3DDefaultDraw()
 {
 #ifdef LOAD_TEST_ASSETS
-	if (TheW3DShadowManager && m_shadow)
-	{
-		TheW3DShadowManager->removeShadow(m_shadow);
-		m_shadow = nullptr;
-	}
 	if (m_renderObject)
 	{
 		W3DDisplay::m_3DScene->Remove_Render_Object(m_renderObject);
@@ -116,21 +103,8 @@ W3DDefaultDraw::~W3DDefaultDraw()
 }
 
 //-------------------------------------------------------------------------------------------------
-void W3DDefaultDraw::setShadowsEnabled(Bool enable)
-{
-#ifdef LOAD_TEST_ASSETS
-	if (m_shadow)
-		m_shadow->enableShadowRender(enable);
-#endif
-}
-
-//-------------------------------------------------------------------------------------------------
 void W3DDefaultDraw::setFullyObscuredByShroud(Bool fullyObscured)
 {
-#ifdef LOAD_TEST_ASSETS
-	if (m_shadow)
-		m_shadow->enableShadowInvisible(fullyObscured);
-#endif
 }
 
 //-------------------------------------------------------------------------------------------------

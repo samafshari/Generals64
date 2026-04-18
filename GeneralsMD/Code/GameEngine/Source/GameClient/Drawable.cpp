@@ -79,7 +79,6 @@
 #include "GameClient/Image.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/LanguageFilter.h"
-#include "GameClient/Shadow.h"
 #include "GameClient/GameText.h"
 
 #include "ww3d.h"
@@ -522,13 +521,6 @@ Drawable::Drawable( const ThingTemplate *thingTemplate, DrawableStatusBits statu
 		}
 	}
 
-	const Bool shadowsEnabled = getShadowsEnabled();
-
-	for (DrawModule** dm = (DrawModule**)getModuleList(MODULETYPE_DRAW); *dm; ++dm)
-	{
-		(*dm)->setShadowsEnabled(shadowsEnabled);
-	}
-
 	appendShellMapDrawableTrace("Drawable: ctor end template=%s", thingTemplate->getName().str());
 
 	m_groupNumber = nullptr;
@@ -905,41 +897,6 @@ void Drawable::setTerrainDecalFadeTarget(Real target, Real rate)
 	//else
 	//	m_decalOpacityFadeRate = 0;
 
-}
-
-//-------------------------------------------------------------------------------------------------
-void Drawable::setShadowsEnabled(Bool enable)
-{
-	// set status bit
-	if( enable )
-		setDrawableStatus( DRAWABLE_STATUS_SHADOWS );
-	else
-		clearDrawableStatus( DRAWABLE_STATUS_SHADOWS );
-
-	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
-	{
-		(*dm)->setShadowsEnabled(enable);
-	}
-}
-
-//-------------------------------------------------------------------------------------------------
-/**frees all shadow resources used by this module - used by Options screen.*/
-void Drawable::releaseShadows()
-{
-	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
-	{
-		(*dm)->releaseShadows();
-	}
-}
-
-//-------------------------------------------------------------------------------------------------
-/**create shadow resources if not already present. Used by Options screen.*/
-void Drawable::allocateShadows()
-{
-	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
-	{
-		(*dm)->allocateShadows();
-	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2680,12 +2637,6 @@ void Drawable::draw()
 	// restore beam visibility. Re-enable these checks once laser rendering is stable.
 	if (!isLaserDrawable && (m_hidden || m_hiddenByStealth || getFullyObscuredByShroud()))
 		return;	// my, that was easy
-
-	{
-		Object* obj = getObject();
-		if ( obj && !obj->isEffectivelyDead() )
-			setShadowsEnabled( m_stealthLook != STEALTHLOOK_VISIBLE_DETECTED );
-	}
 
 #ifdef RTS_DEBUG
 	validatePos();

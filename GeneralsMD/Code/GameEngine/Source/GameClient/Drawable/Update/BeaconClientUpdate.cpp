@@ -131,7 +131,6 @@ void BeaconClientUpdate::hideBeacon()
 	if (draw)
 	{
 		draw->setDrawableHidden( true );
-		draw->setShadowsEnabled( false );
 	}
 
 	ParticleSystem *system;

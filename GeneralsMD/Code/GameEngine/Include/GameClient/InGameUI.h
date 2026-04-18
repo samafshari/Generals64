@@ -56,7 +56,6 @@ class SpecialPowerTemplate;
 class WindowLayout;
 class Anim2DTemplate;
 class Anim2D;
-class Shadow;
 enum LegalBuildCode : Int;
 enum KindOfType : Int;
 enum ShadowType : Int;

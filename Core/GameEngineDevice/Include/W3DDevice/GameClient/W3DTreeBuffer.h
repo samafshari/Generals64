@@ -69,7 +69,6 @@ class TileData;
 class W3DTreeDrawModuleData;
 struct BreezeInfo;
 class GeometryInfo;
-class W3DProjectedShadow;
 
 //-----------------------------------------------------------------------------
 //           Type Defines
@@ -252,8 +251,6 @@ private:
 	Real		m_curSwayOffset[MAX_SWAY_TYPES];
 	Real		m_curSwayStep[MAX_SWAY_TYPES];
 	Real		m_curSwayFactor[MAX_SWAY_TYPES];
-
-	W3DProjectedShadow *m_shadow;
 
 protected:
 	// snapshot methods

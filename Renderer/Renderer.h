@@ -23,24 +23,8 @@ struct alignas(16) FrameConstants
     Render::Float4 lightingOptions; // x = directional light count, y = time, z = point light count
     Render::Float4 pointLightPositions[kMaxPointLights]; // xyz = position, w = outer radius
     Render::Float4 pointLightColors[kMaxPointLights];    // rgb = color * intensity, a = inner radius
-    Render::Float4 cloudParams;  // x = UV scale (1/315), y = X scroll speed, z = Y scroll speed, w = enabled
     Render::Float4 shroudParams; // x = 1/worldW, y = 1/worldH, z = worldOffsetX, w = worldOffsetY (0 = disabled)
     Render::Float4 atmosphereParams; // x = fog density, y = scatter power, z = specular intensity, w = unused
-    Render::Float4x4 shadowMapMatrix; // world → shadow UV+depth
-    Render::Float4 shadowParams;      // x = enabled, y = texel size (1/2048), z = bias, w = unused
-
-    // --- Terrain-side building shadow rects ---
-    // Each active caster puts one entry here; the terrain pixel shader
-    // darkens fragments whose XY land inside the rotated rect. Same
-    // architecture as ApplyCloudShadow: procedural, read-per-fragment,
-    // no separate render target / decal pass needed.
-    // buildingShadowCount.x = live count (max kMaxBuildingShadows).
-    // Each rect: xy = world center, z = halfWidth, w = halfHeight.
-    // Each rot:  xy = (cos, sin) of yaw, zw = reserved.
-    static constexpr int kMaxBuildingShadows = 256;
-    Render::Float4 buildingShadowCount;
-    Render::Float4 buildingShadowRect[kMaxBuildingShadows];
-    Render::Float4 buildingShadowRot[kMaxBuildingShadows];
 };
 
 // Per-object constants
@@ -156,8 +140,6 @@ public:
     void ClearPointLights();
     void SetWaterHeight(float height) { m_frameData.lightingOptions.w = height; }
     void SetTime(float timeMs) { m_frameData.lightingOptions.y = timeMs; }
-    void SetCloudShadowEnabled(bool enabled) { m_frameData.cloudParams.w = enabled ? 1.0f : 0.0f; }
-    void BindCloudTexture(const Texture* cloudTex);
     void SetShroudParams(float invWorldW, float invWorldH, float offsetX, float offsetY);
     void BindShroudTexture(const Texture* shroudTex);
     void PushFrameConstants() { m_savedFrameData = m_frameData; }
@@ -215,28 +197,6 @@ public:
     void SetSharpenEnabled(bool enabled) { m_sharpenEnabled = enabled; }
     void SetTiltShiftEnabled(bool enabled) { m_tiltShiftEnabled = enabled; }
 
-    // GPU Shadow Mapping
-    void SetShadowEnabled(bool enabled)
-    {
-        m_shadowEnabled = enabled;
-        // When turning OFF, immediately clear shadowParams so the shader's
-        // ComputeShadow() returns full-lit instead of sampling a stale
-        // shadow map binding. Toggling enable without this caused skirmish
-        // maps to render all-black on first enable-then-disable.
-        if (!enabled)
-        {
-            m_frameData.shadowParams = { 0.0f, 0.0f, 0.0f, 0.0f };
-            FlushFrameConstants();
-        }
-    }
-    // Camera-frustum-fitted shadow pass: BeginShadowPass takes the 8 camera
-    // frustum corners (world space, near 0..3 / far 4..7 in WW3D order) and
-    // fits an orthographic light projection tightly around them in light
-    // space. Maximizes shadow texel resolution for what the camera sees.
-    // Pass null to fall back to the legacy camera-centered 700x700 ortho.
-    void BeginShadowPass(const Render::Float3* frustumCornersWorld8 = nullptr);
-    void EndShadowPass();
-    void BindShadowMap();
     void SetAtmosphereEnabled(bool enabled);
     void SetSurfaceSpecularEnabled(bool enabled);
     void SetLensFlareEnabled(bool enabled) { m_lensFlareEnabled = enabled; }
@@ -357,7 +317,6 @@ public:
     void SetAdditiveAlpha3DState();
     void SetShroudOverlay3DState();
     void SetMultiplicative3DState();
-    void SetCloudShadow3DState(const Texture* cloudTex);
     void SetSkybox3DState();
     void SetWaterBump3DState(const Texture* bumpTexture);
     void SetEnhancedWaterEnabled(bool enabled);
@@ -443,12 +402,6 @@ private:
     // overlay doesn't pollute the depth buffer for subsequent passes.
     DepthStencilState m_depthGreaterNoWrite;
 
-    // Last shadow-pass light view/proj. BeginShadowPass computes them
-    // (with camera-frustum tight fit when corners are provided), stashes
-    // them here, and EndShadowPass reuses them for the world->shadowUV
-    // matrix the lit shader samples with. Avoids recomputing.
-    Render::Float4x4 m_lastLightView{};
-    Render::Float4x4 m_lastLightProj{};
     SamplerState m_samplerLinear;
     SamplerState m_samplerLinearClamp;
     SamplerState m_samplerPoint;
@@ -650,53 +603,6 @@ public:
     void SetGroundFog(int index, float x, float y, float z, float radius, float r, float g, float b, float density);
     void ClearGroundFog();
 
-    // Shadow mapping
-    bool m_shadowEnabled = false;
-    bool m_shadowReady = false;
-    // Tracks whether BeginShadowPass actually started a pass this frame
-    // (vs. returning early due to bad light state). EndShadowPass uses
-    // this to skip the Pop/Restore when no matching Push happened.
-    bool m_shadowPassActive = false;
-    Texture m_shadowMapRT;
-    Shader m_shaderShadowDepth;
-    RasterizerState m_rasterShadow;
-    SamplerState m_samplerShadowPCF;
-    static constexpr int SHADOW_MAP_SIZE = 2048;
-
-    // Silhouette baker: small scratch RT + flat-alpha PS. D3D11Shims
-    // SilhouetteBaker renders a caster's top-down silhouette into this
-    // scratch RT, then copies it to a permanent texture cached by model
-    // name, which RenderShadowDecalsDX11 then stamps onto the terrain.
-    static constexpr int SILHOUETTE_SIZE = 256;
-    Shader            m_shaderSilhouette;
-    Texture           m_silhouetteScratchRT;
-    RasterizerState   m_silhouetteRaster;
-    BlendState        m_silhouetteBlend;
-    DepthStencilState m_silhouetteDepth;
-    bool              m_silhouetteReady = false;
-public:
-    Shader&            GetSilhouetteShader()     { return m_shaderSilhouette; }
-    Texture&           GetSilhouetteScratchRT()  { return m_silhouetteScratchRT; }
-    RasterizerState&   GetSilhouetteRaster()     { return m_silhouetteRaster; }
-    BlendState&        GetSilhouetteBlend()      { return m_silhouetteBlend; }
-    DepthStencilState& GetSilhouetteDepth()      { return m_silhouetteDepth; }
-    bool               IsSilhouetteReady() const { return m_silhouetteReady; }
-public:
-
-    // Published by BuildCameraFitLightVP each frame for Inspector display.
-    struct ShadowFitDebug {
-        Render::Float3 center, lightEye, sunDir;
-        float lsMinX, lsMaxX, lsMinY, lsMaxY, lsMinZ, lsMaxZ;
-        float lightNear, lightFar;
-        int   castersSubmitted;
-        bool  valid;
-    };
-    ShadowFitDebug m_shadowFitDebug = {};
-
-public:
-    const ShadowFitDebug& GetShadowFitDebug() const { return m_shadowFitDebug; }
-    void SetShadowCastersSubmitted(int n) { m_shadowFitDebug.castersSubmitted = n; }
-private:
     Shader m_shaderLensFlare;
     Shader m_shaderVolumetric;
     ConstantBuffer m_cbLensFlare;

@@ -1123,22 +1123,6 @@ void GameClient::removeFromRayEffects( Drawable *draw )
 
 }
 
-/** frees all shadow resources used by this module - used by Options screen.*/
-void GameClient::releaseShadows()
-{
-	Drawable *draw;
-	for( draw = firstDrawable(); draw; draw = draw->getNextDrawable() )
-		draw->releaseShadows();
-}
-
-/** create shadow resources if not already present. Used by Options screen.*/
-void GameClient::allocateShadows()
-{
-	Drawable *draw;
-	for( draw = firstDrawable(); draw; draw = draw->getNextDrawable() )
-		draw->allocateShadows();
-}
-
 //-------------------------------------------------------------------------------------------------
 /** Preload assets for the currently loaded map.  Those assets include all the damage states
 	* for every building loaded, as well as any faction units/structures we can build and

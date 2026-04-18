@@ -659,15 +659,10 @@ void WaveGuideUpdate::doDamage()
 					//
 					// set flooded condition for model and turn off shadows cause we're inside water,
 					// note that we want to do this after we damage the object so that we switch
-					// off the shadows on the new model data loaded after damage is dealt
-					//
 					Drawable *draw = obj->getDrawable();
 					if( draw )
 					{
-
 						draw->setModelConditionState( MODELCONDITION_FLOODED );
-						draw->setShadowsEnabled( FALSE );
-
 					}
 
 					//

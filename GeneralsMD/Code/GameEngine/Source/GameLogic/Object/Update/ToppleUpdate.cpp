@@ -350,10 +350,6 @@ UpdateSleepTime ToppleUpdate::update()
 		m_angularVelocity += m_angularAcceleration;
 	}
 
-	Drawable *draw=obj->getDrawable();
-	if (draw)
-		draw->setShadowsEnabled(false);
-
 	return UPDATE_SLEEP_NONE;
 }
 

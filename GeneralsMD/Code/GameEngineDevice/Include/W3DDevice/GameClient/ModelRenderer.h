@@ -50,19 +50,11 @@ public:
                       float tintIntensity, float opacity);
     void ClearGhostMode();
     bool IsGhostMode() const { return m_ghostMode; }
-    // Shadow caster mode: when true, RenderMesh skips per-batch state changes
-    // (Restore3DState / SetAlphaTest3DState) so the externally-bound shadow
-    // depth shader and shadow render-target stay in place. Used by the GPU
-    // shadow-map pass to render unit/building meshes into the depth target.
-    void SetShadowCasterMode(bool enabled) { m_shadowCasterMode = enabled; }
-    bool IsInShadowCasterMode() const { return m_shadowCasterMode; }
-
     // Silhouette override mode: when set, ComputeMeshColor returns the
     // overrideColor unconditionally (ignoring HOUSECOLOR meshes, fog
     // darkening, tint envelopes, alpha override). Used by the occluded-
     // silhouette pass to draw every mesh as a flat colored fill regardless
-    // of its texture or material. Pair with SetShadowCasterMode(true) to
-    // also skip per-batch state changes and translucent batches.
+    // of its texture or material.
     void SetSilhouetteOverride(const Render::Float4& color)
     {
         m_silhouetteMode = true;
@@ -178,10 +170,6 @@ private:
 
     // Current blend state tracking to avoid redundant D3D state changes
     MeshBlendMode m_currentBlendMode = BLEND_OPAQUE;
-
-    // Shadow caster mode flag — when true, RenderMesh skips per-batch state
-    // changes so the externally-bound shadow depth shader stays in place.
-    bool m_shadowCasterMode = false;
 
     // Silhouette override mode — when true, ComputeMeshColor returns
     // m_silhouetteColor unconditionally (used by the occluded-unit

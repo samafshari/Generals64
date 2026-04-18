@@ -441,14 +441,9 @@ void ModelRenderer::RenderRenderObject(RenderObjClass* renderObject, bool isSubO
     if (renderObject->Is_Hidden() || renderObject->Is_Animation_Hidden())
         return;
 
-    // Frustum cull using the render object's bounding sphere. Skip in
-    // shadow caster mode — the camera frustum doesn't match the light
-    // frustum, so we'd cull casters that ARE in the light's view but
-    // outside the camera's. The shadow map's tight-fit ortho already
-    // limits the relevant set, and the GPU clip will discard out-of-
-    // bounds verts anyway.
+    // Frustum cull using the render object's bounding sphere.
     extern bool g_debugDisableFrustumCull;
-    if (m_frustumValid && !g_debugDisableFrustumCull && !m_shadowCasterMode)
+    if (m_frustumValid && !g_debugDisableFrustumCull)
     {
         const SphereClass& sphere = renderObject->Get_Bounding_Sphere();
         Render::Float3 center = { sphere.Center.X, sphere.Center.Y, sphere.Center.Z };
@@ -489,13 +484,6 @@ void ModelRenderer::RenderRenderObject(RenderObjClass* renderObject, bool isSubO
     // Only compute LOD and update sub-object transforms for top-level objects.
     // Sub-objects (children of HLod/DistLod/etc.) already have their transforms
     // updated by the parent's Update_Sub_Object_Transforms() call.
-    //
-    // The shadow caster pass runs FIRST in W3DDisplay::draw (before the
-    // regular drawables iteration), so we DO need to compute LOD/transforms
-    // here if we're the first pass to touch this object this frame. Both
-    // passes call this with the same camera, and the transforms are stable
-    // for the duration of the frame, so doing it twice is harmless (the
-    // second call is a no-op or tiny refresh).
     if (!isSubObject)
     {
         renderObject->Prepare_LOD(*m_camera);
@@ -515,12 +503,6 @@ void ModelRenderer::RenderRenderObject(RenderObjClass* renderObject, bool isSubO
         break;
     case RenderObjClass::CLASSID_PARTICLEEMITTER:
     {
-        // In shadow caster mode, skip particle emitter side-effects entirely.
-        // Spawning particles twice per frame would double the emission rate
-        // and breaking the lifetime accounting; m_pendingParticleBuffers is
-        // populated by the regular render pass.
-        if (m_shadowCasterMode)
-            break;
         // Particle emitters on models (e.g. missile exhaust) need their
         // On_Frame_Update called so they generate particles. We also
         // collect their ParticleBuffer for rendering in the scene pass.
@@ -831,11 +813,6 @@ void ModelRenderer::RenderMesh(MeshClass* mesh)
 
         if (isTransparent)
         {
-            // In shadow caster mode, skip translucent batches entirely —
-            // they don't cast solid shadows. (Original DX8 W3DVolumetric
-            // shadow path also skipped them.)
-            if (m_shadowCasterMode)
-                continue;
             // Defer for back-to-front sorted rendering
             float dx = worldMatrix._41 - m_frameData_camX;
             float dy = worldMatrix._42 - m_frameData_camY;
@@ -851,9 +828,7 @@ void ModelRenderer::RenderMesh(MeshClass* mesh)
 
         // Track blend state to avoid redundant D3D state changes.
         // Most meshes are opaque, so this skips Restore3DState for consecutive opaques.
-        // Skip state changes entirely in shadow caster mode — the externally-
-        // bound shadow depth shader and shadow render-target must stay put.
-        if (!m_shadowCasterMode && batch.blendMode != m_currentBlendMode)
+        if (batch.blendMode != m_currentBlendMode)
         {
             switch (batch.blendMode)
             {

@@ -51,7 +51,6 @@ Not ref counted.  Do not store pointers to this class.  */
 class WorldHeightMap;
 class RenderObjClass;
 class ThingTemplate;
-class Shadow;
 enum WaypointID : Int;
 
 #define MAP_XY_FACTOR			(10.0f)	 //How wide and tall each height map square is in world space.
@@ -102,7 +101,6 @@ class MapObject : public MemoryPoolObject
 	// not saved in the map file.
 	Int										m_color;		 ///< Display color.
 	RenderObjClass*				m_renderObj; ///< object that renders in the 3d scene.
-	Shadow*								m_shadowObj; ///< object that renders shadow in the 3d scene.
 	RenderObjClass*				m_bridgeTowers[ BRIDGE_MAX_TOWERS ];		///< for bridge towers
 	Int										m_runtimeFlags;
 
@@ -151,8 +149,6 @@ public:
 
 	void setRenderObj(RenderObjClass *pObj);
 	RenderObjClass *getRenderObj() const {return m_renderObj;}
-	void setShadowObj(Shadow *pObj)	{m_shadowObj=pObj;}
-	Shadow *getShadowObj() const {return m_shadowObj;}
 
 	RenderObjClass* getBridgeRenderObject( BridgeTowerType type );
 	void setBridgeRenderObject( BridgeTowerType type, RenderObjClass* renderObj );

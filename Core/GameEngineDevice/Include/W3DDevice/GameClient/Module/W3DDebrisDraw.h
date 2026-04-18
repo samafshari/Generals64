@@ -38,7 +38,6 @@
 class Thing;
 class RenderObjClass;
 class HAnimClass;
-class Shadow;
 class FXList;
 
 //-------------------------------------------------------------------------------------------------
@@ -55,10 +54,6 @@ public:
 
 	/// the draw method
 	virtual void doDrawModule(const Matrix3D* transformMtx);
-
-	virtual void setShadowsEnabled(Bool enable);
-	virtual void releaseShadows() {};	///< we don't care about preserving temporary shadows.
-	virtual void allocateShadows() {};	///< we don't care about preserving temporary shadows.
 
 	virtual void setFullyObscuredByShroud(Bool fullyObscured);
 	virtual void reactToTransformChange(const Matrix3D* oldMtx, const Coord3D* oldPos, Real oldAngle);
@@ -92,6 +87,5 @@ private:
 	Int												m_state;
 	Int												m_frames;
 	Bool											m_finalStop;
-	Shadow*										m_shadow;													///< Updates/Renders shadows of this object
 
 };

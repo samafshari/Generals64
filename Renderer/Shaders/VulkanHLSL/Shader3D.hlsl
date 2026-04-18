@@ -187,18 +187,6 @@ float3 ApplySurfaceSpecular(float3 color, float3 worldPos, float3 N)
     return color + spec * lightColors[0].rgb;
 }
 
-
-
-// GPU shadow map disabled — return full-lit. The shadow-pass bring-up in
-// commit 8da4e13 darkened cloud shadows too and produced visibly wrong
-// output; this no-op restores pre-commit visuals until the pipeline is
-// re-landed correctly. Signature / cbuffer bindings preserved so all
-// PSMain* call sites compile unchanged.
-float ComputeShadow(float3 worldPos)
-{
-    return 1.0;
-}
-
 // --- Vertex shaders ---
 
 PSInput VSMain(VSInput input)
@@ -378,7 +366,7 @@ float3 ApplyShaderEffect(float3 inColor, float3 worldPos, float3 N, float4 objCo
     return inColor;
 }
 
-// Standard terrain/model shader with integrated cloud shadows
+// Standard terrain/model shader
 float4 PSMain(PSInput input) : SV_TARGET
 {
     float4 texColor = diffuseTexture.Sample(linearSampler, input.texcoord);
@@ -412,10 +400,7 @@ float4 PSMain(PSInput input) : SV_TARGET
 
     float4 finalColor = texColor * input.color;
     finalColor.rgb *= ComputeLighting(input.worldPos, N);
-    finalColor.rgb *= ComputeShadow(input.worldPos);
     finalColor.rgb = ApplySurfaceSpecular(finalColor.rgb, input.worldPos, N);
-    finalColor.rgb = ApplyCloudShadow(finalColor.rgb, input.worldPos);
-    finalColor.rgb = ApplyBuildingShadow(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyUnderwaterFade(finalColor.rgb, input.worldPos.z);
     finalColor.rgb = ApplyShroud(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyAtmosphere(finalColor.rgb, input.worldPos);
@@ -432,18 +417,14 @@ float4 PSMain(PSInput input) : SV_TARGET
 }
 
 // Unlit shader for additive FX (lasers, streaks, line effects).
-// No lighting, shadows, shroud, or atmosphere — just texture * vertex color.
+// No lighting, shroud, or atmosphere — just texture * vertex color.
 float4 PSMainUnlit(PSInput input) : SV_TARGET
 {
     float4 texColor = diffuseTexture.Sample(linearSampler, input.texcoord);
     return texColor * input.color;
 }
 
-// Skybox pixel shader. The sky dome must NEVER receive shadow — the sun itself
-// is what casts those shadows, so darkening the sky at points where a building
-// would occlude it is nonsensical and shows up as "patches of dark sky" moving
-// as the shadow-map ortho frustum slides with the camera. Also skip the
-// surface specular/shroud so the sky stays uniform.
+// Skybox pixel shader. Skips surface specular/shroud so the sky stays uniform.
 float4 PSMainSkybox(PSInput input) : SV_TARGET
 {
     float4 texColor = diffuseTexture.Sample(linearSampler, input.texcoord);
@@ -513,10 +494,7 @@ float4 PSMainAlphaTest(PSInput input) : SV_TARGET
     clip(texColor.a - 0.3);
     float4 finalColor = texColor * input.color;
     finalColor.rgb *= ComputeLighting(input.worldPos, N);
-    finalColor.rgb *= ComputeShadow(input.worldPos);
     finalColor.rgb = ApplySurfaceSpecular(finalColor.rgb, input.worldPos, N);
-    finalColor.rgb = ApplyCloudShadow(finalColor.rgb, input.worldPos);
-    finalColor.rgb = ApplyBuildingShadow(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyShroud(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyAtmosphere(finalColor.rgb, input.worldPos);
 
@@ -574,8 +552,8 @@ float4 PSMeshDecal(PSInput input) : SV_TARGET
 }
 
 // Construction-ghost shader. Used by the placement preview drawable while the
-// player chooses where to drop a building. The pixel runs the regular lit/
-// shadowed path so the ghost reads as a faint version of the real model, then
+// player chooses where to drop a building. The pixel runs the regular lit
+// path so the ghost reads as a faint version of the real model, then
 // optionally blends the lit color toward a tint color (red for invalid
 // placement). Output alpha is the drawable's opacity, fed by an alpha-blend
 // pipeline state with depth-write disabled.
@@ -592,7 +570,6 @@ float4 PSGhost(PSInput input) : SV_TARGET
     float3 N = SafeNormal(input.normal);
     float3 rgb = (texColor * input.color).rgb;
     rgb *= ComputeLighting(input.worldPos, N);
-    rgb *= ComputeShadow(input.worldPos);
     rgb = lerp(rgb, ghostTint.rgb, ghostTint.a);
     rgb = ApplyShroud(rgb, input.worldPos);
     return float4(rgb, ghostParams.x);
@@ -608,10 +585,7 @@ float4 PSMainAlphaTestEdge(PSInput input) : SV_TARGET
     float3 N = SafeNormal(input.normal);
     float4 finalColor = texColor * input.color;
     finalColor.rgb *= ComputeLighting(input.worldPos, N);
-    finalColor.rgb *= ComputeShadow(input.worldPos);
     finalColor.rgb = ApplySurfaceSpecular(finalColor.rgb, input.worldPos, N);
-    finalColor.rgb = ApplyCloudShadow(finalColor.rgb, input.worldPos);
-    finalColor.rgb = ApplyBuildingShadow(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyShroud(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyAtmosphere(finalColor.rgb, input.worldPos);
 
@@ -633,10 +607,7 @@ float4 PSMainTerrainMaskBase(PSInput2Tex input) : SV_TARGET
     float3 N = SafeNormal(input.normal);
     float4 finalColor = texColor * input.color;
     finalColor.rgb *= ComputeLighting(input.worldPos, N);
-    finalColor.rgb *= ComputeShadow(input.worldPos);
     finalColor.rgb = ApplySurfaceSpecular(finalColor.rgb, input.worldPos, N);
-    finalColor.rgb = ApplyCloudShadow(finalColor.rgb, input.worldPos);
-    finalColor.rgb = ApplyBuildingShadow(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyUnderwaterFade(finalColor.rgb, input.worldPos.z);
     finalColor.rgb = ApplyShroud(finalColor.rgb, input.worldPos);
     finalColor.rgb = ApplyAtmosphere(finalColor.rgb, input.worldPos);

@@ -62,11 +62,6 @@ static inline uint32_t argbToAbgr(uint32_t argb)
     return (a << 24) | (b << 16) | (g << 8) | r;
 }
 
-// Defined in GeneralsMD W3DDisplay.cpp at global scope. Used by
-// BuildCameraFitLightVP to gate world-space shadow gizmos.
-extern bool  g_debugShadowGizmos;
-extern float g_debugShadowSunElevDeg;
-
 namespace Render
 {
 
@@ -122,11 +117,8 @@ bool Renderer::Init(void* nativeWindowHandle, bool debug)
     }
     m_frameData.lightColors[0] = { 1.0f, 1.0f, 1.0f, 1.0f };
     m_frameData.lightingOptions = { 1.0f, 0.0f, 0.0f, 0.0f };
-    m_frameData.cloudParams = { 1.0f / 315.0f, -0.02f, -0.03f, 0.0f }; // disabled by default
     m_frameData.shroudParams = { 0.0f, 0.0f, 0.0f, 0.0f }; // disabled until game sets it
     m_frameData.atmosphereParams = { 0.0f, 0.0f, 0.0f, 0.0f }; // atmosphere off by default
-    m_frameData.shadowMapMatrix = Float4x4Identity();
-    m_frameData.shadowParams = { 0.0f, 1.0f / 2048.0f, 0.002f, 0.0f };
 
     return true;
 }
@@ -162,7 +154,6 @@ void Renderer::Shutdown()
     m_shaderParticleExtract.Destroy(m_device);
     m_shaderHeatDistort.Destroy(m_device);
     m_shaderGlowComposite.Destroy(m_device);
-    m_shaderShadowDepth.Destroy(m_device);
     m_shaderLensFlare.Destroy(m_device);
     m_shaderVolumetric.Destroy(m_device);
     m_shaderShockwave.Destroy(m_device);
@@ -208,7 +199,6 @@ void Renderer::Shutdown()
     m_particleExtractRT.Destroy(m_device);
     m_particleBlurRT.Destroy(m_device);
     m_volHalfRT.Destroy(m_device);
-    m_shadowMapRT.Destroy(m_device);
     m_godRayExtractRT.Destroy(m_device);
     m_godRayBlurRT.Destroy(m_device);
 
@@ -216,7 +206,6 @@ void Renderer::Shutdown()
     m_samplerLinear.Destroy(m_device);
     m_samplerLinearClamp.Destroy(m_device);
     m_samplerPoint.Destroy(m_device);
-    m_samplerShadowPCF.Destroy(m_device);
 #endif
 
     m_device.Shutdown();
@@ -320,9 +309,7 @@ bool Renderer::CreateShaders()
     if (!m_shader3DWaterBump.CreateInputLayout(m_device, layout3D, _countof(layout3D), sizeof(Vertex3D)))
         return false;
 
-    // 3D skybox shader (forces depth = 1.0). PSMainSkybox skips shadow
-    // sampling so the sky dome doesn't catch shadow-map-ortho-projected
-    // darkness from buildings/units that occlude the camera-to-sun ray.
+    // 3D skybox shader (forces depth = 1.0).
     if (!CompileOrLoadVS(m_shader3DSkybox, m_device, g_shader3D, "VSMainSkybox", "Shaders/spirv/Shader3D_VSMainSkybox.spv"))
         return false;
     if (!CompileOrLoadPS(m_shader3DSkybox, m_device, g_shader3D, "PSMainSkybox", "Shaders/spirv/Shader3D_PSMainSkybox.spv"))
@@ -588,90 +575,6 @@ bool Renderer::CreateShaders()
             m_cbVolumetric.Create(m_device, sizeof(VolumetricConstants));
     }
 
-    // Shadow depth shader — optional, non-fatal
-    {
-        VertexAttribute layout3D[] = {
-            { "POSITION", 0, VertexFormat::Float3,    offsetof(Vertex3D, position) },
-            { "NORMAL",   0, VertexFormat::Float3,    offsetof(Vertex3D, normal) },
-            { "TEXCOORD", 0, VertexFormat::Float2,    offsetof(Vertex3D, texcoord) },
-            { "COLOR",    0, VertexFormat::UByte4Norm, offsetof(Vertex3D, color) },
-        };
-        bool shadowOk = true;
-        shadowOk = shadowOk && CompileOrLoadVS(m_shaderShadowDepth, m_device, g_shaderShadowDepth, "VSShadowDepth", "Shaders/spirv/ShaderShadowDepth_VSShadowDepth.spv");
-        shadowOk = shadowOk && CompileOrLoadPS(m_shaderShadowDepth, m_device, g_shaderShadowDepth, "PSShadowDepth", "Shaders/spirv/ShaderShadowDepth_PSShadowDepth.spv");
-        shadowOk = shadowOk && m_shaderShadowDepth.CreateInputLayout(m_device, layout3D, _countof(layout3D), sizeof(Vertex3D));
-        if (shadowOk)
-        {
-            m_shadowReady = m_shadowMapRT.CreateDepthTarget(m_device, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
-            if (m_shadowReady)
-            {
-                // Shadow caster raster state:
-                //   * CullMode::None — W3D meshes include thin/single-sided geometry
-                //     (infantry billboards, flag quads, tree cards, some HLOD bits).
-                //     Front-face culling would drop all such triangles and leave no
-                //     shadow for those units. Rendering both sides at 2048² is cheap.
-                //   * DepthBias — constant per-texel bias to avoid self-shadowing
-                //     acne on the caster's own back face when a receiver (terrain)
-                //     is exactly coincident.
-                //   * SlopeScaledDepthBias — extra bias proportional to the
-                //     fragment's depth slope. Fixes shadow acne on surfaces oriented
-                //     at grazing angles to the light (low-angle hills, long walls).
-                m_rasterShadow.Create(
-                    m_device,
-                    FillMode::Solid,
-                    CullMode::None,
-                    true,       // frontCCW
-                    10000,      // depthBias (5x previous — fights self-shadow
-                                // acne on caster front faces; building walls
-                                // no longer shadow themselves)
-                    false,      // scissor
-                    4.0f);      // slopeScaledDepthBias (2x previous — long
-                                // walls at grazing sun angles still need
-                                // extra headroom)
-                m_samplerShadowPCF.CreateComparison(m_device,
-                    Filter::ComparisonMinMagMipLinear,
-                    AddressMode::Border);
-            }
-        }
-    }
-
-    // Silhouette baker resources — reuses the shadow-depth VS (same
-    // world * viewProjection transform) with a flat-alpha PS, a small
-    // 256x256 RGBA8 scratch RT, and a no-cull / no-depth-test / opaque
-    // pipeline state. SilhouetteBaker in D3D11Shims owns the cache of
-    // per-model baked textures; this just makes the primitives available.
-    {
-        VertexAttribute layout3D[] = {
-            { "POSITION", 0, VertexFormat::Float3,     offsetof(Vertex3D, position) },
-            { "NORMAL",   0, VertexFormat::Float3,     offsetof(Vertex3D, normal) },
-            { "TEXCOORD", 0, VertexFormat::Float2,     offsetof(Vertex3D, texcoord) },
-            { "COLOR",    0, VertexFormat::UByte4Norm, offsetof(Vertex3D, color) },
-        };
-        bool silOk = true;
-        silOk = silOk && CompileOrLoadVS(m_shaderSilhouette, m_device, g_shaderShadowDepth,
-                                         "VSShadowDepth",
-                                         "Shaders/spirv/ShaderShadowDepth_VSShadowDepth.spv");
-        silOk = silOk && CompileOrLoadPS(m_shaderSilhouette, m_device, g_shaderShadowDepth,
-                                         "PSShadowSilhouette",
-                                         "Shaders/spirv/ShaderShadowDepth_PSShadowSilhouette.spv");
-        silOk = silOk && m_shaderSilhouette.CreateInputLayout(m_device, layout3D,
-                                                              _countof(layout3D), sizeof(Vertex3D));
-        if (silOk)
-        {
-            silOk = silOk && m_silhouetteScratchRT.CreateRenderTarget(
-                m_device, SILHOUETTE_SIZE, SILHOUETTE_SIZE);
-            silOk = silOk && m_silhouetteRaster.Create(
-                m_device, FillMode::Solid, CullMode::None, true, 0, false, 0.0f);
-            // Opaque blend — we simply overwrite the cleared (0,0,0,0) RT
-            // with flat (0,0,0,1) where geometry lands.
-            silOk = silOk && m_silhouetteBlend.CreateOpaque(m_device);
-            // Depth off — bakes are 2D writes, no self-occlusion needed
-            // (we want the silhouette of the union of all meshes).
-            silOk = silOk && m_silhouetteDepth.Create(m_device, false, false, CompareFunc::Always);
-            m_silhouetteReady = silOk;
-        }
-    }
-
     // Render::Debug colored line shader. Reuses FrameConstants slot
     // b0 (only samples viewProjection), takes a tiny vertex format
     // of position+color so the dynamic VB stays small. Failure here
@@ -926,15 +829,14 @@ void Renderer::SetSunLight(const Render::Float3& direction, const Render::Float4
 }
 
 // Fixed "2pm sun" direction: elevation ~60° (sin60 = 0.866), azimuth 225°
-// (SW of zenith) so the sun is high-and-slightly-behind for a typical camera
-// view, casting a clearly visible NE-ward shadow. +Z is up in the Generals
-// coordinate system; lightDirections[0] stores the direction light TRAVELS
-// (from sun to scene), so this vector points down-and-northeast. Unit length.
+// (SW of zenith). +Z is up in the Generals coordinate system; lightDirections[0]
+// stores the direction light TRAVELS (from sun to scene), so this vector points
+// down-and-northeast. Unit length.
 static const Render::Float3 kFixedSunDirection2PM = { 0.354f, 0.354f, -0.866f };
 
-// Global: override the map's lighting[0] direction with kFixedSunDirection2PM
-// so shadows come from a known-good fixed angle regardless of map INI.
-// Colors/ambient still come from the map so the time-of-day mood is preserved.
+// Global: override the map's lighting[0] direction with kFixedSunDirection2PM so
+// the per-pixel lighting comes from a known-good fixed angle regardless of map
+// INI. Colors/ambient still come from the map so the time-of-day mood is preserved.
 bool g_fixedSunAt2PM = true;
 
 void Renderer::SetDirectionalLights(const Render::Float3* directions, const Render::Float4* colors, uint32_t count)
@@ -954,10 +856,10 @@ void Renderer::SetDirectionalLights(const Render::Float3* directions, const Rend
         }
     }
 
-    // Force the primary sun direction to the fixed 2pm angle so shadows and
-    // per-pixel lighting line up across all maps, even ones whose INI sets a
-    // degenerate lightPos (zero or poorly normalized). Color intensity from
-    // the map is retained so maps still feel bright/dim as authored.
+    // Force the primary sun direction to the fixed 2pm angle so per-pixel
+    // lighting lines up across all maps, even ones whose INI sets a degenerate
+    // lightPos (zero or poorly normalized). Color intensity from the map is
+    // retained so maps still feel bright/dim as authored.
     if (g_fixedSunAt2PM && clampedCount > 0)
     {
         m_frameData.lightDirections[0] = {
@@ -1021,7 +923,7 @@ void Renderer::FlushFrameConstants()
     m_cbFrame.Update(m_device, &m_frameData, sizeof(m_frameData));
     m_cbFrame.BindVS(m_device, 0);
     m_cbFrame.BindPS(m_device, 0);
-    // Always bind WRAP sampler at s1 for cloud shadows and tiling textures.
+    // Always bind WRAP sampler at s1 for tiling textures.
     // s0 may be CLAMP (for terrain atlas) or WRAP depending on the pass.
     m_samplerLinear.BindPS(m_device, 1);
 }
@@ -1323,27 +1225,12 @@ void Renderer::SetDepthDisabled()
 void Renderer::SetMultiplicative3DState()
 {
     // Multiplicative blend: result = dest * src_color.
-    // Used for shadows and shroud to darken terrain while preserving hue.
+    // Used for shroud to darken terrain while preserving hue.
     m_shader3D.Bind(m_device);
     m_rasterNoCull.Bind(m_device);
     m_blendMultiplicative.Bind(m_device);
     m_depthNoWrite.Bind(m_device);
     m_samplerLinear.BindPS(m_device, 0);
-}
-
-void Renderer::SetCloudShadow3DState(const Texture* /*cloudTex*/)
-{
-    // Cloud shadows are now procedural in PSMain — no texture needed.
-    m_shader3D.Bind(m_device);
-    m_rasterDefault.Bind(m_device);
-    m_blendMultiplicative.Bind(m_device);
-    m_depthNoWrite.Bind(m_device);
-    m_samplerLinear.BindPS(m_device, 0);
-}
-
-void Renderer::BindCloudTexture(const Texture* /*cloudTex*/)
-{
-    // Cloud shadows are now procedural — no texture bind needed.
 }
 
 void Renderer::SetShroudParams(float invWorldW, float invWorldH, float offsetX, float offsetY)
@@ -1931,346 +1818,6 @@ void Renderer::DrawDecalsInstanced(uint32_t instanceCount, const Texture* decalT
     m_device.UnbindVSSRVs(3, 2);
     m_device.UnbindVSSamplers(0);
     m_device.UnbindVSConstantBuffers(2);
-}
-
-// Build a tight off-center orthographic light projection that exactly
-// covers the camera's view frustum in light-space, plus the lightView
-// matrix it was computed with. Both are stored in m_lastLightView and
-// m_lastLightProj so EndShadowPass can recompute the same shadowMatrix
-// without re-doing the AABB pass. Snaps the AABB to shadow-texel
-// boundaries so shadows don't shimmer as the camera pans.
-static void BuildCameraFitLightVP(
-    const Render::Float3& sunDir,                  // unit vector — sun direction (light comes FROM here)
-    const Render::Float3* corners,                 // 8 camera frustum corners in world space
-    int shadowMapSize,                             // resolution of the shadow map (for texel snap)
-    Renderer::ShadowFitDebug* outDebug,            // optional — published for Inspector display
-    Render::Float4x4& outLightView,
-    Render::Float4x4& outLightProj)
-{
-    using namespace Render;
-
-    // Clamp each camera-frustum corner's Z to the playable altitude slab
-    // before we fit. The raw camera far-plane corners can dive deep below
-    // ground and the near-plane corners sit at camera altitude; fitting
-    // to those directly produces a 12km x 12km ortho volume that wastes
-    // 99% of the shadow map on empty sky/below-ground space, giving ~5
-    // texels per building — way too sparse to produce visible shadows.
-    //
-    // Clamping to a ~500-unit vertical slab keeps the frustum tight
-    // around ground-level geometry (which is what actually casts).
-    const float kSlabMinZ = -50.0f;   // allow a bit below sea level
-    const float kSlabMaxZ = 500.0f;   // above tallest structures
-    Float3 clamped[8];
-    for (int i = 0; i < 8; ++i)
-    {
-        clamped[i] = corners[i];
-        if (clamped[i].z < kSlabMinZ) clamped[i].z = kSlabMinZ;
-        if (clamped[i].z > kSlabMaxZ) clamped[i].z = kSlabMaxZ;
-    }
-
-    // Look-at target: average of the 8 clamped corners (frustum centroid).
-    Float3 center{ 0, 0, 0 };
-    for (int i = 0; i < 8; ++i)
-    {
-        center.x += clamped[i].x;
-        center.y += clamped[i].y;
-        center.z += clamped[i].z;
-    }
-    center.x /= 8.0f; center.y /= 8.0f; center.z /= 8.0f;
-
-    // Light "eye" sits ALONG the sun direction from the centroid.
-    const float lightDistance = 2000.0f;
-    Float3 lightEye = {
-        center.x + sunDir.x * lightDistance,
-        center.y + sunDir.y * lightDistance,
-        center.z + sunDir.z * lightDistance
-    };
-    Float3 up{ 0, 0, 1 };
-    if (fabsf(Float3Dot(sunDir, up)) > 0.99f)
-        up = Float3{ 0, 1, 0 };
-    outLightView = Float4x4LookAtRH(lightEye, center, up);
-
-    // Transform the 8 CLAMPED corners into light view space and find
-    // the axis-aligned bounding box. Light X/Y span the screen extents,
-    // light Z is depth.
-    float lsMinX = +1e30f, lsMinY = +1e30f, lsMinZ = +1e30f;
-    float lsMaxX = -1e30f, lsMaxY = -1e30f, lsMaxZ = -1e30f;
-    for (int i = 0; i < 8; ++i)
-    {
-        Float4 c4{ clamped[i].x, clamped[i].y, clamped[i].z, 1.0f };
-        Float4 ls = Float4Transform(c4, outLightView);
-        if (ls.x < lsMinX) lsMinX = ls.x;
-        if (ls.y < lsMinY) lsMinY = ls.y;
-        if (ls.z < lsMinZ) lsMinZ = ls.z;
-        if (ls.x > lsMaxX) lsMaxX = ls.x;
-        if (ls.y > lsMaxY) lsMaxY = ls.y;
-        if (ls.z > lsMaxZ) lsMaxZ = ls.z;
-    }
-
-    // Simple texel snap using a FIXED world-space texel size. Span width
-    // is whatever the current camera frustum requires, rounded up to an
-    // integer number of fixed-size texels. As the camera pans, edges
-    // snap in whole-texel jumps (still some shimmer on pan direction
-    // crossings but much better than self-referential snap).
-    const float kTexelSize = 1.0f;  // 1 world unit per shadow texel
-    lsMinX = floorf(lsMinX / kTexelSize) * kTexelSize;
-    lsMaxX = ceilf (lsMaxX / kTexelSize) * kTexelSize;
-    lsMinY = floorf(lsMinY / kTexelSize) * kTexelSize;
-    lsMaxY = ceilf (lsMaxY / kTexelSize) * kTexelSize;
-    // Safety: cap the AABB so it never exceeds the shadow map's texel
-    // capacity. If camera sees a much larger region, clamp to what we
-    // can resolve.
-    float maxSpan = (float)shadowMapSize * kTexelSize;
-    if (lsMaxX - lsMinX > maxSpan)
-    {
-        float midX = (lsMinX + lsMaxX) * 0.5f;
-        lsMinX = midX - maxSpan * 0.5f;
-        lsMaxX = midX + maxSpan * 0.5f;
-    }
-    if (lsMaxY - lsMinY > maxSpan)
-    {
-        float midY = (lsMinY + lsMaxY) * 0.5f;
-        lsMinY = midY - maxSpan * 0.5f;
-        lsMaxY = midY + maxSpan * 0.5f;
-    }
-
-    // RH light view: eye looks down -Z, so all corners have ls.z < 0
-    // (in front of eye). The "depth from light" = -ls.z. We want the
-    // ortho near/far to span ALL corner depths plus a generous front
-    // margin so casters between the light and the closest visible
-    // pixel (e.g., tall buildings just at the camera-frustum edge)
-    // also write into the shadow map.
-    const float zFront = 1000.0f;  // extra space toward the light
-    float lightNear = -lsMaxZ - zFront;
-    float lightFar  = -lsMinZ + 100.0f;
-    if (lightNear < 0.1f) lightNear = 0.1f;
-    if (lightFar  < lightNear + 1.0f) lightFar = lightNear + 1.0f;
-
-    // Off-center orthographic projection (DX RH, depth [0,1], row-major).
-    float l = lsMinX, r = lsMaxX, b = lsMinY, t = lsMaxY;
-    float n = lightNear, f = lightFar;
-    Float4x4 proj{};
-    proj._11 = 2.0f / (r - l);
-    proj._22 = 2.0f / (t - b);
-    proj._33 = 1.0f / (n - f);
-    proj._41 = -(r + l) / (r - l);
-    proj._42 = -(t + b) / (t - b);
-    proj._43 = n / (n - f);
-    proj._44 = 1.0f;
-    outLightProj = proj;
-
-    // Publish fit values so the Inspector can render them as live text.
-    if (outDebug)
-    {
-        outDebug->center     = center;
-        outDebug->lightEye   = lightEye;
-        outDebug->sunDir     = sunDir;
-        outDebug->lsMinX     = lsMinX; outDebug->lsMaxX = lsMaxX;
-        outDebug->lsMinY     = lsMinY; outDebug->lsMaxY = lsMaxY;
-        outDebug->lsMinZ     = lsMinZ; outDebug->lsMaxZ = lsMaxZ;
-        outDebug->lightNear  = lightNear;
-        outDebug->lightFar   = lightFar;
-        outDebug->valid      = true;
-        // castersSubmitted is updated by the caller (W3DDisplay) after the
-        // caster loop — don't touch here.
-    }
-
-    // ---- World-space visualization gizmos -----------------------------
-    // All optional, gated on g_debugShadowGizmos. These draw through the
-    // Render::Debug line queue, which flushes at the end of the frame
-    // AFTER terrain/models/water/etc., so the gizmos sit on top with
-    // depth test enabled (they respect occlusion but don't write depth).
-    if (::g_debugShadowGizmos)
-    {
-        // Yellow arrow from the centroid of the visible volume toward the
-        // sun. Length = lightDistance so the arrow tip sits at the light eye.
-        Render::Float3 arrowEnd{
-            center.x + sunDir.x * lightDistance,
-            center.y + sunDir.y * lightDistance,
-            center.z + sunDir.z * lightDistance };
-        Render::Debug::Arrow(center, arrowEnd, Render::Debug::kYellow);
-
-        // Orange cross at the light eye (sun position).
-        Render::Debug::Cross(lightEye, 60.0f, Render::Debug::kOrange);
-
-        // Green crosses at the 8 camera-frustum corners so we can see
-        // whether the light frustum tightly wraps what the camera sees.
-        for (int i = 0; i < 8; ++i)
-            Render::Debug::Cross(corners[i], 20.0f, Render::Debug::kGreen);
-
-        // Magenta wireframe cube = light orthographic volume in world
-        // space. If it DOESN'T enclose the buildings you want to cast
-        // shadows, those buildings are outside the shadow frustum and
-        // get clipped.
-        //
-        // Reconstruct the 8 ortho corners in world space: for each
-        // light-view-space point (ls_x, ls_y, ls_z),
-        //   world = lightEye + ls_x * right + ls_y * up - ls_z * forward
-        // where right/up/forward are the light-view basis vectors in
-        // world space (see the LookAtRH matrix layout for the source).
-        Float3 right{ outLightView._11, outLightView._21, outLightView._31 };
-        Float3 upW  { outLightView._12, outLightView._22, outLightView._32 };
-        Float3 fwd  { -outLightView._13, -outLightView._23, -outLightView._33 };
-
-        // ls.z at near/far planes: negative of the positive near/far
-        // (ortho in RH: ls.z<0 is in front of eye; our near = -maxZ etc).
-        float zNearLS = -lightNear;
-        float zFarLS  = -lightFar;
-
-        Float3 lsCorners[8] = {
-            { lsMinX, lsMinY, zNearLS }, { lsMaxX, lsMinY, zNearLS },
-            { lsMaxX, lsMaxY, zNearLS }, { lsMinX, lsMaxY, zNearLS },
-            { lsMinX, lsMinY, zFarLS  }, { lsMaxX, lsMinY, zFarLS  },
-            { lsMaxX, lsMaxY, zFarLS  }, { lsMinX, lsMaxY, zFarLS  },
-        };
-        Float3 wsCorners[8];
-        for (int i = 0; i < 8; ++i)
-        {
-            const Float3& ls = lsCorners[i];
-            wsCorners[i] = {
-                lightEye.x + ls.x * right.x + ls.y * upW.x - ls.z * fwd.x,
-                lightEye.y + ls.x * right.y + ls.y * upW.y - ls.z * fwd.y,
-                lightEye.z + ls.x * right.z + ls.y * upW.z - ls.z * fwd.z,
-            };
-        }
-        static const int edges[12][2] = {
-            {0,1},{1,2},{2,3},{3,0},   // near plane
-            {4,5},{5,6},{6,7},{7,4},   // far plane
-            {0,4},{1,5},{2,6},{3,7},   // connectors
-        };
-        for (int i = 0; i < 12; ++i)
-            Render::Debug::Line(wsCorners[edges[i][0]],
-                                wsCorners[edges[i][1]],
-                                Render::Debug::kMagenta);
-        // Also drop a big cross at each ortho corner — lines can be hard
-        // to see against terrain, crosses are always readable.
-        for (int i = 0; i < 8; ++i)
-            Render::Debug::Cross(wsCorners[i], 40.0f, Render::Debug::kMagenta);
-
-        // Center of the ortho box, projected to world: marks the visual
-        // centroid the light frustum is fitted around.
-        Render::Debug::Cross(center, 30.0f, Render::Debug::kCyan);
-
-        // Connect the light eye to the center so you can see the light's
-        // forward axis through the scene.
-        Render::Debug::Line(lightEye, center, Render::Debug::kRed);
-    }
-}
-
-void Renderer::BeginShadowPass(const Render::Float3* frustumCornersWorld8)
-{
-    m_shadowPassActive = false;
-    if (!m_shadowReady || !m_shadowEnabled)
-        return;
-
-    // Sun direction: engine stores lightDirections[0] as the direction
-    // the light travels (toward the ground). Negate so sunDir points
-    // back toward the sun. Refuse to run if the light hasn't been set up
-    // yet — a zero-length sun vector would make BuildCameraFitLightVP's
-    // LookAt matrix NaN, corrupting the shadow projection.
-    Render::Float3 rawSun = Render::Float3(
-        -m_frameData.lightDirections[0].x,
-        -m_frameData.lightDirections[0].y,
-        -m_frameData.lightDirections[0].z);
-    float sunLen = sqrtf(rawSun.x*rawSun.x + rawSun.y*rawSun.y + rawSun.z*rawSun.z);
-    if (sunLen < 0.001f)
-    {
-        // Shadow pass can't run this frame. Leave shadowParams disabled so
-        // the receiver shader returns fully-lit instead of sampling garbage.
-        m_frameData.shadowParams = { 0.0f, 0.0f, 0.0f, 0.0f };
-        FlushFrameConstants();
-        return;
-    }
-    Render::Float3 sunDir = Render::Float3Normalize(rawSun);
-
-    // Optional override for easy debugging of shadow length. elev=0 keeps
-    // the engine's actual sun; elev=90 puts the sun directly overhead;
-    // elev=20 drops it to a low horizon-skimming position that casts
-    // dramatic long shadows. Azimuth is preserved from the real sun.
-    if (::g_debugShadowSunElevDeg > 0.001f)
-    {
-        float azimuth = atan2f(sunDir.y, sunDir.x);
-        float elevRad = ::g_debugShadowSunElevDeg * 3.14159265f / 180.0f;
-        float ce = cosf(elevRad), se = sinf(elevRad);
-        sunDir.x = cosf(azimuth) * ce;
-        sunDir.y = sinf(azimuth) * ce;
-        sunDir.z = se;
-    }
-
-    m_device.SetDepthOnlyRenderTarget(m_shadowMapRT);
-    m_device.ClearDepthStencil(m_shadowMapRT);
-    SetViewport(0, 0, (float)SHADOW_MAP_SIZE, (float)SHADOW_MAP_SIZE);
-
-    Render::Float4x4 lightView, lightProj;
-    if (frustumCornersWorld8 != nullptr)
-    {
-        BuildCameraFitLightVP(sunDir, frustumCornersWorld8, SHADOW_MAP_SIZE, &m_shadowFitDebug, lightView, lightProj);
-    }
-    else
-    {
-        // Legacy fallback: 700x700 ortho centered on camera position.
-        Render::Float3 camPos3(m_frameData.cameraPos.x, m_frameData.cameraPos.y, m_frameData.cameraPos.z);
-        Render::Float3 lightPos{
-            camPos3.x - sunDir.x * 500.0f,
-            camPos3.y - sunDir.y * 500.0f,
-            camPos3.z - sunDir.z * 500.0f };
-        Render::Float3 up(0, 0, 1);
-        if (fabsf(Render::Float3Dot(sunDir, up)) > 0.99f) up = Render::Float3(0, 1, 0);
-        lightView = Render::Float4x4LookAtRH(lightPos, camPos3, up);
-        lightProj = Render::Float4x4OrthoRH(700.0f, 700.0f, 1.0f, 1000.0f);
-    }
-
-    Render::Float4x4 lightVP = Render::Float4x4Multiply(lightView, lightProj);
-
-    m_lastLightView = lightView;
-    m_lastLightProj = lightProj;
-
-    PushFrameConstants();
-    m_frameData.viewProjection = lightVP;
-    m_frameData.shadowParams = { 0.0f, 0.0f, 0.0f, 0.0f }; // disable shadow sampling during shadow pass
-    FlushFrameConstants();
-
-    m_shaderShadowDepth.Bind(m_device);
-    m_rasterShadow.Bind(m_device);
-    m_depthDefault.Bind(m_device);
-    m_shadowPassActive = true;
-}
-
-void Renderer::EndShadowPass()
-{
-    if (!m_shadowReady || !m_shadowEnabled || !m_shadowPassActive)
-        return;
-    m_shadowPassActive = false;
-
-    Render::Float4x4 lightVP = Render::Float4x4Multiply(m_lastLightView, m_lastLightProj);
-
-    // Bias matrix: clip [-1,1] -> UV [0,1] (Y flipped for D3D11 convention)
-    Render::Float4x4 shadowBias(
-        0.5f, 0, 0, 0,
-        0, -0.5f, 0, 0,
-        0, 0, 1, 0,
-        0.5f, 0.5f, 0, 1);
-    Render::Float4x4 shadowMat = Render::Float4x4Multiply(lightVP, shadowBias);
-
-    PopFrameConstants();
-    RestoreBackBuffer();
-
-    m_frameData.shadowMapMatrix = shadowMat;
-    extern int g_debugShadowMapViz;
-    m_frameData.shadowParams = { 1.0f, 1.0f / (float)SHADOW_MAP_SIZE, 0.0015f, (float)g_debugShadowMapViz };
-    FlushFrameConstants();
-}
-
-void Renderer::BindShadowMap()
-{
-    // Only bind when the shadow pass actually ran and produced depth. If
-    // BeginShadowPass early-returned (bad light state), shadowParams was
-    // already set to disabled by that path — binding the stale shadow
-    // map here would just waste texture slots.
-    if (!m_shadowReady || !m_shadowEnabled)
-        return;
-    m_shadowMapRT.BindPS(m_device, 4);
-    m_samplerShadowPCF.BindPS(m_device, 2);
 }
 
 void Renderer::EnsurePingPongRTs()

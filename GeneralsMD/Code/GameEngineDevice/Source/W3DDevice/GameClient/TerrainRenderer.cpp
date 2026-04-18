@@ -1565,15 +1565,6 @@ void TerrainRenderer::Render(CameraClass* camera, WorldHeightMap* heightMap)
         m_atlasWidth = 2;
         m_atlasHeight = 2;
     }
-    // Cloud shadows are now procedural in the shader — no texture needed.
-    // Honor the Inspector's "Cloud shadows" toggle too; the shader checks
-    // cloudParams.w so this actually turns them off.
-    extern bool g_debugDisableCloudShadows;
-    bool cloudEnabled = TheGlobalData && TheGlobalData->m_useCloudMap
-                     && TheGlobalData->m_timeOfDay != TIME_OF_DAY_NIGHT
-                     && !g_debugDisableCloudShadows;
-    renderer.SetCloudShadowEnabled(cloudEnabled);
-
     // Bind shroud texture for per-pixel fog of war (sampled in PSMain via ApplyShroud)
     if (m_shroudDirty)
         UpdateShroudTexture();
@@ -1673,26 +1664,6 @@ void TerrainRenderer::Render(CameraClass* camera, WorldHeightMap* heightMap)
 
     if (s_loggedFrames < 3)
         ++s_loggedFrames;
-}
-
-void TerrainRenderer::RenderShadowDepth()
-{
-    // Caller (W3DDisplay shadow pass) has already bound the shadow depth
-    // target and the shadow depth shader, and set viewProjection in the
-    // cbuffer to the light-space VP. We must NOT call ApplyW3DCamera here
-    // (which would override lightVP). Just submit the terrain mesh so the
-    // bound vertex shader writes light-space depth values into the shadow
-    // texture. We skip the alpha-blend overlays and the edging passes —
-    // those are tiny detail layers that don't meaningfully cast shadow.
-    if (!m_ready) return;
-    if (m_indexCount == 0) return;
-    auto& renderer = Renderer::Instance();
-    Render::Float4x4 worldIdentity;
-    DirectX::XMStoreFloat4x4(&ToXM(worldIdentity), DirectX::XMMatrixIdentity());
-    // Texture binding is irrelevant for the shadow depth shader (which
-    // doesn't sample), but Draw3D requires *something* in slot 0 — pass
-    // the existing terrain texture so it doesn't unbind the previous one.
-    renderer.Draw3D(m_vertexBuffer, m_indexBuffer, &m_terrainTexture, worldIdentity);
 }
 
 void TerrainRenderer::RenderWater(CameraClass* camera)
@@ -2179,29 +2150,6 @@ void TerrainRenderer::RenderRoads(CameraClass* camera)
     }
 
     renderer.Restore3DState();
-}
-
-// ============================================================================
-// Cloud Shadows - integrated per-pixel in PSMain via ApplyCloudShadow()
-// ============================================================================
-
-void TerrainRenderer::EnsureCloudTextureLoaded()
-{
-    // Cloud shadows are now fully procedural in the shader.
-    // No texture loading needed.
-    m_cloudTextureLoaded = true;
-}
-
-const Texture* TerrainRenderer::GetCloudTexture()
-{
-    // Cloud shadows are procedural — no texture.
-    return nullptr;
-}
-
-void TerrainRenderer::RenderCloudShadows(CameraClass* camera)
-{
-    // Cloud shadows are procedural in PSMain (ApplyCloudShadow).
-    (void)camera;
 }
 
 // ============================================================================

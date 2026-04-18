@@ -219,9 +219,6 @@ void SlowDeathBehavior::beginSlowDeath(const DamageInfo *damageInfo)
 			Drawable *draw = getObject()->getDrawable();
 			if ( draw )
 			{
-				// this object sinks slowly after it dies so don't draw a
-				// floating shadow decal on the ground above it.
-				obj->getDrawable()->setShadowsEnabled(false);
 				draw->setTerrainDecalFadeTarget( 0.0f, -0.2f );
 			}
 

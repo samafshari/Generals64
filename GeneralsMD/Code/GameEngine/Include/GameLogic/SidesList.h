@@ -42,7 +42,6 @@ class DataChunkOutput;
 class BuildListInfo;
 class RenderObjClass;
 class ScriptList;
-class Shadow;
 
 // ----------------------------------------------------------------------------------------------
 /**
@@ -291,7 +290,6 @@ protected:
 
 	// For WorldBuilder use only:
 	RenderObjClass	*m_renderObj;				///< object that renders in the 3d scene.
-	Shadow			*m_shadowObj;				///< object that renders shadows in the 3d scane.
 	Bool				m_selected;					///< True if the obj is selected in the editor.
 
 	// For solo AI use only:
@@ -338,8 +336,6 @@ public:
 
 	void setRenderObj(RenderObjClass *pObj) {m_renderObj = pObj;}
 	RenderObjClass *getRenderObj() {return m_renderObj;}
-	void setShadowObj(Shadow *pObj) {m_shadowObj = pObj;}
-	Shadow *getShadowObj() {return m_shadowObj;}
 
 	void setSelected(Bool sel) {m_selected = sel;}
 	Bool isSelected() {return m_selected;}

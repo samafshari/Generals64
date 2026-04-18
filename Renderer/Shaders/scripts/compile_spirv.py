@@ -73,9 +73,6 @@ ENTRIES: list[tuple[str, str, str | None]] = [
     ("ShaderSharpen", "VSPost",    "PSSharpen"),
     # Tilt shift
     ("ShaderTiltShift", "VSPost",  "PSTiltShift"),
-    # Shadow depth + silhouette bake (same VS, two different pixel outputs)
-    ("ShaderShadowDepth", "VSShadowDepth", "PSShadowDepth"),
-    ("ShaderShadowDepth", "VSShadowDepth", "PSShadowSilhouette"),
     # Volumetric
     ("ShaderVolumetric", "VSPost", "PSVolumetric"),
     # Lens flare

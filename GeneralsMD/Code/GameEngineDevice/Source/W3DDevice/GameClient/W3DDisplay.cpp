@@ -71,7 +71,6 @@ class WorldHeightMap;
 extern WorldHeightMap* GetTerrainHeightMap(); // defined in D3D11Shims.cpp
 class CameraClass;
 extern void RenderTerrainPropsDX11(CameraClass *camera); // defined in D3D11Shims.cpp
-extern void RenderShadowDecalsDX11(CameraClass *camera); // defined in D3D11Shims.cpp
 extern void RenderScorchMarksDX11(CameraClass *camera); // defined in D3D11Shims.cpp
 extern void RenderTerrainTracksDX11(CameraClass *camera); // defined in D3D11Shims.cpp
 extern void RenderBibsDX11(CameraClass *camera); // defined in D3D11Shims.cpp
@@ -102,8 +101,6 @@ bool g_debugDisableWaypoints = false;
 bool g_debugDisableTranslucent = false;
 bool g_debugDisableParticles = false;
 bool g_debugDisableSnow = false;
-bool g_debugDisableShadowDecals = true;
-bool g_debugDisableCloudShadows = false;
 bool g_debugDisableUI = false;
 bool g_debugDisableBegin2DEnd2D = false;  // skip the inner Begin2D/End2D in drawViews
 bool g_debugDisableMultiDrawSkip = false;
@@ -148,44 +145,6 @@ bool g_debugDisableVolumetric = true;         // Volumetric explosion clouds —
 bool g_debugDisableModernAOE = true;         // Modern ground AOE fog — OFF by default
 bool g_debugDisableSurfaceSpec = false;       // Surface specular highlights — ON by default
 bool g_debugDisableDistanceFog = true;       // Distance fog — OFF by default
-// GPU shadow mapping: sun-aligned depth RT sampled per-pixel for soft PCF
-// shadows. Caster list restricted to real gameplay drawables (structures,
-// units, trees) — NEVER the skybox or scenery, which would otherwise fill
-// the shadow map and blanket-darken everything below. Terrain does NOT
-// cast (no self-shadow acne) but DOES receive.
-//
-// Default OFF pending investigation: enabling caused skirmish maps to
-// render all-black on first enable. Likely culprits: (a) sunDir is zero
-// before the time-of-day is applied, making BuildCameraFitLightVP
-// produce a NaN lookAt; (b) shadowParams stays enabled across frames
-// when the pass is skipped, so subsequent frames sample a stale/empty
-// shadow map. User can flip this from Inspector → Debug Draw to
-// investigate.
-bool g_debugDisableShadowMap = true;         // GPU shadow mapping — OFF by default (WIP)
-// Shadow debug visualization mode. Wired into shadowParams.w by EndShadowPass.
-//   0 = normal PCF shadow
-//   1 = visualize raw shadow map depth (red gradient on terrain = casters wrote depth)
-//   2 = force-darken inside light frustum (proves matrix chain covers receivers)
-int  g_debugShadowMapViz    = 0;
-// When true, BuildCameraFitLightVP also emits world-space gizmos through
-// Render::Debug: yellow sun arrow, orange cross at light eye, green
-// crosses at the 8 camera frustum corners, magenta wireframe of the
-// orthographic shadow volume. Flip this from Inspector to see whether
-// the shadow frustum actually encloses your buildings.
-bool g_debugShadowGizmos    = false;
-// Debug viz mode for ApplyBuildingShadow in the shader:
-//   0 = normal soft rect shadow
-//   1 = CYAN flood-fill if any rect registered
-//   2 = MAGENTA ring at radius ~50 around each rect center
-//   3 = RED fill inside each rect (ignores height guard)
-int  g_debugBuildingShadowViz = 0;
-// When non-zero, overrides the game's time-of-day sun direction for the
-// shadow pass ONLY (scene lighting is unchanged). Expressed as an
-// elevation angle above the horizon in degrees. 90 = sun straight up
-// (tiny shadows), 20 = low evening sun (long dramatic shadows). 0 keeps
-// the game's actual time-of-day sun. Useful for testing shadow quality
-// without waiting for a sunset in-game.
-float g_debugShadowSunElevDeg = 0.0f;
 bool g_debugDisableLensFlare = false;         // Procedural lens flare — ON by default
 bool g_debugDisableSmoothParticleFade = false; // Smooth lifetime-based particle alpha — ON by default
 bool g_debugDisableVolumetricTrails = false;  // GPU volumetric smoke trails — ON by default
@@ -763,12 +722,6 @@ void W3DDisplay::draw()
 			// Set time for shader animations (water bump, cloud scroll)
 			renderer.SetTime(static_cast<float>(WW3D::Get_Sync_Time()));
 
-			// GPU shadow map retired in favor of per-caster baked silhouettes
-			// (the original game's approach, see D3D11Shims SilhouetteBaker).
-			// The Renderer-side infrastructure stays in place for A/B testing
-			// via Inspector but runs as a no-op here by default.
-			renderer.SetShadowEnabled(false);
-
 			// depth is cleared in BeginFrame — no extra clear needed
 			{
 			LIVE_PERF_SCOPE("W3DDisplay::terrainPasses");
@@ -780,8 +733,6 @@ void W3DDisplay::draw()
 			renderer.Restore3DState();
 			auto t2 = perfNow();
 			if (!g_debugDisableRoads)   terrainRenderer.RenderRoads(camera);
-			renderer.Restore3DState();
-			if (!g_debugDisableCloudShadows) terrainRenderer.RenderCloudShadows(camera);
 			renderer.Restore3DState();
 			auto t3 = perfNow();
 			if (!g_debugDisableBridges) terrainRenderer.RenderBridges(camera);
@@ -840,20 +791,6 @@ void W3DDisplay::draw()
 		if (!g_debugDisableTranslucent)
 			Render::ModelRenderer::Instance().FlushTranslucent();
 		renderer.Restore3DState();
-	}
-
-	// Render shadow decals on terrain under units. This is the original
-	// Generals projected-shadow system — blob/outline decals that conform to
-	// terrain height under each unit/building. Gated only on the dev disable
-	// flag; the user-facing "2D Shadows" option used to gate this too but in
-	// practice its LOD-dependent default was turning shadows off entirely for
-	// most setups. We now render shadows unconditionally when the debug
-	// toggle is off (the options checkbox still writes m_useShadowDecals for
-	// save-file compatibility, it just no longer hides shadows at render).
-	if (!g_debugDisableShadowDecals && camera && TheGlobalData)
-	{
-		LIVE_PERF_SCOPE("W3DDisplay::shadowDecals");
-		RenderShadowDecalsDX11(camera);
 	}
 
 	// --- Occluded-unit silhouettes ---

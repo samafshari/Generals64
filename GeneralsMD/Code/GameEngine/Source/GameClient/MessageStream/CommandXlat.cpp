@@ -4460,22 +4460,6 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 		//------------------------------------------------------------------------------- DEMO MESSAGES
 		//-----------------------------------------------------------------------------------------
-		case GameMessage::MSG_META_DEMO_TOGGLE_SHADOW_VOLUMES:
-		{
-			TheWritableGlobalData->m_useShadowVolumes = !TheGlobalData->m_useShadowVolumes;
-			TheWritableGlobalData->m_useShadowDecals = !TheGlobalData->m_useShadowDecals;
-
-			if (TheWritableGlobalData->m_useShadowVolumes)
-				TheInGameUI->messageNoFormat( TheGameText->FETCH_OR_SUBSTITUTE("GUI:DebugShadowVolumesOn", L"Shadow Volumes is ON") );
-			else
-				TheInGameUI->messageNoFormat( TheGameText->FETCH_OR_SUBSTITUTE("GUI:DebugShadowVolumesOff", L"Shadow Volumes is OFF") );
-
-			disp = DESTROY_MESSAGE;
-			break;
-		}
-
-		//------------------------------------------------------------------------------- DEMO MESSAGES
-		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_DEMO_TOGGLE_FOGOFWAR:
 		{
 			TheWritableGlobalData->m_fogOfWarOn = !TheGlobalData->m_fogOfWarOn;

@@ -84,15 +84,10 @@ extern bool g_debugDisableScorch;
 extern bool g_debugDisableTracks;
 extern bool g_debugDisableWaypoints;
 extern bool g_debugDisableShroud;
-extern bool g_debugDisableCloudShadows;
 extern bool g_debugDisableModels;
 extern bool g_debugDisableTranslucent;
 extern bool g_debugDisableParticles;
 extern bool g_debugDisableSnow;
-extern bool g_debugDisableShadowDecals;
-extern bool g_debugDisableShadowMap;
-extern bool g_debugShadowGizmos;
-extern int  g_debugBuildingShadowViz;
 extern bool g_debugDisableWater;
 extern bool g_debugDisableReflection;
 extern bool g_debugDisableUI;
@@ -2603,13 +2598,10 @@ void DrawRenderTogglesPanel()
                 {"Vehicle tracks",      &g_debugDisableTracks},
                 {"Waypoints",           &g_debugDisableWaypoints},
                 {"Shroud (fog of war)", &g_debugDisableShroud},
-                {"Cloud shadows",       &g_debugDisableCloudShadows},
                 {"Models / Units",      &g_debugDisableModels},
                 {"Translucent pass",    &g_debugDisableTranslucent},
                 {"Particles",           &g_debugDisableParticles},
                 {"Snow",                &g_debugDisableSnow},
-                {"Shadow decals",       &g_debugDisableShadowDecals},
-                {"GPU shadow map",      &g_debugDisableShadowMap},
                 {"Water",               &g_debugDisableWater},
                 {"Water reflections",   &g_debugDisableReflection},
                 {"UI (windows + HUD)",  &g_debugDisableUI},
@@ -2620,21 +2612,6 @@ void DrawRenderTogglesPanel()
                 {"FSR video upscale",   &g_debugDisableFSRVideo},
             };
             for (const Item& it : passes) DrawItem(it, s_filter);
-            ImGui::Separator();
-            ImGui::Checkbox("Shadow decal gizmos (green=with robj, yellow=scripted)",
-                            &g_debugShadowGizmos);
-            ImGui::TextDisabled("Draws a ground rectangle + X at each caster's shadow stamp site.");
-
-            ImGui::Separator();
-            ImGui::TextDisabled("Building-shadow shader debug:");
-            ImGui::RadioButton("Normal",    &g_debugBuildingShadowViz, 0); ImGui::SameLine();
-            ImGui::RadioButton("Cyan fill", &g_debugBuildingShadowViz, 1); ImGui::SameLine();
-            ImGui::RadioButton("Magenta rings", &g_debugBuildingShadowViz, 2); ImGui::SameLine();
-            ImGui::RadioButton("Red rects", &g_debugBuildingShadowViz, 3);
-            ImGui::TextDisabled(
-                "Cyan fill: if entire terrain turns cyan, cbuffer upload works.\n"
-                "Magenta rings: each rect center gets a 50-unit circle.\n"
-                "Red rects: fills each rotated rect bright red.");
             ImGui::EndTabItem();
         }
 

@@ -58,7 +58,6 @@ public:
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
 class Thing;
 class RenderObjClass;
-class Shadow;
 class TerrainTracksRenderObjClass;
 class HAnimClass;
 enum GameLODLevel : Int;
@@ -352,9 +351,6 @@ public:
 
 	/// the draw method
 	virtual void doDrawModule(const Matrix3D* transformMtx);
-	virtual void setShadowsEnabled(Bool enable);
-	virtual void releaseShadows();	///< frees all shadow resources used by this module - used by Options screen.
-	virtual void allocateShadows(); ///< create shadow resources if not already present. Used by Options screen.
 
 #if defined(RTS_DEBUG)
 	virtual void getRenderCost(RenderCost & rc) const;  ///< estimates the render cost of this draw module
@@ -421,7 +417,6 @@ public:
 	virtual ObjectDrawInterface* getObjectDrawInterface() { return this; }
 	virtual const ObjectDrawInterface* getObjectDrawInterface() const { return this; }
 
-	///@todo: I had to make this public because W3DDevice needs access for casting shadows -MW
 	RenderObjClass *getRenderObject() { return m_renderObject; }
 	virtual Bool updateBonesForClientParticleSystems();///< this will reposition particle systems on the fly ML
 
@@ -497,10 +492,7 @@ private:
 	WeaponRecoilInfoVec						m_weaponRecoilInfoVec[WEAPONSLOT_COUNT];
 	Bool													m_needRecalcBoneParticleSystems;
 	Bool													m_fullyObscuredByShroud;
-	Bool													m_shadowEnabled;	///< cached state of shadow.  Used to determine if shadows should be enabled via options screen.
 	RenderObjClass*								m_renderObject;										///< W3D Render object for this drawable
-	Shadow*												m_shadow;													///< Updates/Renders shadows of this object
-	Shadow*												m_terrainDecal;
 	TerrainTracksRenderObjClass*	m_trackRenderObject;							///< This is rendered under object
 	ParticleSystemIDVec						m_particleSystemIDs;							///< The ID numbers of the particle systems currently running.
 	std::vector<ModelConditionInfo::HideShowSubObjInfo>		m_subObjectVec;

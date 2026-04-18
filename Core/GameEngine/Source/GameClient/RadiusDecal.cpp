@@ -16,16 +16,7 @@
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-////////////////////////////////////////////////////////////////////////////////
-//																																						//
-//  (c) 2001-2003 Electronic Arts Inc.																				//
-//																																						//
-////////////////////////////////////////////////////////////////////////////////
-
-// RadiusDecal.cpp ///////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////
-
-#include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+#include "PreRTS.h"
 
 #define DEFINE_SHADOW_NAMES
 
@@ -50,7 +41,7 @@ RadiusDecalTemplate::RadiusDecalTemplate() :
 }
 
 // ------------------------------------------------------------------------------------------------
-void RadiusDecalTemplate::createRadiusDecal(const Coord3D& pos, Real radius, const Player* owningPlayer, RadiusDecal& result) const
+void RadiusDecalTemplate::createRadiusDecal(const Coord3D& /*pos*/, Real radius, const Player* owningPlayer, RadiusDecal& result) const
 {
 	result.clear();
 
@@ -63,39 +54,13 @@ void RadiusDecalTemplate::createRadiusDecal(const Coord3D& pos, Real radius, con
 	if (m_name.isEmpty() || radius <= 0.0f)
 		return;
 
-	// it is now considered nonEmpty, regardless of the state of m_decal, etc
 	result.m_empty = false;
-
-	if (!m_onlyVisibleToOwningPlayer ||
-			owningPlayer->getPlayerIndex() == ThePlayerList->getLocalPlayer()->getPlayerIndex())
-	{
-		Shadow::ShadowTypeInfo decalInfo;
-		decalInfo.allowUpdates = FALSE;										// shadow texture will never update
-		decalInfo.allowWorldAlign = TRUE;									// shadow image will wrap around world objects
-		decalInfo.m_type = m_shadowType;
-		strlcpy(decalInfo.m_ShadowName, m_name.str(), ARRAY_SIZE(decalInfo.m_ShadowName));		// name of your texture
-		decalInfo.m_sizeX = radius*2;									// world space dimensions
-		decalInfo.m_sizeY = radius*2;									// world space dimensions
-
-		result.m_decal = TheProjectedShadowManager->addDecal(&decalInfo);
-		if (result.m_decal)
-		{
-			result.m_decal->setAngle(0.0f);
-			result.m_decal->setColor(m_color == 0 ? owningPlayer->getPlayerColor() : m_color);
-			result.m_decal->setPosition(pos.x, pos.y, pos.z);
-			result.m_template = this;
-		}
-		else
-		{
-			DEBUG_CRASH(("Unable to add decal %s",decalInfo.m_ShadowName));
-		}
-	}
+	result.m_template = this;
 }
 
 // ------------------------------------------------------------------------------------------------
 void RadiusDecalTemplate::xferRadiusDecalTemplate( Xfer *xfer )
 {
-  // version
   XferVersion currentVersion = 1;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
@@ -130,15 +95,13 @@ void RadiusDecalTemplate::xferRadiusDecalTemplate( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 RadiusDecal::RadiusDecal() :
 	m_template(nullptr),
-	m_decal(nullptr),
 	m_empty(true)
 {
 }
 
 // ------------------------------------------------------------------------------------------------
-RadiusDecal::RadiusDecal(const RadiusDecal& that) :
+RadiusDecal::RadiusDecal(const RadiusDecal& /*that*/) :
 	m_template(nullptr),
-	m_decal(nullptr),
 	m_empty(true)
 {
 	DEBUG_CRASH(("not fully implemented"));
@@ -150,9 +113,6 @@ RadiusDecal& RadiusDecal::operator=(const RadiusDecal& that)
 	if (this != &that)
 	{
 		m_template = nullptr;
-		if (m_decal)
-			m_decal->release();
-		m_decal = nullptr;
 		m_empty = true;
 		DEBUG_CRASH(("not fully implemented"));
 	}
@@ -162,7 +122,6 @@ RadiusDecal& RadiusDecal::operator=(const RadiusDecal& that)
 // ------------------------------------------------------------------------------------------------
 void RadiusDecal::xferRadiusDecal( Xfer *xfer )
 {
-	/// @todo implement me
 	if (xfer->getXferMode() == XFER_LOAD)
 	{
 		clear();
@@ -173,11 +132,6 @@ void RadiusDecal::xferRadiusDecal( Xfer *xfer )
 void RadiusDecal::clear()
 {
 	m_template = nullptr;
-	if (m_decal)
-	{
-		m_decal->release();
-	}
-	m_decal = nullptr;
 	m_empty = true;
 }
 
@@ -190,40 +144,13 @@ RadiusDecal::~RadiusDecal()
 // ------------------------------------------------------------------------------------------------
 void RadiusDecal::update()
 {
-	if (m_decal && m_template)
-	{
-		UnsignedInt now = TheGameLogic->getFrame();
-		Real theta = (2*PI) * (Real)(now % m_template->m_opacityThrobTime) / (Real)m_template->m_opacityThrobTime;
-		Real percent = 0.5f * (Sin(theta) + 1.0f);
-		Int opac;
-		if( TheGameLogic->getDrawIconUI() )
-		{
-			opac = REAL_TO_INT((m_template->m_minOpacity + percent * (m_template->m_maxOpacity - m_template->m_minOpacity)) * 255.0f);
-		}
-		else
-		{
-			//Scripts turned this off, so don't show them!
-			opac = 0;
-		}
-		m_decal->setOpacity(opac);
-	}
 }
 
-
-
-void RadiusDecal::setOpacity( Real o )
+void RadiusDecal::setOpacity( Real /*o*/ )
 {
-	if (m_decal)
-	{
-		m_decal->setOpacity(REAL_TO_INT(255.0f * o));
-	}
 }
 
 // ------------------------------------------------------------------------------------------------
-void RadiusDecal::setPosition(const Coord3D& pos)
+void RadiusDecal::setPosition(const Coord3D& /*pos*/)
 {
-	if (m_decal)
-	{
-		m_decal->setPosition(pos.x, pos.y, pos.z);	//world space position of center of decal
-	}
 }

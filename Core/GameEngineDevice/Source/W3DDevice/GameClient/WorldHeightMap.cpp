@@ -51,7 +51,6 @@
 #include "W3DDevice/GameClient/TileData.h"
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "W3DDevice/GameClient/TerrainTex.h"
-#include "W3DDevice/GameClient/W3DShadow.h"
 
 #include "Common/file.h"
 
@@ -96,7 +95,6 @@ MapObject::MapObject(Coord3D loc, AsciiString name, Real angle, Int flags, const
 	m_color = (0xff)<<8; // Bright green.
 	m_flags = flags;
 	m_renderObj = nullptr;
-	m_shadowObj = nullptr;
 	m_runtimeFlags = 0;
 	// Note - do NOT set TheKey_objectSelectable on creation - allow it to follow the .ini value unless specified by user action.  jba. [3/20/2003]
 	if (props)
@@ -123,7 +121,6 @@ MapObject::MapObject(Coord3D loc, AsciiString name, Real angle, Int flags, const
 MapObject::~MapObject()
 {
 	setRenderObj(nullptr);
-	setShadowObj(nullptr);
 	if (m_nextMapObject) {
 		MapObject *cur = m_nextMapObject;
 		MapObject *next;
@@ -813,10 +810,7 @@ Bool WorldHeightMap::ParseLightingDataChunk(DataChunkInput &file, DataChunkInfo 
 			}
 		}
 		if (!file.atEndOfChunk()) {
-			UnsignedInt shadowColor = file.readInt();
-			if (TheW3DShadowManager) {
-				TheW3DShadowManager->setShadowColor(shadowColor);
-			}
+			file.readInt(); // shadow color (legacy data field, unused)
 		}
 	DEBUG_ASSERTCRASH(file.atEndOfChunk(), ("Unexpected data left over."));
 	return true;

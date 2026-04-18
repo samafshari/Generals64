@@ -77,10 +77,6 @@ static const char* g_shader2D =
 #include "VulkanHLSL/Shader2D.hlsl.inc"
 ;
 
-static const char* g_shaderShadowDepth =
-#include "VulkanHLSL/ShaderShadowDepth.hlsl.inc"
-;
-
 static const char* g_shaderDebug =
 #include "VulkanHLSL/ShaderDebug.hlsl.inc"
 ;

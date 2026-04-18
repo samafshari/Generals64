@@ -585,18 +585,6 @@ void GameLODManager::applyStaticLODLevel(StaticGameLODLevel level)
 
 		TheWritableGlobalData->m_textureReductionFactor = requestedTextureReduction;
 
-		//Check if shadow state changed
-		if (m_currentStaticLOD == STATIC_GAME_LOD_UNKNOWN	||
-			lodInfo->m_useShadowVolumes != prevLodInfo->m_useShadowVolumes ||
-			lodInfo->m_useShadowDecals != prevLodInfo->m_useShadowDecals)
-		{
-			if (TheGameClient)
-			{
-				TheGameClient->releaseShadows();	//free all shadows
-				TheGameClient->allocateShadows();	//allocate those shadows that are enabled.
-			}
-		}
-
 		TheWritableGlobalData->m_useCloudMap=lodInfo->m_useCloudMap;
 		TheWritableGlobalData->m_useLightMap=lodInfo->m_useLightMap;
 		TheWritableGlobalData->m_showSoftWaterEdge=lodInfo->m_showSoftWaterEdge;
