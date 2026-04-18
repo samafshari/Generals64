@@ -61,6 +61,7 @@
 #include "W3DDevice/GameClient/W3DAssetManager.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/W3DScene.h"
+#include "W3DDevice/GameClient/W3DShadow.h"
 #include "W3DDevice/GameClient/W3DTerrainTracks.h"
 #include "W3DDevice/GameClient/WorldHeightMap.h"
 #include "WW3D2/hanim.h"
@@ -1803,6 +1804,8 @@ W3DModelDraw::W3DModelDraw(Thing *thing, const ModuleData* moduleData) : DrawMod
 	m_hexColor = 0;
 	m_renderObject = nullptr;
 	m_trackRenderObject = nullptr;
+	m_shadow = nullptr;
+	m_shadowEnabled = TRUE;
 	m_whichAnimInCurState = -1;
 	m_nextState = nullptr;
 	m_nextStateAnimLoopDuration = NO_NEXT_DURATION;
@@ -1908,6 +1911,9 @@ void W3DModelDraw::setHidden(Bool hidden)
 	if (m_renderObject)
 		m_renderObject->Set_Hidden(hidden);
 
+	if (m_shadow)
+		m_shadow->enableShadowRender(!hidden);
+
 	if (m_trackRenderObject && hidden)
 	{	const Coord3D* pos = getDrawable()->getPosition();
 		m_trackRenderObject->addCapEdgeToTrack(pos->x,pos->y);
@@ -1971,8 +1977,64 @@ void W3DModelDraw::setFullyObscuredByShroud(Bool fullyObscured)
 	if (m_fullyObscuredByShroud != fullyObscured)
 	{
 		m_fullyObscuredByShroud = fullyObscured;
+
+		if (m_shadow)
+			m_shadow->enableShadowInvisible(m_fullyObscuredByShroud);
+
 		doStartOrStopParticleSys();
 	}
+}
+
+//-------------------------------------------------------------------------------------------------
+// Options-screen shadow toggle: drop this module's shadow back to the manager.
+void W3DModelDraw::releaseShadows(void)
+{
+	if (m_shadow)
+	{
+		m_shadow->release();
+		m_shadow = nullptr;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+// Options-screen shadow toggle: (re)create a shadow from the ThingTemplate
+// if one isn't already attached. Skipped entirely when the template's
+// ShadowType is SHADOW_NONE.
+void W3DModelDraw::allocateShadows(void)
+{
+	const ThingTemplate* tmplate = getDrawable()->getTemplate();
+
+	if (m_shadow == nullptr
+		&& m_renderObject != nullptr
+		&& TheW3DShadowManager != nullptr
+		&& tmplate->getShadowType() != SHADOW_NONE)
+	{
+		Shadow::ShadowTypeInfo shadowInfo;
+		strncpy(shadowInfo.m_ShadowName, tmplate->getShadowTextureName().str(), sizeof(shadowInfo.m_ShadowName) - 1);
+		shadowInfo.m_ShadowName[sizeof(shadowInfo.m_ShadowName) - 1] = '\0';
+		shadowInfo.allowUpdates		= FALSE;
+		shadowInfo.allowWorldAlign	= TRUE;
+		shadowInfo.m_type			= (ShadowType)tmplate->getShadowType();
+		shadowInfo.m_sizeX			= tmplate->getShadowSizeX();
+		shadowInfo.m_sizeY			= tmplate->getShadowSizeY();
+		shadowInfo.m_offsetX		= tmplate->getShadowOffsetX();
+		shadowInfo.m_offsetY		= tmplate->getShadowOffsetY();
+		m_shadow = TheW3DShadowManager->addShadow(m_renderObject, &shadowInfo);
+		if (m_shadow)
+		{
+			m_shadow->enableShadowInvisible(m_fullyObscuredByShroud);
+			if (m_renderObject->Is_Hidden() || !m_shadowEnabled)
+				m_shadow->enableShadowRender(FALSE);
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+void W3DModelDraw::setShadowsEnabled(Bool enable)
+{
+	if (m_shadow)
+		m_shadow->enableShadowRender(enable);
+	m_shadowEnabled = enable;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2763,6 +2825,15 @@ void W3DModelDraw::nukeCurrentRender(Matrix3D* xform)
 	// this needs to be "dirtied" so that the new pausing of the animation will be triggered.
 	m_pauseAnimation = false;
 
+	// Releasing the render object means the shadow it referenced is
+	// about to point at nothing — drop it here and let the new shadow
+	// be created in setModelState() once the new render object exists.
+	if (m_shadow)
+	{
+		m_shadow->release();
+		m_shadow = nullptr;
+	}
+
 	// remove existing render object from the scene
 	if (m_renderObject)
 	{
@@ -3124,6 +3195,29 @@ void W3DModelDraw::setModelState(const ModelConditionInfo* newState)
 				}
    		}
 
+			// Rebuild the shadow for the freshly-created render object.
+			// Must come before the isDrawableEffectivelyHidden() check so
+			// that new shadow's render-enable state can be dimmed below.
+			if (m_renderObject && TheW3DShadowManager && tmplate->getShadowType() != SHADOW_NONE)
+			{
+				Shadow::ShadowTypeInfo shadowInfo;
+				strncpy(shadowInfo.m_ShadowName, tmplate->getShadowTextureName().str(), sizeof(shadowInfo.m_ShadowName) - 1);
+				shadowInfo.m_ShadowName[sizeof(shadowInfo.m_ShadowName) - 1] = '\0';
+				shadowInfo.allowUpdates		= FALSE;
+				shadowInfo.allowWorldAlign	= TRUE;
+				shadowInfo.m_type			= (ShadowType)tmplate->getShadowType();
+				shadowInfo.m_sizeX			= tmplate->getShadowSizeX();
+				shadowInfo.m_sizeY			= tmplate->getShadowSizeY();
+				shadowInfo.m_offsetX		= tmplate->getShadowOffsetX();
+				shadowInfo.m_offsetY		= tmplate->getShadowOffsetY();
+				m_shadow = TheW3DShadowManager->addShadow(m_renderObject, &shadowInfo, draw);
+				if (m_shadow)
+				{
+					m_shadow->enableShadowInvisible(m_fullyObscuredByShroud);
+					m_shadow->enableShadowRender(m_shadowEnabled);
+				}
+			}
+
 			// add render object to our scene
 			if (W3DDisplay::m_3DScene != nullptr)
 				W3DDisplay::m_3DScene->Add_Render_Object(m_renderObject);
@@ -3136,6 +3230,9 @@ void W3DModelDraw::setModelState(const ModelConditionInfo* newState)
 			if (draw->isDrawableEffectivelyHidden())
 			{
 				m_renderObject->Set_Hidden(TRUE);
+				if (m_shadow)
+					m_shadow->enableShadowRender(FALSE);
+				m_shadowEnabled = FALSE;
 			}
 
 			//

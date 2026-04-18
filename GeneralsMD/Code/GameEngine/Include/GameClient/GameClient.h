@@ -118,6 +118,10 @@ public:
 	void updateFakeDrawables();
 
 	virtual void removeFromRayEffects( Drawable *draw );  ///< remove the drawable from the ray effect system if present
+
+	void releaseShadows(void);		///< free shadows on every drawable — Options screen toggle
+	void allocateShadows(void);		///< (re)create shadows on every drawable — Options screen toggle
+
 	virtual void getRayEffectData( Drawable *draw, RayEffectData *effectData );  ///< get ray effect data for a drawable
 	virtual void createRayEffectByTemplate( const Coord3D *start, const Coord3D *end, const ThingTemplate* tmpl ) = 0;  ///< create effect needing start and end location
 

@@ -913,6 +913,32 @@ void Drawable::setFullyObscuredByShroud(Bool fullyObscured)
 }
 
 //-------------------------------------------------------------------------------------------------
+void Drawable::setShadowsEnabled(Bool enable)
+{
+	if (enable)
+		setDrawableStatus(DRAWABLE_STATUS_SHADOWS);
+	else
+		clearDrawableStatus(DRAWABLE_STATUS_SHADOWS);
+
+	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
+		(*dm)->setShadowsEnabled(enable);
+}
+
+//-------------------------------------------------------------------------------------------------
+void Drawable::releaseShadows(void)
+{
+	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
+		(*dm)->releaseShadows();
+}
+
+//-------------------------------------------------------------------------------------------------
+void Drawable::allocateShadows(void)
+{
+	for (DrawModule** dm = getDrawModules(); *dm; ++dm)
+		(*dm)->allocateShadows();
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Set drawable's "selected" status, if not already set.  Also update running
  * total count of selected drawables. */
 //-------------------------------------------------------------------------------------------------

@@ -71,6 +71,13 @@ public:
 
 	virtual void doDrawModule(const Matrix3D* transformMtx) = 0;
 
+	// Shadow lifecycle — empty default so draw modules that don't emit
+	// shadows (laser, rope, tracer, etc.) don't need stub overrides.
+	// W3DModelDraw overrides all three with real behaviour.
+	virtual void setShadowsEnabled(Bool /*enable*/) {}
+	virtual void releaseShadows(void) {}
+	virtual void allocateShadows(void) {}
+
 #if defined(RTS_DEBUG)
 	virtual void getRenderCost(RenderCost & rc) const { };  ///< estimates the render cost of this draw module
 #endif

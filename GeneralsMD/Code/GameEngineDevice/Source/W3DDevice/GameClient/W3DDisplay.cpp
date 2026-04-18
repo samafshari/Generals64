@@ -42,6 +42,7 @@
 #include "GameLogic/Object.h"
 #include "Lib/BaseType.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"
+#include "W3DDevice/GameClient/W3DShadow.h"
 #include "Renderer.h"
 #include "GPUParticles.h"
 #include "Inspector/Inspector.h"
@@ -219,6 +220,15 @@ W3DDisplay::~W3DDisplay()
 	// destroys the device.
 	Inspector::Shutdown();
 
+	// Shadow manager holds D3D resources — tear it down before the
+	// Renderer is shut down.
+	if (TheW3DShadowManager)
+	{
+		TheW3DShadowManager->ReleaseResources();
+		delete TheW3DShadowManager;
+		TheW3DShadowManager = nullptr;
+	}
+
 	if (m_assetManager)
 	{
 		DestroyWW3DAssetManagerInstance();
@@ -344,6 +354,15 @@ void W3DDisplay::init()
 		TheGameLODManager->setStaticLODLevel(TheGameLODManager->getRecommendedStaticLODLevel());
 	}
 
+	// Bring up the shadow manager. Must come after Renderer::Init so that
+	// D3D resources exist, and after GlobalData is populated (its ctor
+	// reads m_terrainLightPos for the initial sun position).
+	if (!TheW3DShadowManager)
+	{
+		TheW3DShadowManager = NEW W3DShadowManager;
+		TheW3DShadowManager->init();
+	}
+
 	m_initialized = true;
 	if (TheGlobalData->m_displayDebug)
 	{
@@ -366,6 +385,10 @@ void W3DDisplay::reset()
 	Display::reset();
 	m_lightPulses.clear();
 	m_lastLightUpdateTime = 0;
+
+	// Per-map reset: drop all shadows belonging to the previous map.
+	if (TheW3DShadowManager)
+		TheW3DShadowManager->Reset();
 }
 
 // ============================================================================
@@ -779,6 +802,21 @@ void W3DDisplay::draw()
 			TheTacticalView);
 	}
 
+	// Raise the scene flag so the two DoShadows() hooks know they're
+	// running inside a frame that should emit shadows.
+	if (TheW3DShadowManager)
+		TheW3DShadowManager->queueShadows(TRUE);
+
+	// Projected shadow decals — render before opaque meshes so they stamp
+	// onto the already-drawn terrain and are then overdrawn by opaque
+	// object geometry.
+	if (camera && TheW3DShadowManager)
+	{
+		RenderInfoClass rinfo(*camera);
+		DoShadows(rinfo, FALSE);
+		renderer.Restore3DState();
+	}
+
 	// Draw all views of the world (calls drawViews which triggers view rendering)
 	{
 		LIVE_PERF_SCOPE("W3DDisplay::drawViews");
@@ -790,6 +828,15 @@ void W3DDisplay::draw()
 		LIVE_PERF_SCOPE("W3DDisplay::flushTranslucent");
 		if (!g_debugDisableTranslucent)
 			Render::ModelRenderer::Instance().FlushTranslucent();
+		renderer.Restore3DState();
+	}
+
+	// Volumetric stencil shadows — render after opaque/translucent meshes
+	// so the depth buffer contains all potential shadow occluders.
+	if (camera && TheW3DShadowManager)
+	{
+		RenderInfoClass rinfo(*camera);
+		DoShadows(rinfo, TRUE);
 		renderer.Restore3DState();
 	}
 
@@ -1874,6 +1921,14 @@ void W3DDisplay::setTimeOfDay(TimeOfDay tod)
 
 	if (lightCount > 0)
 		renderer.SetDirectionalLights(lightDirs, lightColors, lightCount);
+
+	// Propagate the sun direction into the shadow manager so its
+	// cached sun position follows time-of-day transitions.
+	if (TheW3DShadowManager)
+	{
+		TheW3DShadowManager->setTimeOfDay(tod);
+		TheW3DShadowManager->invalidateCachedLightPositions();
+	}
 }
 
 // ============================================================================

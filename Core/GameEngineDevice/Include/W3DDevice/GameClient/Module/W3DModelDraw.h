@@ -32,6 +32,7 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "Common/ModelState.h"
 #include "Common/DrawModule.h"
+#include "GameClient/Shadow.h"
 #ifdef BRUTAL_TIMING_HACK // hack for collecting model timing info.  jba.
 class RenderObjClass {
 public:
@@ -360,6 +361,10 @@ public:
 	virtual void setFullyObscuredByShroud(Bool fullyObscured);
 	virtual void setTerrainDecal(TerrainDecalType type);
 
+	virtual void setShadowsEnabled(Bool enable);
+	virtual void releaseShadows(void);		///< release any shadow held by this module.
+	virtual void allocateShadows(void);		///< add a shadow to TheW3DShadowManager based on this module's ThingTemplate.
+
 	virtual Bool isVisible() const;
 	virtual void reactToTransformChange(const Matrix3D* oldMtx, const Coord3D* oldPos, Real oldAngle);
 	virtual void reactToGeometryChange() { }
@@ -494,6 +499,8 @@ private:
 	Bool													m_fullyObscuredByShroud;
 	RenderObjClass*								m_renderObject;										///< W3D Render object for this drawable
 	TerrainTracksRenderObjClass*	m_trackRenderObject;							///< This is rendered under object
+	Shadow*												m_shadow;												///< shadow owned by TheW3DShadowManager for this model
+	Bool													m_shadowEnabled;								///< latched render-enable state for m_shadow
 	ParticleSystemIDVec						m_particleSystemIDs;							///< The ID numbers of the particle systems currently running.
 	std::vector<ModelConditionInfo::HideShowSubObjInfo>		m_subObjectVec;
 	Bool													m_hideHeadlights;
