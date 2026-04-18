@@ -522,19 +522,32 @@ void GameClient::update()
 	// create the FRAME_TICK message
 	GameMessage *frameMsg = TheMessageStream->appendMessage( GameMessage::MSG_FRAME_TICK );
 	frameMsg->appendTimestampArgument( getFrame() );
-	// Skip EA logo and Sizzle intro movies entirely - go straight to shell.
-	// The FFmpeg-based video path was getting stuck trying to play EA_LOGO.bik
-	// because the Bink decoder can't always read these legacy files; since the
-	// user explicitly did not want these movies anyway, just flag the intro as
-	// done on the first frame.
-	if(TheGlobalData->m_playIntro)
+	static Bool playSizzle = FALSE;
+	// We need to show the movie first.
+	if(TheGlobalData->m_playIntro && !TheDisplay->isMoviePlaying())
 	{
+		if(TheGameLODManager && TheGameLODManager->didMemPass())
+			TheDisplay->playLogoMovie("EALogoMovie", 5000, 3000);
+		else
+			TheDisplay->playLogoMovie("EALogoMovie640", 5000, 3000);
 		TheWritableGlobalData->m_playIntro = FALSE;
 		TheWritableGlobalData->m_afterIntro = TRUE;
+		playSizzle = TRUE;
 	}
 
+	//Initial Game Codition.  We must show the movie first and then we can display the shell
 	if(TheGlobalData->m_afterIntro && !TheDisplay->isMoviePlaying())
 	{
+		if( playSizzle && TheGlobalData->m_playSizzle )
+		{
+			TheWritableGlobalData->m_allowExitOutOfMovies = TRUE;
+			if(TheGameLODManager && TheGameLODManager->didMemPass())
+				TheDisplay->playMovie("Sizzle");
+			else
+				TheDisplay->playMovie("Sizzle640");
+			playSizzle = FALSE;
+		}
+		else
 		{
 			TheWritableGlobalData->m_breakTheMovie = TRUE;
 			TheWritableGlobalData->m_allowExitOutOfMovies = TRUE;
