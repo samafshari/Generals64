@@ -81,7 +81,6 @@
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/AISkirmishPlayer.h"
 #include "GameLogic/ExperienceTracker.h"
-#include "GameLogic/GameTelemetry.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/Scripts.h"
 #include "GameLogic/PartitionManager.h"
@@ -1564,11 +1563,6 @@ void Player::onUnitCreated( Object *factory, Object *unit )
 	// increment our scorekeeper
 	m_scoreKeeper.addObjectBuilt(unit);
 
-	// Per-owner telemetry bucket (mirrors the scorekeeper filter implicitly:
-	// telemetry bumps on the full unit set, the server can narrow if needed).
-	if (TheGameTelemetry)
-		TheGameTelemetry->onObjectBuiltBy(this, unit);
-
 	// ai notification callback
 	if( m_ai )
 		m_ai->onUnitProduced( factory, unit );
@@ -1656,11 +1650,6 @@ void Player::onStructureConstructionComplete( Object *builder, Object *structure
 	if (isRebuild == FALSE) {
 		m_scoreKeeper.addObjectBuilt(structure);
 		m_scoreKeeper.addMoneySpent(structure->getTemplate()->calcCostToBuild(this));
-
-		// Per-owner telemetry bucket (skip rebuilds so reclaiming rubble
-		// doesn't inflate build counts, matching the scorekeeper's rule).
-		if (TheGameTelemetry)
-			TheGameTelemetry->onObjectBuiltBy(this, structure);
 	}
 
 	structure->friend_adjustPowerForPlayer(TRUE);

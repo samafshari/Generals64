@@ -62,7 +62,6 @@
 #include "GameLogic/ExperienceTracker.h"
 #include "GameLogic/FiringTracker.h"
 #include "GameLogic/GameLogic.h"
-#include "GameLogic/GameTelemetry.h"
 #include "GameLogic/Locomotor.h"
 
 #include "GameLogic/Module/AIUpdate.h"
@@ -2967,8 +2966,6 @@ void Object::scoreTheKill( const Object *victim )
 	if (victimController)
 	{
 		victimController->getScoreKeeper()->addObjectLost(victim);
-		if (TheGameTelemetry)
-			TheGameTelemetry->onObjectLostBy(victimController, victim);
 	}
 
 	Relationship r = getRelationship(victim);
@@ -2986,8 +2983,6 @@ void Object::scoreTheKill( const Object *victim )
 		controller->getScoreKeeper()->addObjectDestroyed(victim);
 		controller->addSkillPointsForKill(this, victim);
 		controller->doBountyForKill(this, victim);
-		if (TheGameTelemetry)
-			TheGameTelemetry->onObjectDestroyedBy(controller, victim);
 	}
 
 	// Now handle experience, if we can gain any
@@ -4597,12 +4592,6 @@ void Object::onCapture( Player *oldOwner, Player *newOwner )
 
 	// this gets the new owner some points
 	newOwner->getScoreKeeper()->addObjectCaptured(this);
-
-	// Per-owner telemetry: distinguishes structure captures from vehicle
-	// hijacks internally, and attributes both perspectives (the capturer
-	// and the previous controller).
-	if (TheGameTelemetry)
-		TheGameTelemetry->onObjectCapturedBy(newOwner, oldOwner, this);
 
 	// rip through the behavior modules and call the onCapture for any modules that care
 	for( BehaviorModule **module = m_behaviors; *module; ++module )

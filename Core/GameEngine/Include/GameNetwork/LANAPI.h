@@ -424,10 +424,14 @@ protected:
 	// in CosmeticsCache, keyed by authenticated user id.
 	static const char RELAY_TYPE_COSMETICS   = 8;
 
+public:
 	Bool relayConnect();
 	void relayDisconnect();
 	Bool relaySendAll(const char *data, int len);
 	Bool relaySend(LANMessage *msg);
+	// Ship the end-of-game GAMERESULT JSON through the relay's
+	// RELAY_TYPE_GAMERESULT channel. Called by GameTelemetry on
+	// onGameWon/Lost/Surrendered/Exited.
 	Bool relaySendGameResult(const char *json, int len);
 
 protected:

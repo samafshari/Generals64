@@ -43,7 +43,6 @@
 #include "Common/Xfer.h"
 
 #include "GameLogic/GameLogic.h"
-#include "GameLogic/GameTelemetry.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/DeletionUpdate.h"
 #include "GameLogic/Module/UpdateModule.h"
@@ -547,16 +546,6 @@ void SpecialPowerModule::aboutToDoSpecialPower( const Coord3D *location )
 		getObject()->getControllingPlayer()->getPlayerIndex(),
 		getSpecialPowerModuleData()->m_specialPowerTemplate->getName(),
 		getObject()->getID());
-
-	// Per-owner telemetry: one bucket bump per power activation. Bucket
-	// object name is the SpecialPowerTemplate name (e.g. SuperweaponParticleCannon),
-	// owner is the activating player.
-	if (TheGameTelemetry)
-	{
-		TheGameTelemetry->onSpecialPowerUsedBy(
-			getObject()->getControllingPlayer(),
-			getSpecialPowerModuleData()->m_specialPowerTemplate->getName().str());
-	}
 
 	// Let EVA do her thing
 	SpecialPowerType type = getSpecialPowerModuleData()->m_specialPowerTemplate->getSpecialPowerType();

@@ -38,7 +38,6 @@
 #include "Common/ModuleFactory.h"
 #include "Common/RandomValue.h"
 #include "GameLogic/GameLogic.h"
-#include "GameLogic/GameTelemetry.h"
 #include "GameLogic/Object.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
@@ -346,12 +345,6 @@ Object *ThingFactory::newObject( const ThingTemplate *tmplate, Team *team, Objec
 	ThePartitionManager->registerObject( obj );
 
 	obj->initObject();
-
-	// Telemetry: record unit / building creation. Fires after initObject
-	// so the template + kindof are fully resolved. Silently no-ops outside
-	// of a relay-tracked MP game.
-	if (TheGameTelemetry)
-		TheGameTelemetry->onObjectCreated(obj);
 
 	return obj;
 
