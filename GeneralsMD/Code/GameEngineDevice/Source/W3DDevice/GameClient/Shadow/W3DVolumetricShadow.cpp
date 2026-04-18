@@ -1096,6 +1096,13 @@ void W3DVolumetricShadow::updateOptimalExtrusionPadding(void)
 // ---------------------------------------------------------------------------
 void W3DVolumetricShadow::RenderVolume(Int meshIndex, Int lightIndex)
 {
+	if (!m_robj || !m_geometry)
+		return;
+	if (lightIndex < 0 || lightIndex >= MAX_SHADOW_LIGHTS || meshIndex < 0 || meshIndex >= MAX_SHADOW_CASTER_MESHES)
+		return;
+	if (!m_shadowVolume[lightIndex][meshIndex])
+		return;
+
 	HLodClass* hlod = (HLodClass*)m_robj;
 	MeshClass* mesh = nullptr;
 
@@ -1108,7 +1115,8 @@ void W3DVolumetricShadow::RenderVolume(Int meshIndex, Int lightIndex)
 
 	if (mesh)
 	{
-		if (m_shadowVolume[0][meshIndex]->GetFlags() & SHADOW_DYNAMIC)
+		// Bug fix: original indexed [0] here — should be [lightIndex].
+		if (m_shadowVolume[lightIndex][meshIndex]->GetFlags() & SHADOW_DYNAMIC)
 			RenderDynamicMeshVolume(meshIndex, lightIndex, &mesh->Get_Transform());
 		else
 			RenderMeshVolume(meshIndex, lightIndex, &mesh->Get_Transform());
@@ -1245,7 +1253,7 @@ void W3DVolumetricShadow::Update()
 	static Vector3 originCompareVector(0, 0, 0);
 	Vector3 pos;
 
-	if (m_geometry == nullptr)
+	if (m_geometry == nullptr || m_robj == nullptr)
 		return;
 
 	pos = m_robj->Get_Position();
@@ -2295,6 +2303,21 @@ void W3DVolumetricShadowManager::renderShadows(Int projectionCount)
 		// Even with no stencil volumes, fill the stencil buffer if projected
 		// shadows expected it.
 		renderStencilShadows();
+	}
+
+	// DX11: explicit state restore — we bound VB slot 0, IB, VS cbuffer @ b1
+	// (worldCB), and PS cbuffer @ b0 (darkenCB). Any of those linger and
+	// break later passes (notably the water pass that reuses PS@b0 for its
+	// frame constants). Unbind them and then let the caller-side
+	// renderer.Restore3DState() reset the pipeline states.
+	{
+		ID3D11Buffer* nullBuf = nullptr;
+		UINT nullStride = 0, nullOffset = 0;
+		ctx->IASetVertexBuffers(0, 1, &nullBuf, &nullStride, &nullOffset);
+		ctx->IASetIndexBuffer(nullptr, DXGI_FORMAT_R16_UINT, 0);
+		ctx->VSSetConstantBuffers(1, 1, &nullBuf);
+		ctx->PSSetConstantBuffers(0, 1, &nullBuf);
+		g_lastBoundVB = nullptr;
 	}
 #else
 	(void)projectionCount;

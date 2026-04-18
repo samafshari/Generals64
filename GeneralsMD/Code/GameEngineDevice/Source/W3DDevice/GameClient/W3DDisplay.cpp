@@ -101,6 +101,11 @@ bool g_debugDisableTracks = false;
 bool g_debugDisableWaypoints = false;
 bool g_debugDisableTranslucent = false;
 bool g_debugDisableParticles = false;
+// Shadow subsystem toggles — enabled by default. Projected is a no-op in
+// this DX11 build (TheTerrainRenderObject is always null) so it's safe to
+// leave on. Volumetric state-restore + null-safety fixes have landed.
+bool g_debugDisableProjectedShadows = false;
+bool g_debugDisableVolumetricShadows = false;
 bool g_debugDisableSnow = false;
 bool g_debugDisableUI = false;
 bool g_debugDisableBegin2DEnd2D = false;  // skip the inner Begin2D/End2D in drawViews
@@ -810,7 +815,7 @@ void W3DDisplay::draw()
 	// Projected shadow decals — render before opaque meshes so they stamp
 	// onto the already-drawn terrain and are then overdrawn by opaque
 	// object geometry.
-	if (camera && TheW3DShadowManager)
+	if (camera && TheW3DShadowManager && !g_debugDisableProjectedShadows)
 	{
 		RenderInfoClass rinfo(*camera);
 		DoShadows(rinfo, FALSE);
@@ -833,7 +838,7 @@ void W3DDisplay::draw()
 
 	// Volumetric stencil shadows — render after opaque/translucent meshes
 	// so the depth buffer contains all potential shadow occluders.
-	if (camera && TheW3DShadowManager)
+	if (camera && TheW3DShadowManager && !g_debugDisableVolumetricShadows)
 	{
 		RenderInfoClass rinfo(*camera);
 		DoShadows(rinfo, TRUE);
