@@ -5,7 +5,7 @@
 #   find_program(DXC_EXECUTABLE dxc HINTS "${VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/Bin")
 #   include(Renderer/Shaders/compile_shaders.cmake)
 
-set(SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Renderer/Shaders/HLSL")
+set(SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Renderer/Shaders/VulkanHLSL")
 set(SHADER_OUT "${CMAKE_BINARY_DIR}/Shaders")
 
 file(MAKE_DIRECTORY "${SHADER_OUT}/dxbc")
