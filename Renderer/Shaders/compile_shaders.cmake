@@ -65,6 +65,9 @@ set(SHADER_ENTRIES
     "ShaderLensFlare.hlsl|VSPost|PSLensFlare"
     # Debug line overlays (Render::Debug)
     "ShaderDebug.hlsl|VSMain|PSMain"
+    # Sun shadow map depth pass
+    "ShaderShadowMap.hlsl|VSShadowMesh|PSShadow"
+    "ShaderShadowMap.hlsl|VSShadowTerrain|PSShadow"
     # GPU particles (compute)
     "GPUParticleUpdate.hlsl|CSUpdate|_"
     # GPU particles (render)

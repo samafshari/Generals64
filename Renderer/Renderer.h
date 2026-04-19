@@ -25,6 +25,17 @@ struct alignas(16) FrameConstants
     Render::Float4 pointLightColors[kMaxPointLights];    // rgb = color * intensity, a = inner radius
     Render::Float4 shroudParams; // x = 1/worldW, y = 1/worldH, z = worldOffsetX, w = worldOffsetY (0 = disabled)
     Render::Float4 atmosphereParams; // x = fog density, y = scatter power, z = specular intensity, w = unused
+    // Sun shadow map — populated by BeginShadowPass and read by receiver shaders.
+    Render::Float4x4 sunViewProjection;
+    // x = shadow darkness (0 = no shadow, 1 = fully black), y = depth bias,
+    // z = 1/shadowMapSize (texel size), w = 1 if shadow map ready else 0.
+    Render::Float4 shadowParams;
+    // x = debug visualization mode (0 = production PCF, 1 = always lit,
+    //      2 = shadow map depth, 3 = footprint outline, 4 = receiver depth),
+    // y = caster color-debug intensity (0 = off, 1 = fully replace lit color
+    //      with per-caster hashed color — set by shadow pass only),
+    // z, w = reserved.
+    Render::Float4 shadowParams2;
 };
 
 // Per-object constants
@@ -328,6 +339,42 @@ public:
     void SetRenderTarget(Texture& rt, int width, int height);
     void RestoreBackBuffer();
 
+    // --- Sun shadow map pass ---
+    //
+    // Bind the depth-only shadow RT, override FrameConstants.viewProjection
+    // with the sun's orthographic VP (`sunVP`), and bind a depth-only shader.
+    // Scene geometry can then be re-rendered with the usual Draw3D* calls to
+    // populate the shadow depth texture. EndShadowPass restores the backbuffer,
+    // viewport, and original frame constants. While the pass is active,
+    // SetCamera() ignores incoming VP matrices so re-entrant terrain/model
+    // renderers don't stomp sunVP mid-pass.
+    void BeginShadowPass(const Render::Float4x4& sunVP);
+    void EndShadowPass();
+    bool IsShadowPassActive() const { return m_shadowPassActive; }
+    // Must be bound to t4 + comparison sampler on s2 for receivers to sample.
+    // Called automatically by Restore3DState / the main 3D state setters.
+    void BindShadowMapAsSRV();
+    // Shadow map square size in texels. Callers that trigger a viewport reset
+    // inside the shadow pass (e.g. ModelRenderer::BeginFrame installs the
+    // camera's backbuffer-sized viewport) re-assert the shadow viewport by
+    // calling SetViewport(0, 0, size, size, 0, 1).
+    uint32_t GetShadowMapSize() const { return kShadowMapSize; }
+
+    // Live-tuning accessors for the Inspector's Shadows panel. Each returns
+    // a reference into m_frameData so the panel can drive the shader uniforms
+    // with a single slider/toggle. FlushFrameConstants propagates the edits
+    // on the next 3D pass.
+    Render::Float4& ShadowParams()  { return m_frameData.shadowParams; }
+    Render::Float4& ShadowParams2() { return m_frameData.shadowParams2; }
+
+#ifdef BUILD_WITH_D3D11
+    // SRV of the shadow depth target, for displaying the shadow map as an
+    // ImGui image in the Shadows panel. Null until the first frame after
+    // Init runs.
+    ID3D11ShaderResourceView* GetShadowMapSRV() const
+    { return m_shadowMap.IsValid() ? m_shadowMap.GetSRV() : nullptr; }
+#endif
+
     // FSR video upscaling: renders srcTexture through FSR shader to the backbuffer
     // at (dstX, dstY, dstW, dstH). Call between Begin2D/End2D.
     void DrawImageFSR(const Texture& srcTexture, float dstX, float dstY, float dstW, float dstH);
@@ -410,6 +457,17 @@ private:
     SamplerState m_samplerLinear;
     SamplerState m_samplerLinearClamp;
     SamplerState m_samplerPoint;
+    SamplerState m_samplerShadow; // comparison sampler for shadow map PCF
+
+    // --- Sun shadow map ---
+    Texture m_shadowMap;            // D32_FLOAT depth target (SRV-capable)
+    Shader m_shaderShadowMesh;      // depth-only VS/PS for Vertex3D geometry
+    Shader m_shaderShadowTerrain;   // depth-only VS/PS for Vertex3DMasked terrain
+    DepthStencilState m_depthShadowWrite; // Depth enable + write, LessEqual
+    BlendState m_blendNoColorWrite;       // Color writes off (depth only)
+    bool m_shadowPassActive = false;
+    Render::Float4x4 m_savedViewProjection = {};
+    static constexpr uint32_t kShadowMapSize = 2048;
 
     // Render::Debug dynamic vertex buffer (colored line list)
     VertexBuffer m_vbDebug;

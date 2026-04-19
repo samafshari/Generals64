@@ -43,6 +43,7 @@
 #include "Lib/BaseType.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/W3DShadow.h"
+#include "WW3D2/camera.h"  // needed for CameraClass::Get_Position in the sun shadow pass
 #include "Renderer.h"
 #include "GPUParticles.h"
 #include "Inspector/Inspector.h"
@@ -105,7 +106,8 @@ bool g_debugDisableParticles = false;
 // Volumetric rendering prefers ZFail stencil updates to avoid
 // camera-inside-volume pillar artifacts from airborne casters.
 bool g_debugDisableProjectedShadows = false;
-bool g_debugDisableVolumetricShadows = false;
+bool g_debugDisableVolumetricShadows = true;  // Stencil volume system is being replaced by shadow mapping
+bool g_debugDisableSunShadowMap = false;      // Sun shadow map pass (new, replacing stencil volumes)
 bool g_debugDisableSnow = false;
 bool g_debugDisableUI = false;
 bool g_debugDisableBegin2DEnd2D = false;  // skip the inner Begin2D/End2D in drawViews
@@ -520,6 +522,85 @@ void W3DDisplay::step()
 }
 
 // ============================================================================
+// Sun shadow map — depth pre-pass helpers.
+//
+// BuildSunViewProjection: builds an orthographic matrix fitting a square
+// region of ground (`kShadowFootprint` world units on a side) centered at the
+// camera's XY position, viewed from the direction of the sun.
+//
+// RenderShadowCasters: walks the same scene containers the main pass walks
+// (W3DDisplay::m_3DScene + TheGameClient drawable list) plus the terrain,
+// issuing normal Draw3DIndexed calls. Because Renderer::BeginShadowPass has
+// (a) swapped the color RT for the shadow DSV with color-writes disabled,
+// (b) pinned FrameConstants.viewProjection to sunVP, the same VS code paths
+// now write the scene's depth from the sun's POV.
+// ============================================================================
+
+// How many world units across on the ground the sun "sees" per shadow pass.
+// Larger = more shadows in frame but softer / lower effective resolution;
+// smaller = sharper but shadows pop at camera movement. The Inspector's
+// Shadows panel edits these live, so they're mutable globals (not constexpr).
+float g_shadowFootprint  = 2400.0f;
+float g_sunEyeDistance   = 5000.0f;
+float g_sunNear          = 1.0f;
+float g_sunFar           = 10000.0f;
+
+static Render::Float4x4 BuildSunViewProjection(CameraClass* camera)
+{
+	using namespace Render;
+
+	// Camera focus on the ground: start at camera XY, Z = 0. A more accurate
+	// estimate would ray-cast the camera forward onto the heightmap, but the
+	// XY position is already close enough for a 2400-unit footprint and it
+	// avoids a heightmap probe on every frame.
+	Vector3 camPos(0, 0, 0);
+	if (camera)
+		camPos = camera->Get_Position();
+	Float3 focus = { camPos.X, camPos.Y, 0.0f };
+
+	// Sun direction — ray from sun to ground, normalized. Pull from the
+	// shadow manager's cached light position (set from the map's INI /
+	// time-of-day data and refreshed per frame in DoShadows).
+	Float3 sunRay = { 0.0f, 0.0f, -1.0f };
+	if (TheW3DShadowManager)
+	{
+		Vector3 lw = TheW3DShadowManager->getLightPosWorld(0);
+		float len = sqrtf(lw.X * lw.X + lw.Y * lw.Y + lw.Z * lw.Z);
+		if (len > 0.001f)
+		{
+			// getLightPosWorld returns the sun POSITION (far above ground) —
+			// the ray to the ground is -position / |position| from a caster
+			// at origin, but for directional-shadow purposes we just want
+			// the unit sun-direction with Z negative.
+			sunRay = { -lw.X / len, -lw.Y / len, -lw.Z / len };
+		}
+	}
+
+	// Sun eye: place far enough along the reverse of sunRay that the entire
+	// visible footprint sits inside the ortho near/far band.
+	Float3 sunEye = {
+		focus.x - sunRay.x * g_sunEyeDistance,
+		focus.y - sunRay.y * g_sunEyeDistance,
+		focus.z - sunRay.z * g_sunEyeDistance,
+	};
+
+	// Up vector — world +Y is a safe non-parallel default for Generals'
+	// Z-up coordinate system. Sun is always mostly-vertical (rayZ < 0) with
+	// some horizontal component, so world-Y never ends up parallel to the
+	// view direction.
+	Float3 up = { 0.0f, 1.0f, 0.0f };
+
+	Float4x4 view = Float4x4LookAtRH(sunEye, focus, up);
+	Float4x4 proj = Float4x4OrthoRH(g_shadowFootprint, g_shadowFootprint, g_sunNear, g_sunFar);
+	return Float4x4Multiply(view, proj);
+}
+
+// Forward-declare the scene-walk helper — its body lives alongside the
+// reflection-meshes helper in D3D11Shims.cpp. Returns number of submitted
+// render objects.
+extern int RenderShadowCastersDX11(CameraClass* camera);
+
+// ============================================================================
 // draw - THE MAIN RENDERING FUNCTION
 // This is called every frame. Real D3D11 rendering happens here.
 // ============================================================================
@@ -749,6 +830,38 @@ void W3DDisplay::draw()
 
 			// Set time for shader animations (water bump, cloud scroll)
 			renderer.SetTime(static_cast<float>(WW3D::Get_Sync_Time()));
+
+			// --- Sun shadow map pre-pass ---
+			// Builds a D32 depth texture of shadow-CASTERS only, from the
+			// sun's POV. The main Shader3D.PSMain samples this on t4 via
+			// ComputeShadowVisibility in ComputeLighting to darken the
+			// primary directional light on shadow RECEIVERS.
+			//
+			// Key invariant: the terrain is a RECEIVER, not a caster. If
+			// we rendered terrain into this map it would fill the entire
+			// footprint with a single smooth depth surface, which then
+			// sample-matches every ground receiver and swamps contributions
+			// from actual casters — producing the visible "one big plane"
+			// bug. Terrain therefore only shows up in the main pass, where
+			// it samples the map and draws itself shadowed.
+			if (!g_debugDisableSunShadowMap && camera)
+			{
+				LIVE_PERF_SCOPE("W3DDisplay::shadowMap");
+				Render::Float4x4 sunVP = BuildSunViewProjection(camera);
+				renderer.BeginShadowPass(sunVP);
+
+				// Only scene meshes + drawables (buildings, units, props).
+				// RenderShadowCastersDX11 internally calls
+				// ModelRenderer::BeginFrame which stomps the shadow viewport
+				// with the main camera's backbuffer-sized one; the helper
+				// re-asserts the shadow viewport before issuing any draws.
+				RenderShadowCastersDX11(camera);
+
+				renderer.EndShadowPass();
+				// Restore3DState is called inside EndShadowPass, which binds the
+				// main 3D shader + rebinds the shadow SRV on t4 / sampler on s2
+				// for receivers to read.
+			}
 
 			// depth is cleared in BeginFrame — no extra clear needed
 			{
@@ -1873,14 +1986,6 @@ void W3DDisplay::applyLightPulsesToRenderer()
 
 void W3DDisplay::setTimeOfDay(TimeOfDay tod)
 {
-	{
-		char buf[192];
-		sprintf(buf, "W3DDISPLAY_TOD tod=%d shadowMgr=%p lightsOverridden=%d\n",
-			(int)tod, (void*)TheW3DShadowManager,
-			(int)Render::Renderer::Instance().LightsOverridden());
-		OutputDebugStringA(buf);
-	}
-
 	// Apply lighting from GlobalData's terrain lighting settings
 	if (!TheGlobalData)
 		return;

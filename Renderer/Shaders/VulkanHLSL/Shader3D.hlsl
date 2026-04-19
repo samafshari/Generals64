@@ -14,6 +14,9 @@ cbuffer FrameConstants : register(b0)
     float4 pointLightColors[MAX_POINT_LIGHTS];    // rgb = color * intensity, a = inner radius
     float4 shroudParams; // x = 1/worldWidth, y = 1/worldHeight, z = worldOffsetX, w = worldOffsetY  (0 if disabled)
     float4 atmosphereParams; // x = fog density, y = scatter power, z = specular intensity, w = unused
+    row_major float4x4 sunViewProjection; // world -> sun clip space
+    float4 shadowParams;  // x = darkness [0..1], y = depth bias, z = 1/shadowMapSize, w = enabled (0 = no shadows)
+    float4 shadowParams2; // x = debugMode (int cast), y,z,w = reserved
 };
 
 cbuffer ObjectConstants : register(b1)
@@ -70,8 +73,10 @@ Texture2D diffuseTexture : register(t0);
 Texture2D bumpTexture    : register(t1);
 Texture2D depthTexture   : register(t2); // scene depth for water shore foam
 Texture2D shroudTexture  : register(t3);
+Texture2D shadowMap      : register(t4); // sun shadow map (D32 depth)
 SamplerState linearSampler : register(s0);
 SamplerState wrapSampler   : register(s1); // always WRAP mode, for tiling textures
+SamplerComparisonState shadowSampler : register(s2); // SampleCmp for shadow PCF
 
 // --- Shared lighting functions ---
 
@@ -80,9 +85,86 @@ float3 SafeNormal(float3 N)
     return length(N) > 0.001 ? normalize(N) : float3(0, 1, 0);
 }
 
+// -----------------------------------------------------------------------------
+// Sun shadow sampling
+//
+// shadowParams: x = shadow darkness (0 = no effect, 1 = fully black),
+//               y = depth bias (added to receiver depth before compare),
+//               z = 1/shadowMapSize (texel footprint for PCF offsets),
+//               w = shadow enabled (0 = skip sampling, return 1.0).
+//
+// Returns a visibility factor in [0, 1]: 1 = fully lit, 0 = fully shadowed
+// (before darkness scaling). Apply as:
+//     lighting *= lerp(1.0, vis, shadowParams.x);
+// so "darkness = 0" leaves lighting alone and "darkness = 1" multiplies
+// shadowed pixels by `vis` directly.
+//
+// Uses a 3x3 PCF kernel with hardware 2x2 linear comparison for soft edges.
+// Early-outs for fragments outside the shadow atlas or behind the far plane
+// so the sun's bounded orthographic view doesn't shadow the entire map.
+// -----------------------------------------------------------------------------
+// Runtime debug mode, driven by the Inspector's Shadows panel:
+//   0 = production PCF (default)
+//   1 = always return 1.0 (disable shadows visually)
+//   2 = sample shadow map as raw depth (visualize map content)
+//   3 = return 1.0 inside sun footprint, 0.0 outside (visualize footprint)
+//   4 = return receiverDepth (smooth gradient across scene)
+float ComputeShadowVisibility(float3 worldPos)
+{
+    if (shadowParams.w < 0.5)
+        return 1.0;
+
+    int mode = (int)shadowParams2.x;
+
+    float4 lightClip = mul(float4(worldPos, 1.0), sunViewProjection);
+    float3 ndc = lightClip.xyz / max(lightClip.w, 0.0001);
+
+    if (mode == 3)
+    {
+        return (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 ||
+                ndc.z < 0.0 || ndc.z > 1.0) ? 0.0 : 1.0;
+    }
+
+    // Skip samples outside the sun's frustum — anything the sun never saw
+    // has no shadow info, so treat as lit.
+    if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 || ndc.z < 0.0 || ndc.z > 1.0)
+        return 1.0;
+
+    float2 uv = float2(ndc.x * 0.5 + 0.5, -ndc.y * 0.5 + 0.5);
+    float receiverDepth = ndc.z - shadowParams.y;
+
+    if (mode == 1)
+        return 1.0;
+    if (mode == 2)
+        return shadowMap.Sample(linearSampler, uv).r;
+    if (mode == 4)
+        return saturate(receiverDepth);
+
+    // Production path: 3x3 PCF.
+    float texel = shadowParams.z;
+    float sum = 0.0;
+    [unroll]
+    for (int y = -1; y <= 1; ++y)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; ++x)
+        {
+            float2 off = float2(x, y) * texel;
+            sum += shadowMap.SampleCmpLevelZero(shadowSampler, uv + off, receiverDepth);
+        }
+    }
+    return sum / 9.0;
+}
+
 float3 ComputeLighting(float3 worldPos, float3 N)
 {
     float3 lighting = ambientColor.rgb;
+
+    // Sun shadow visibility: only the primary (index 0) directional light
+    // is a shadow caster. Visibility is 1 for lit pixels, 0 for fully
+    // shadowed; shadowParams.x scales how much that matters.
+    float sunVis = ComputeShadowVisibility(worldPos);
+    float sunAtten = lerp(1.0, sunVis, shadowParams.x);
 
     [unroll]
     for (int i = 0; i < MAX_DIRECTIONAL_LIGHTS; ++i)
@@ -91,7 +173,10 @@ float3 ComputeLighting(float3 worldPos, float3 N)
             break;
         float3 L = normalize(-lightDirections[i].xyz);
         float NdotL = saturate(dot(N, L));
-        lighting += lightColors[i].rgb * NdotL;
+        // Only attenuate the primary sun light; secondary fill lights
+        // aren't represented in the shadow map.
+        float atten = (i == 0) ? sunAtten : 1.0;
+        lighting += lightColors[i].rgb * NdotL * atten;
     }
 
     int numPointLights = (int)lightingOptions.z;

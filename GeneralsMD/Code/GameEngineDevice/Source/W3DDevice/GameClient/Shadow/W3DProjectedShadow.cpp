@@ -401,7 +401,7 @@ void W3DProjectedShadowManager::updateRenderTargetTextures(void)
 // -----------------------------------------------------------------------------
 
 #ifdef BUILD_WITH_D3D11
-static W3DShadowTexture* LoadDecalTexture(W3DShadowTextureManager* mgr, const char* textureName)
+static W3DShadowTexture* TryLoadDecalTexture(W3DShadowTextureManager* mgr, const char* textureName)
 {
 	if (!mgr || !textureName || !textureName[0])
 		return nullptr;
@@ -413,10 +413,7 @@ static W3DShadowTexture* LoadDecalTexture(W3DShadowTextureManager* mgr, const ch
 	Render::Texture* tex = Render::ImageCache::Instance().GetTexture(
 		Render::Renderer::Instance().GetDevice(), textureName);
 	if (!tex)
-	{
-		DEBUG_CRASH(("W3DProjectedShadowManager: missing decal texture '%s'", textureName));
 		return nullptr;
-	}
 
 	st = NEW W3DShadowTexture;
 	st->Set_Name(textureName);
@@ -424,7 +421,19 @@ static W3DShadowTexture* LoadDecalTexture(W3DShadowTextureManager* mgr, const ch
 	mgr->addTexture(st);
 	return st;
 }
+
+static W3DShadowTexture* LoadDecalTexture(W3DShadowTextureManager* mgr, const char* textureName)
+{
+	W3DShadowTexture* st = TryLoadDecalTexture(mgr, textureName);
+	if (!st)
+	{
+		DEBUG_CRASH(("W3DProjectedShadowManager: missing decal texture '%s'", textureName));
+		return nullptr;
+	}
+	return st;
+}
 #else
+static W3DShadowTexture* TryLoadDecalTexture(W3DShadowTextureManager*, const char*) { return nullptr; }
 static W3DShadowTexture* LoadDecalTexture(W3DShadowTextureManager*, const char*) { return nullptr; }
 #endif
 
@@ -1173,11 +1182,28 @@ W3DProjectedShadow* W3DProjectedShadowManager::addShadow(RenderObjClass* robj, S
 			st = m_W3DShadowTextureManager->getTexture(texture_name);
 			if (!st)
 			{
+				// Try direct texture load (<name>.tga) before falling back to the
+				// generic blob, so per-object authored silhouettes are used when present.
+				char texture_name_tga[132];
+				size_t tnLen = strlen(texture_name);
+				if (tnLen > 0 && tnLen < (sizeof(texture_name_tga) - 5))
+				{
+					memcpy(texture_name_tga, texture_name, tnLen);
+					texture_name_tga[tnLen] = '\0';
+					if (strchr(texture_name_tga, '.') == nullptr)
+						strcat(texture_name_tga, ".tga");
+					st = TryLoadDecalTexture(m_W3DShadowTextureManager, texture_name_tga);
+				}
+				if (!st)
+					st = TryLoadDecalTexture(m_W3DShadowTextureManager, texture_name);
 				// DX11: fall back to the generic shadow.tga until dynamic
 				// silhouette generation lands.
-				st = LoadDecalTexture(m_W3DShadowTextureManager, "shadow.tga");
 				if (!st)
-					return nullptr;
+				{
+					st = LoadDecalTexture(m_W3DShadowTextureManager, "shadow.tga");
+					if (!st)
+						return nullptr;
+				}
 			}
 			shadowType = SHADOW_PROJECTION;
 		}
@@ -1192,9 +1218,24 @@ W3DProjectedShadow* W3DProjectedShadowManager::addShadow(RenderObjClass* robj, S
 		st = m_W3DShadowTextureManager->getTexture(texture_name);
 		if (!st)
 		{
-			st = LoadDecalTexture(m_W3DShadowTextureManager, "shadow.tga");
+			char texture_name_tga[132];
+			size_t tnLen = strlen(texture_name);
+			if (tnLen > 0 && tnLen < (sizeof(texture_name_tga) - 5))
+			{
+				memcpy(texture_name_tga, texture_name, tnLen);
+				texture_name_tga[tnLen] = '\0';
+				if (strchr(texture_name_tga, '.') == nullptr)
+					strcat(texture_name_tga, ".tga");
+				st = TryLoadDecalTexture(m_W3DShadowTextureManager, texture_name_tga);
+			}
 			if (!st)
-				return nullptr;
+				st = TryLoadDecalTexture(m_W3DShadowTextureManager, texture_name);
+			if (!st)
+			{
+				st = LoadDecalTexture(m_W3DShadowTextureManager, "shadow.tga");
+				if (!st)
+					return nullptr;
+			}
 		}
 		shadowType = SHADOW_PROJECTION;
 	}
@@ -1212,21 +1253,36 @@ W3DProjectedShadow* W3DProjectedShadowManager::addShadow(RenderObjClass* robj, S
 	AABoxClass box;
 	robj->Get_Obj_Space_Bounding_Box(box);
 
-	// DECAL path uses world-space sizes directly; PROJECTION path uses
-	// inverse world-space in the original because uv axes are computed in
-	// world space. We unify to world sizes here because the DX11 queueDecal
-	// takes world sizes (not reciprocals).
-	if (decalSizeX == 0.0f)
-		decalSizeX = box.Extent.X * 2.0f;
-	if (decalSizeY == 0.0f)
-		decalSizeY = box.Extent.Y * 2.0f;
+	if (shadowType == SHADOW_PROJECTION)
+	{
+		// Match original SHADOW_PROJECTION UV orientation semantics.
+		Real oowDecalSizeX = decalSizeX ? (1.0f / decalSizeX) : (1.0f / (box.Extent.X * 2.0f));
+		Real oowDecalSizeY = decalSizeY ? (-1.0f / decalSizeY) : (-1.0f / (box.Extent.Y * 2.0f));
+		Real offsetU = decalOffsetX ? (-decalOffsetX * oowDecalSizeX) : 0.0f;
+		Real offsetV = decalOffsetY ? (-decalOffsetY * oowDecalSizeY) : 0.0f;
 
-	shadow->m_decalSizeX = decalSizeX;
-	shadow->m_decalSizeY = decalSizeY;
-	shadow->m_oowDecalSizeX = 1.0f / decalSizeX;
-	shadow->m_oowDecalSizeY = 1.0f / decalSizeY;
-	shadow->m_decalOffsetU = decalOffsetX ? (decalOffsetX * shadow->m_oowDecalSizeX) : 0.0f;
-	shadow->m_decalOffsetV = decalOffsetY ? (decalOffsetY * shadow->m_oowDecalSizeY) : 0.0f;
+		shadow->m_oowDecalSizeX = oowDecalSizeX;
+		shadow->m_oowDecalSizeY = oowDecalSizeY;
+		shadow->m_decalSizeX = (oowDecalSizeX != 0.0f) ? (1.0f / oowDecalSizeX) : 0.0f;
+		shadow->m_decalSizeY = (oowDecalSizeY != 0.0f) ? (1.0f / oowDecalSizeY) : 0.0f;
+		shadow->m_decalOffsetU = offsetU;
+		shadow->m_decalOffsetV = offsetV;
+	}
+	else
+	{
+		// Decal path uses direct world-space footprint sizes.
+		if (decalSizeX == 0.0f)
+			decalSizeX = box.Extent.X * 2.0f;
+		if (decalSizeY == 0.0f)
+			decalSizeY = box.Extent.Y * 2.0f;
+
+		shadow->m_decalSizeX = decalSizeX;
+		shadow->m_decalSizeY = decalSizeY;
+		shadow->m_oowDecalSizeX = 1.0f / decalSizeX;
+		shadow->m_oowDecalSizeY = 1.0f / decalSizeY;
+		shadow->m_decalOffsetU = decalOffsetX ? (decalOffsetX * shadow->m_oowDecalSizeX) : 0.0f;
+		shadow->m_decalOffsetV = decalOffsetY ? (decalOffsetY * shadow->m_oowDecalSizeY) : 0.0f;
+	}
 
 	shadow->init();
 

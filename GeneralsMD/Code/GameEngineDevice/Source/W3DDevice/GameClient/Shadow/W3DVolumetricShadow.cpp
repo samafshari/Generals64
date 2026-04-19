@@ -38,6 +38,7 @@
 #include "W3DDevice/GameClient/W3DBufferManager.h"
 #include "W3DDevice/GameClient/W3DShadow.h"
 #include "W3DDevice/GameClient/W3DVolumetricShadow.h"
+#include "W3DDevice/GameClient/WorldHeightMap.h"
 #include "hash.h"
 #include "refcount.h"
 
@@ -82,6 +83,37 @@ static Real bcX = 0, bcY = 0, bcZ = 0;
 static Real beX = 0, beY = 0, beZ = 0;
 
 W3DVolumetricShadowManager* TheW3DVolumetricShadowManager = nullptr;
+
+#ifdef BUILD_WITH_D3D11
+extern WorldHeightMap* GetTerrainHeightMap();
+
+static Real GetTerrainMinHeightWorld()
+{
+	static WorldHeightMap* s_cachedMap = nullptr;
+	static Real s_cachedMinHeight = 0.0f;
+
+	WorldHeightMap* hmap = GetTerrainHeightMap();
+	if (!hmap)
+		return 0.0f;
+
+	if (hmap != s_cachedMap)
+	{
+		Int minHeight = WorldHeightMap::getMaxHeightValue();
+		const Int xExtent = hmap->getXExtent();
+		const Int yExtent = hmap->getYExtent();
+		for (Int y = 0; y < yExtent; ++y)
+		{
+			for (Int x = 0; x < xExtent; ++x)
+				minHeight = std::min(minHeight, (Int)hmap->getHeight(x, y));
+		}
+
+		s_cachedMinHeight = (Real)minHeight * MAP_HEIGHT_SCALE;
+		s_cachedMap = hmap;
+	}
+
+	return s_cachedMinHeight;
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // Geometry — per-volume scratch storage (vertices + indices + bounds +
@@ -1313,9 +1345,11 @@ void W3DVolumetricShadow::Update()
 			fabs(pos.Z - bcZ) > (beZ + extent))
 			return;
 
-		// DX11: min terrain height unavailable in current build — use a
-		// conservative extrusion relative to the object position.
-		updateVolumes(fabs(pos.Z - groundHeight) + SHADOW_EXTRUSION_BUFFER);
+		Real minTerrainHeight = groundHeight;
+#ifdef BUILD_WITH_D3D11
+		minTerrainHeight = GetTerrainMinHeightWorld();
+#endif
+		updateVolumes(fabs(pos.Z - minTerrainHeight) + SHADOW_EXTRUSION_BUFFER);
 	}
 	else
 	{
@@ -1398,29 +1432,6 @@ void W3DVolumetricShadow::updateMeshVolume(Int meshIndex, Int lightIndex, const 
 
 	Matrix4x4 objectToWorld(*meshXform);
 
-#ifdef BUILD_WITH_D3D11
-	// DX11 diagnostic: shadows appear to rotate with the camera. Math in this
-	// function is world-space so that should not happen — log meshXform
-	// translation + X-basis + world-space light once per caster, every 60th
-	// time we hit that caster. If either value changes as the camera rotates,
-	// transforms are being polluted (view-space leak) or the light is being
-	// re-written somewhere.
-	{
-		static unsigned s_callCount = 0;
-		if ((s_callCount++ % 60u) == 0u && meshIndex == 0 && lightIndex == 0)
-		{
-			Vector3 lpw = TheW3DShadowManager->getLightPosWorld(0);
-			char buf[256];
-			sprintf(buf,
-				"SHADOW_DIAG this=%p xform T=(%.2f,%.2f,%.2f) Xaxis=(%.3f,%.3f,%.3f) lightW=(%.1f,%.1f,%.1f)\n",
-				(void*)this,
-				(*meshXform)[0][3], (*meshXform)[1][3], (*meshXform)[2][3],
-				(*meshXform)[0][0], (*meshXform)[1][0], (*meshXform)[2][0],
-				lpw.X, lpw.Y, lpw.Z);
-			OutputDebugStringA(buf);
-		}
-	}
-#endif
 	Matrix4x4* prevXForm = &m_objectXformHistory[lightIndex][meshIndex];
 
 	// Normalized-axis orientation comparison (CNC3 variant).
@@ -2473,11 +2484,11 @@ void W3DVolumetricShadowManager::renderShadows(Int projectionCount)
 		// Bind shared pipeline for stencil passes.
 		g_svPipeline.extrudeShader.Bind(dev);
 		ctx->OMSetBlendState(g_svPipeline.blendNoColor, nullptr, 0xFFFFFFFF);
-		// Camera-inside-volume is common with airborne casters. Running ZPass
-		// there leaves unmatched stencil counts (pillar/column artifacts), so
-		// prefer ZFail whenever available.
+		// Match the original DX8 path: ZPass stencil update (incr/decr on depth pass).
+		// A global ZFail path requires robust closed volumes/caps and caused camera-
+		// relative/front-layer artifacts in this port.
 		ctx->OMSetDepthStencilState(
-			g_svPipeline.dsExtrudeZFail ? g_svPipeline.dsExtrudeZFail : g_svPipeline.dsExtrudeZPass,
+			g_svPipeline.dsExtrudeZPass ? g_svPipeline.dsExtrudeZPass : g_svPipeline.dsExtrudeZFail,
 			0x0);
 		ctx->RSSetState(g_svPipeline.rasterNoCull);
 		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -2523,8 +2534,6 @@ void W3DVolumetricShadowManager::renderShadows(Int projectionCount)
 		}
 
 		// DX11: with two-sided stencil, both front/back ops fire in one draw.
-		// We run the ZFail state to keep counts correct when the camera is
-		// inside a volume (frequent with airborne casters).
 
 		// Flush any dynamic tasks queued but not yet drained.
 		W3DVolumetricShadowRenderTask* dyn = m_dynamicShadowVolumesToRender;

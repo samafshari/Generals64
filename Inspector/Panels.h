@@ -30,6 +30,7 @@ struct Visibility
     bool destruction   = false; // Destruction Timeline (gantt of unit losses per player per minute)
     bool lights        = false; // Lights debugger (sun direction + color sliders, sun gizmo)
     bool launchParams  = false; // Launch parameters debugger (raw command line + parsed flags)
+    bool shadows       = false; // Sun shadow-map tuning (darkness, bias, debug modes, tooltip, map preview)
 };
 
 // Per-frame debug-draw overlay toggles. The toolbar mutates these via

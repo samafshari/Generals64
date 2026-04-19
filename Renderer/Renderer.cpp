@@ -119,6 +119,14 @@ bool Renderer::Init(void* nativeWindowHandle, bool debug)
     m_frameData.lightingOptions = { 1.0f, 0.0f, 0.0f, 0.0f };
     m_frameData.shroudParams = { 0.0f, 0.0f, 0.0f, 0.0f }; // disabled until game sets it
     m_frameData.atmosphereParams = { 0.0f, 0.0f, 0.0f, 0.0f }; // atmosphere off by default
+    m_frameData.sunViewProjection = Float4x4Identity();
+    // shadowParams: x=darkness(0.9), y=depthBias(0.0005), z=1/shadowMapSize, w=0(disabled until ready)
+    m_frameData.shadowParams = { 0.9f, 0.0005f, 1.0f / (float)kShadowMapSize, 0.0f };
+    m_frameData.shadowParams2 = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+    // Sun shadow map — D32_FLOAT with SRV so the main shaders can sample it.
+    if (!m_shadowMap.CreateDepthTarget(m_device, kShadowMapSize, kShadowMapSize))
+        return false;
 
     return true;
 }
@@ -164,6 +172,8 @@ void Renderer::Shutdown()
     m_shaderFilmGrain.Destroy(m_device);
     m_shaderSharpen.Destroy(m_device);
     m_shaderTiltShift.Destroy(m_device);
+    m_shaderShadowMesh.Destroy(m_device);
+    m_shaderShadowTerrain.Destroy(m_device);
 
     // Constant buffers
     m_cbFrame.Destroy(m_device);
@@ -201,11 +211,13 @@ void Renderer::Shutdown()
     m_volHalfRT.Destroy(m_device);
     m_godRayExtractRT.Destroy(m_device);
     m_godRayBlurRT.Destroy(m_device);
+    m_shadowMap.Destroy(m_device);
 
     // Samplers
     m_samplerLinear.Destroy(m_device);
     m_samplerLinearClamp.Destroy(m_device);
     m_samplerPoint.Destroy(m_device);
+    m_samplerShadow.Destroy(m_device);
 #endif
 
     m_device.Shutdown();
@@ -315,6 +327,21 @@ bool Renderer::CreateShaders()
     if (!CompileOrLoadPS(m_shader3DSkybox, m_device, g_shader3D, "PSMainSkybox", "Shaders/spirv/Shader3D_PSMainSkybox.spv"))
         return false;
     if (!m_shader3DSkybox.CreateInputLayout(m_device, layout3D, _countof(layout3D), sizeof(Vertex3D)))
+        return false;
+
+    // Sun shadow-map depth pass — one VS per vertex layout, shared PS.
+    if (!CompileOrLoadVS(m_shaderShadowMesh, m_device, g_shaderShadowMap, "VSShadowMesh", "Shaders/spirv/ShaderShadowMap_VSShadowMesh.spv"))
+        return false;
+    if (!CompileOrLoadPS(m_shaderShadowMesh, m_device, g_shaderShadowMap, "PSShadow", "Shaders/spirv/ShaderShadowMap_PSShadow.spv"))
+        return false;
+    if (!m_shaderShadowMesh.CreateInputLayout(m_device, layout3D, _countof(layout3D), sizeof(Vertex3D)))
+        return false;
+
+    if (!CompileOrLoadVS(m_shaderShadowTerrain, m_device, g_shaderShadowMap, "VSShadowTerrain", "Shaders/spirv/ShaderShadowMap_VSShadowTerrain.spv"))
+        return false;
+    if (!CompileOrLoadPS(m_shaderShadowTerrain, m_device, g_shaderShadowMap, "PSShadow", "Shaders/spirv/ShaderShadowMap_PSShadow.spv"))
+        return false;
+    if (!m_shaderShadowTerrain.CreateInputLayout(m_device, layout3DMasked, _countof(layout3DMasked), sizeof(Vertex3DMasked)))
         return false;
 
     // 2D color shader
@@ -624,6 +651,23 @@ bool Renderer::CreateStates()
     m_samplerLinear.Create(m_device, Filter::MinMagMipLinear, AddressMode::Wrap);
     m_samplerLinearClamp.Create(m_device, Filter::MinMagMipLinear, AddressMode::Clamp);
     m_samplerPoint.Create(m_device, Filter::MinMagMipPoint, AddressMode::Clamp);
+    // Comparison sampler for shadow map PCF. MUST use a COMPARISON-class
+    // D3D11 filter — `D3D11_FILTER_MIN_MAG_MIP_LINEAR` (plain linear) makes
+    // SampleCmp* silently produce wrong results instead of hardware 2x2 PCF.
+    // The wrong result looks like a large shadow plane overlaid on the scene
+    // because the compare collapses to 0 for most UVs.
+    m_samplerShadow.CreateComparison(m_device, Filter::ComparisonMinMagMipLinear, AddressMode::Clamp);
+
+    // Depth state for shadow map — depth enable + write + LessEqual.
+    m_depthShadowWrite.Create(m_device, true, true, CompareFunc::LessEqual);
+
+    // Blend state for shadow pass — color writes off (depth-only).
+    {
+        BlendDesc bd = {};
+        bd.enable = false;
+        bd.writeMask = 0; // no color channels written
+        m_blendNoColorWrite.CreateFromDesc(m_device, bd);
+    }
 
     return true;
 }
@@ -810,7 +854,12 @@ void Renderer::SetCamera(const Render::Float4x4& view, const Render::Float4x4& p
     if (valid)
     {
         m_lastValidVP = vpTest; // save for fallback
-        m_frameData.viewProjection = vp;
+        // During a shadow pass the viewProjection slot is pinned to sunVP.
+        // Re-entrant TerrainRenderer / ModelRenderer calls SetCamera with
+        // the real camera every frame; we keep sunVP intact here so their
+        // draws target the shadow map through the sun's orthographic view.
+        if (!m_shadowPassActive)
+            m_frameData.viewProjection = vp;
         m_frameData.cameraPos = { cameraPos.x, cameraPos.y, cameraPos.z, 1.0f };
         m_lastValidCameraPos = m_frameData.cameraPos;
     }
@@ -818,7 +867,8 @@ void Renderer::SetCamera(const Render::Float4x4& view, const Render::Float4x4& p
     {
         // Use last known good matrix to prevent dark frame.
         // NaN should be caught at source by SanitizeMatrix3D; this is a safety net.
-        m_frameData.viewProjection = m_lastValidVP;
+        if (!m_shadowPassActive)
+            m_frameData.viewProjection = m_lastValidVP;
         m_frameData.cameraPos = m_lastValidCameraPos;
     }
 }
@@ -942,6 +992,13 @@ void Renderer::Restore3DState()
     m_blendOpaque.Bind(m_device);
     m_depthDefault.Bind(m_device);
     m_samplerLinear.BindPS(m_device, 0);
+
+    // Re-bind the shadow map SRV + comparison sampler so main-pass shaders
+    // can sample it. Cheap — D3D11 dedups redundant binds. Skip while a
+    // shadow pass is in flight (the shadow DSV can't be both the RT and an
+    // SRV at the same time).
+    if (!m_shadowPassActive)
+        BindShadowMapAsSRV();
 }
 
 void Renderer::SetAlphaBlend3DState()
@@ -1314,6 +1371,97 @@ void Renderer::RestoreBackBuffer()
 {
     m_device.SetBackBuffer();
     ResetViewport();
+}
+
+// -----------------------------------------------------------------------------
+// Sun shadow-map pass
+// -----------------------------------------------------------------------------
+
+void Renderer::BeginShadowPass(const Render::Float4x4& sunVP)
+{
+    if (m_shadowPassActive)
+        return; // guard: nested passes not supported
+
+    // Stash the current scene VP so re-entrant SetCamera calls inside the
+    // shadow pass don't leak the scene camera through — SetCamera checks
+    // m_shadowPassActive and leaves m_frameData.viewProjection alone.
+    m_savedViewProjection = m_frameData.viewProjection;
+
+    // Pin both the active viewProjection (used by ShaderShadowMap VS) and
+    // the sunViewProjection slot (read by receiver shaders in the main pass).
+    m_frameData.viewProjection    = sunVP;
+    m_frameData.sunViewProjection = sunVP;
+    m_frameData.shadowParams.w    = 1.0f; // mark shadow map valid for receivers
+
+    m_shadowPassActive = true;
+
+    // CRITICAL: unbind the shadow SRV from its reader slot. D3D11 refuses to
+    // bind a resource as DSV while the same resource is still bound as SRV
+    // from the previous frame — any subsequent Draw call would silently
+    // disable the offending SRV and the depth writes would fail. Explicit
+    // unbind keeps both states clean.
+    m_device.UnbindPSSRVs(4, 1);
+
+    // Bind the shadow-map DSV with no color target. Clear to 1.0 (farthest)
+    // so any un-rendered texel samples as "fully lit" rather than shadowed.
+    m_device.ClearDepthStencil(m_shadowMap);
+    m_device.SetDepthOnlyRenderTarget(m_shadowMap);
+    SetViewport(0.0f, 0.0f, (float)kShadowMapSize, (float)kShadowMapSize, 0.0f, 1.0f);
+
+    // State: depth enable + write, color-writes off, default cull, opaque.
+    // Actual shader binding happens in the re-entrant renderers via state
+    // setters (SetAlphaBlend3DState etc.) — we rebind the shadow VS before
+    // each Draw3DIndexed-driven mesh in the shadow walk (see ShadowRenderer
+    // integration in W3DDisplay::draw). The blend override keeps color writes
+    // off regardless of which state setter gets called.
+    m_blendNoColorWrite.Bind(m_device);
+    m_depthShadowWrite.Bind(m_device);
+    m_rasterDefault.Bind(m_device);
+
+    // Upload the pinned sunVP + shadowParams now so the shadow shader reads
+    // the right viewProjection on its first draw.
+    FlushFrameConstants();
+
+    // Clear the Draw3D per-draw cbuffer bind cache — the shadow pass writes
+    // its own ObjectConstants via the same slot (b1).
+    m_objectCBBound = false;
+    m_lastBoundTexture = nullptr;
+}
+
+void Renderer::EndShadowPass()
+{
+    if (!m_shadowPassActive)
+        return;
+
+    m_shadowPassActive = false;
+
+    // Restore scene VP and re-upload frame constants so the main render
+    // reads the original camera VP (and the now-populated sunVP for shadow
+    // sampling).
+    m_frameData.viewProjection = m_savedViewProjection;
+    FlushFrameConstants();
+
+    // Swap RT back to the backbuffer + full-screen viewport.
+    m_device.SetBackBuffer();
+    ResetViewport();
+
+    // Restore default 3D state so the next pass starts from a known baseline.
+    Restore3DState();
+}
+
+void Renderer::BindShadowMapAsSRV()
+{
+    // Bind the shadow map depth SRV to t4 and the comparison sampler to s2.
+    // Kept in one place so Restore3DState and anyone who stomps these slots
+    // can refresh the binding after.
+    if (!m_shadowMap.IsValid())
+        return;
+#ifdef BUILD_WITH_D3D11
+    ID3D11ShaderResourceView* srv = m_shadowMap.GetSRV();
+    if (srv)
+        m_device.GetContext()->PSSetShaderResources(4, 1, &srv);
+#endif
+    m_samplerShadow.BindPS(m_device, 2);
 }
 
 void Renderer::Draw3D(const VertexBuffer& vb, const IndexBuffer& ib, const Texture* texture, const Render::Float4x4& world, const Render::Float4& color)

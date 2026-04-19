@@ -27,11 +27,6 @@
 #include "W3DDevice/GameClient/W3DProjectedShadow.h"
 #include "W3DDevice/GameClient/W3DVolumetricShadow.h"
 
-#ifdef BUILD_WITH_D3D11
-#include <windows.h>
-#include <cstdio>
-#endif
-
 // Distance of the sun light source from ground. Arbitrary but far enough
 // that the direction vector dominates over position for shadow projection.
 #define SUN_DISTANCE_FROM_GROUND	10000.0f
@@ -109,20 +104,6 @@ W3DShadowManager::W3DShadowManager(void)
 		-TheGlobalData->m_terrainLightPos[0].z);
 	lightRay.Normalize();
 	s_lightPosWorld[0] = lightRay * SUN_DISTANCE_FROM_GROUND;
-
-#ifdef BUILD_WITH_D3D11
-	{
-		char buf[256];
-		sprintf(buf,
-			"SHADOW_CTOR tod=%d srcTerrainLightPos=(%.3f,%.3f,%.3f) s_lightPosWorld=(%.1f,%.1f,%.1f)\n",
-			(int)TheGlobalData->m_timeOfDay,
-			TheGlobalData->m_terrainLightPos[0].x,
-			TheGlobalData->m_terrainLightPos[0].y,
-			TheGlobalData->m_terrainLightPos[0].z,
-			s_lightPosWorld[0].X, s_lightPosWorld[0].Y, s_lightPosWorld[0].Z);
-		OutputDebugStringA(buf);
-	}
-#endif
 
 	TheW3DVolumetricShadowManager = NEW W3DVolumetricShadowManager;
 	TheProjectedShadowManager = TheW3DProjectedShadowManager = NEW W3DProjectedShadowManager;
@@ -250,18 +231,6 @@ void W3DShadowManager::setTimeOfDay(TimeOfDay tod)
 	Vector3 lightRay(-ol->lightPos.x, -ol->lightPos.y, -ol->lightPos.z);
 	lightRay.Normalize();
 	lightRay *= SUN_DISTANCE_FROM_GROUND;
-
-#ifdef BUILD_WITH_D3D11
-	{
-		char buf[256];
-		sprintf(buf,
-			"SHADOW_TOD tod=%d srcLightPos=(%.3f,%.3f,%.3f) computedLightW=(%.1f,%.1f,%.1f)\n",
-			(int)tod,
-			ol->lightPos.x, ol->lightPos.y, ol->lightPos.z,
-			lightRay.X, lightRay.Y, lightRay.Z);
-		OutputDebugStringA(buf);
-	}
-#endif
 
 	setLightPosition(0, lightRay.X, lightRay.Y, lightRay.Z);
 }

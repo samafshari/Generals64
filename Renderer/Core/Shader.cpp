@@ -107,9 +107,17 @@ static DXGI_FORMAT VertexFormatToDXGI(VertexFormat f)
 bool Shader::CompileVS(Device& device, const char* source, const char* entryPoint, const char* profile)
 {
     ComPtr<ID3DBlob> errors;
-    UINT flags = D3DCOMPILE_OPTIMIZATION_LEVEL3;
+    // D3DCompile defaults to column-major matrix packing in cbuffers, but
+    // our C++ Render::Float4x4 is row-major. The per-variable `row_major`
+    // qualifier in HLSL sources works for simple cases but miscompiles
+    // silently for certain placements (observed on sunViewProjection at
+    // offset 368 in FrameConstants — it got packed column-major despite
+    // the qualifier, causing shadow UVs to mutate with camera position).
+    // Force row-major globally so all cbuffer matrices line up with the
+    // C++ data without qualifier games.
+    UINT flags = D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR;
 #ifdef _DEBUG
-    flags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+    flags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR;
 #endif
 
     HRESULT hr = D3DCompile(source, strlen(source), nullptr, nullptr, nullptr,
@@ -130,9 +138,17 @@ bool Shader::CompilePS(Device& device, const char* source, const char* entryPoin
 {
     ComPtr<ID3DBlob> bytecode;
     ComPtr<ID3DBlob> errors;
-    UINT flags = D3DCOMPILE_OPTIMIZATION_LEVEL3;
+    // D3DCompile defaults to column-major matrix packing in cbuffers, but
+    // our C++ Render::Float4x4 is row-major. The per-variable `row_major`
+    // qualifier in HLSL sources works for simple cases but miscompiles
+    // silently for certain placements (observed on sunViewProjection at
+    // offset 368 in FrameConstants — it got packed column-major despite
+    // the qualifier, causing shadow UVs to mutate with camera position).
+    // Force row-major globally so all cbuffer matrices line up with the
+    // C++ data without qualifier games.
+    UINT flags = D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR;
 #ifdef _DEBUG
-    flags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+    flags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR;
 #endif
 
     HRESULT hr = D3DCompile(source, strlen(source), nullptr, nullptr, nullptr,
@@ -357,9 +373,17 @@ bool ComputeShader::Compile(Device& device, const char* source, const char* entr
 {
     ComPtr<ID3DBlob> bytecode;
     ComPtr<ID3DBlob> errors;
-    UINT flags = D3DCOMPILE_OPTIMIZATION_LEVEL3;
+    // D3DCompile defaults to column-major matrix packing in cbuffers, but
+    // our C++ Render::Float4x4 is row-major. The per-variable `row_major`
+    // qualifier in HLSL sources works for simple cases but miscompiles
+    // silently for certain placements (observed on sunViewProjection at
+    // offset 368 in FrameConstants — it got packed column-major despite
+    // the qualifier, causing shadow UVs to mutate with camera position).
+    // Force row-major globally so all cbuffer matrices line up with the
+    // C++ data without qualifier games.
+    UINT flags = D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR;
 #ifdef _DEBUG
-    flags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+    flags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR;
 #endif
 
     HRESULT hr = D3DCompile(source, strlen(source), nullptr, nullptr, nullptr,

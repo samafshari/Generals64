@@ -504,8 +504,14 @@ void Update(float dt)
     if (keys[SDL_SCANCODE_S]) { s_posX -= fx * move; s_posY -= fy * move; s_posZ -= fz * move; }
     if (keys[SDL_SCANCODE_A]) { s_posX -= rx * move; s_posY -= ry * move; }
     if (keys[SDL_SCANCODE_D]) { s_posX += rx * move; s_posY += ry * move; }
-    if (keys[SDL_SCANCODE_E]) { s_posZ += move; }
-    if (keys[SDL_SCANCODE_Q]) { s_posZ -= move; }
+    if (keys[SDL_SCANCODE_SPACE])  { s_posZ += move; }
+    if (keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL]) { s_posZ -= move; }
+
+    // Q / E — yaw rotation at a fixed angular rate (radians/sec) so it's
+    // predictable for the "does the shadow stay put when I rotate?" test.
+    const float yawRate = 1.5f; // ~86 deg/sec
+    if (keys[SDL_SCANCODE_Q]) s_yaw += yawRate * dt;
+    if (keys[SDL_SCANCODE_E]) s_yaw -= yawRate * dt;
 
     // ---- Mouse look while RMB held ----------------------------------
     // Per-frame mouse delta from ImGui (which the SDL3 backend feeds
@@ -620,6 +626,7 @@ void BeginFrame()
                     ImGui::MenuItem("Mission Script", nullptr, &v.script);
                     ImGui::MenuItem("Destruction Timeline", nullptr, &v.destruction);
                     ImGui::MenuItem("Lights",       nullptr, &v.lights);
+                    ImGui::MenuItem("Shadows",      nullptr, &v.shadows);
                     ImGui::MenuItem("Launch Parameters", nullptr, &v.launchParams);
                     ImGui::Separator();
                     if (ImGui::MenuItem("Reset Layout"))

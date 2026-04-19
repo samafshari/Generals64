@@ -12,10 +12,6 @@
 // W3D implementation of the GameClient - rewritten for D3D11
 
 #include <stdlib.h>
-#include <stdio.h>
-#ifdef _WIN32
-#include <windows.h>
-#endif
 
 #include "Common/ThingTemplate.h"
 #include "Common/ThingFactory.h"
@@ -127,11 +123,6 @@ void W3DGameClient::createRayEffectByTemplate(const Coord3D *start,
 
 void W3DGameClient::setTimeOfDay(TimeOfDay tod)
 {
-	{
-		char buf[128];
-		sprintf(buf, "W3DGAMECLIENT_TOD tod=%d display=%p\n", (int)tod, (void*)TheDisplay);
-		OutputDebugStringA(buf);
-	}
 	GameClient::setTimeOfDay(tod);
 	TheDisplay->setTimeOfDay(tod);
 }

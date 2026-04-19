@@ -42,24 +42,35 @@ extern Int g_autotestFrames;
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/AIUpdate.h"
+#include "GameClient/GameClient.h"
 #include "GameClient/View.h"
 #include "GameClient/Drawable.h"
 #include "W3DDevice/GameClient/W3DView.h"
 // Model debugger panel: walks the W3D render-object tree of the
 // selected drawable to show meshes, textures, sub-objects, decals.
 #include "W3DDevice/GameClient/Module/W3DModelDraw.h"
+#include "W3DDevice/GameClient/W3DShadow.h" // for TheW3DShadowManager (sun ray)
 #include "WW3D2/rendobj.h"
 #include "WW3D2/hlod.h"
 #include "WW3D2/mesh.h"
 #include "WW3D2/meshmdl.h"
 #include "WW3D2/matinfo.h"
 #include "WW3D2/texture.h"
+// AABoxClass is declared in WWMath/aabox.h, which is already pulled in via
+// rendobj.h (above) — no explicit include needed here.
 
 // Renderer debug-draw module (3D world-space line/box/sphere/arrow).
 #include "DebugDraw.h"
 // Renderer.h for the game viewport SRV (used by the Game panel)
 #include "Renderer.h"
 #include "Core/Texture.h"
+
+// Live-tunables from W3DDisplay.cpp exposed to the Shadows panel.
+extern float g_shadowFootprint;
+extern float g_sunEyeDistance;
+extern float g_sunNear;
+extern float g_sunFar;
+extern bool  g_debugDisableSunShadowMap;
 
 // Bridge in D3D11Shims.cpp — reads WorldHeightMap bytes without
 // pulling any W3D / DX8-era headers into this translation unit.
@@ -580,6 +591,8 @@ namespace
     void DrawModelPanel();
     void DrawRenderTogglesPanel();
     void DrawLightsPanel();
+    void DrawShadowsPanel();
+    void DrawShadowTooltipOverlay();
     void DrawLaunchParamsPanel();
 
     // ---- Pick mode helpers (per-frame picking + overlay rendering) -
@@ -762,6 +775,8 @@ void DrawAll()
     if (s_visibility.destruction)
         Destruction::DrawPanel(&s_visibility.destruction);
     if (s_visibility.lights)     DrawLightsPanel();
+    if (s_visibility.shadows)    DrawShadowsPanel();
+    DrawShadowTooltipOverlay(); // only draws when the tooltip mode is armed
     if (s_visibility.launchParams) DrawLaunchParamsPanel();
 
     // After hierarchy renders, if the user was hovering a row in it
@@ -2361,6 +2376,224 @@ void DrawLightsPanel()
         "Lower values stretch shadows; higher compresses them.");
 
     ImGui::End();
+}
+
+// ============================================================================
+// Shadows panel — sun shadow-map tuning + diagnostics
+// ============================================================================
+//
+// Live-edit darkness, depth bias, sun frustum footprint + eye distance; flip
+// the visualization mode in the shader; preview the shadow depth map; and
+// arm a "What object's shadow is this?" tooltip that raycasts from the mouse
+// ground point along the sun ray and prints the first caster it hits.
+//
+// Everything here is pure Inspector UI — the actual shadow state lives on
+// `Render::Renderer::Instance().ShadowParams()` / `ShadowParams2()` (the
+// cbuffer gets re-uploaded on the next Draw3D) and on the `g_*` tunables
+// in W3DDisplay.cpp (sampled inside `BuildSunViewProjection` every frame).
+
+namespace
+{
+    bool s_shadowTooltipMode = false;
+}
+
+static const char* kShadowDebugModeLabels[] = {
+    "0 — Production (PCF)",
+    "1 — Force lit (shadows off)",
+    "2 — Shadow map depth",
+    "3 — Footprint outline",
+    "4 — Receiver depth",
+};
+
+// Raycast an axis-aligned box in world space. Ray is origin + t*dir, with
+// t >= 0. Returns the smallest t where the ray enters the box, or -1 if it
+// doesn't hit. Based on the slab method — six plane tests collapsed to min
+// and max t values.
+static float RayAABB(const ::Render::Float3& origin, const ::Render::Float3& dir,
+                     const ::Render::Float3& boxMin, const ::Render::Float3& boxMax)
+{
+    float tmin = -1e30f;
+    float tmax =  1e30f;
+    const float* o = &origin.x;
+    const float* d = &dir.x;
+    const float* lo = &boxMin.x;
+    const float* hi = &boxMax.x;
+    for (int i = 0; i < 3; ++i) {
+        if (fabsf(d[i]) < 1e-6f) {
+            if (o[i] < lo[i] || o[i] > hi[i]) return -1.0f;
+        } else {
+            float t1 = (lo[i] - o[i]) / d[i];
+            float t2 = (hi[i] - o[i]) / d[i];
+            if (t1 > t2) { float s = t1; t1 = t2; t2 = s; }
+            if (t1 > tmin) tmin = t1;
+            if (t2 < tmax) tmax = t2;
+            if (tmin > tmax) return -1.0f;
+        }
+    }
+    return tmin >= 0 ? tmin : (tmax >= 0 ? tmax : -1.0f);
+}
+
+// Cast a ray from the ground point at `groundPos` toward the sun, return
+// the first drawable whose world-space AABB the ray enters. Returns nullptr
+// if the ground point is outside the map or no drawable is hit.
+//
+// Walks TheGameClient's drawable list — exactly the same iteration the
+// shadow pass uses for casters, so the tooltip mirrors what's actually
+// written to the shadow map.
+static Drawable* FindShadowCasterAt(const ::Render::Float3& groundPos,
+                                    const ::Render::Float3& toSun)
+{
+    if (!TheGameClient) return nullptr;
+
+    Drawable* hit = nullptr;
+    float bestT = 1e30f;
+
+    Drawable* draw = TheGameClient->getDrawableList();
+    while (draw) {
+        if (!draw->isDrawableEffectivelyHidden()) {
+            for (DrawModule** dm = draw->getDrawModules(); *dm; ++dm) {
+                ObjectDrawInterface* odi = (*dm)->getObjectDrawInterface();
+                if (!odi) continue;
+                W3DModelDraw* w3dDraw = static_cast<W3DModelDraw*>(odi);
+                RenderObjClass* robj = w3dDraw->getRenderObject();
+                if (!robj) continue;
+
+                const AABoxClass& box = robj->Get_Bounding_Box();
+                ::Render::Float3 lo{ box.Center.X - box.Extent.X,
+                                     box.Center.Y - box.Extent.Y,
+                                     box.Center.Z - box.Extent.Z };
+                ::Render::Float3 hi{ box.Center.X + box.Extent.X,
+                                     box.Center.Y + box.Extent.Y,
+                                     box.Center.Z + box.Extent.Z };
+                float t = RayAABB(groundPos, toSun, lo, hi);
+                if (t > 0 && t < bestT) {
+                    bestT = t;
+                    hit = draw;
+                }
+            }
+        }
+        draw = draw->getNextDrawable();
+    }
+    return hit;
+}
+
+void DrawShadowsPanel()
+{
+    ImGui::SetNextWindowSize(ImVec2(420, 560), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Shadows", &s_visibility.shadows))
+    {
+        ImGui::End();
+        return;
+    }
+
+    auto& renderer = ::Render::Renderer::Instance();
+    auto& sp  = renderer.ShadowParams();
+    auto& sp2 = renderer.ShadowParams2();
+
+    // --- Master enable ---
+    bool enabled = !g_debugDisableSunShadowMap;
+    if (ImGui::Checkbox("Sun shadow pass enabled", &enabled))
+        g_debugDisableSunShadowMap = !enabled;
+    ImGui::TextDisabled("Drives the pre-pass that populates the shadow map.");
+    ImGui::Separator();
+
+    // --- Tunables ---
+    ImGui::Text("Strength / bias");
+    ImGui::SliderFloat("Darkness##sp_x",  &sp.x, 0.0f, 1.0f,   "%.2f");
+    ImGui::SliderFloat("Depth bias##sp_y", &sp.y, 0.0f, 0.005f, "%.5f");
+    ImGui::TextDisabled("Darkness 0 = no shadow, 1 = fully shadowed pixels drop to ambient.");
+    ImGui::TextDisabled("Raise bias if you see acne; lower if shadows 'float' away from casters.");
+    ImGui::Separator();
+
+    ImGui::Text("Sun frustum fit");
+    ImGui::SliderFloat("Footprint (world units)", &g_shadowFootprint, 500.0f, 8000.0f, "%.0f");
+    ImGui::SliderFloat("Eye distance",            &g_sunEyeDistance,  500.0f, 20000.0f, "%.0f");
+    ImGui::SliderFloat("Near plane",              &g_sunNear,         0.1f,   500.0f,   "%.1f");
+    ImGui::SliderFloat("Far plane",               &g_sunFar,          1000.0f,50000.0f, "%.0f");
+    ImGui::TextDisabled("Footprint smaller = sharper shadows but narrower coverage.");
+    ImGui::Separator();
+
+    // --- Debug visualization mode ---
+    ImGui::Text("Shader debug mode");
+    int mode = (int)sp2.x;
+    if (ImGui::Combo("##shadow_mode", &mode,
+                     kShadowDebugModeLabels, IM_ARRAYSIZE(kShadowDebugModeLabels)))
+    {
+        sp2.x = (float)mode;
+    }
+    ImGui::TextDisabled("Switches ComputeShadowVisibility in Shader3D.hlsl at runtime.");
+    ImGui::Separator();
+
+    // --- Tooltip toggle ---
+    ImGui::Text("Shadow tooltip");
+    ImGui::Checkbox("Identify caster under mouse", &s_shadowTooltipMode);
+    ImGui::TextDisabled("When on: mouse ground-point raycasts toward the sun and "
+                        "reports the first caster bounding-box it hits.");
+    ImGui::Separator();
+
+    // --- Shadow map preview ---
+#ifdef BUILD_WITH_D3D11
+    ImGui::Text("Shadow depth map");
+    if (ID3D11ShaderResourceView* srv = renderer.GetShadowMapSRV()) {
+        const float w = ImGui::GetContentRegionAvail().x;
+        const float sz = w < 384.0f ? w : 384.0f;
+        ImGui::Image((ImTextureID)(uintptr_t)srv, ImVec2(sz, sz));
+    } else {
+        ImGui::TextColored(ImVec4(1,0.4f,0.4f,1), "(shadow map not yet created)");
+    }
+#endif
+
+    ImGui::End();
+}
+
+// Tooltip overlay — draws at the mouse position when shadow tooltip mode
+// is armed. Independent from the normal pick tooltip; we don't want it to
+// interfere with the regular Properties hover when the user is NOT doing
+// shadow debugging.
+void DrawShadowTooltipOverlay()
+{
+    if (!s_shadowTooltipMode) return;
+    if (!TheTacticalView) return;
+    if (!TheW3DShadowManager) return;
+
+    // Mouse must be over the Game viewport (not over any panel).
+    ImVec2 m = ImGui::GetMousePos();
+    if (!IsPointInGameViewport((int)m.x, (int)m.y))
+        return;
+
+    GameViewportTransform xf = RemapPointToGameViewport((int)m.x, (int)m.y);
+    if (!xf.valid) return;
+
+    ICoord2D screen{ xf.outX, xf.outY };
+    Coord3D ground{};
+    TheTacticalView->screenToTerrain(&screen, &ground);
+
+    // Sun direction from the shadow manager's cached light position.
+    Vector3 lw = TheW3DShadowManager->getLightPosWorld(0);
+    float len = sqrtf(lw.X * lw.X + lw.Y * lw.Y + lw.Z * lw.Z);
+    if (len < 1e-3f) return;
+    ::Render::Float3 toSun{ lw.X / len, lw.Y / len, lw.Z / len };
+    ::Render::Float3 g{ ground.x, ground.y, ground.z };
+
+    Drawable* caster = FindShadowCasterAt(g, toSun);
+
+    ImGui::BeginTooltip();
+    ImGui::Text("Ground point: (%.0f, %.0f, %.0f)", ground.x, ground.y, ground.z);
+    if (caster) {
+        const Object* obj = caster->getObject();
+        const ThingTemplate* tmpl = caster->getTemplate();
+        ImGui::Separator();
+        ImGui::Text("Shadow caster: %s", tmpl ? tmpl->getName().str() : "<unnamed drawable>");
+        if (obj) {
+            ImGui::Text("ObjectID: %u", (unsigned)obj->getID());
+            const Coord3D* p = obj->getPosition();
+            if (p) ImGui::Text("At world: (%.0f, %.0f, %.0f)", p->x, p->y, p->z);
+        }
+    } else {
+        ImGui::Separator();
+        ImGui::TextDisabled("(no drawable AABB on the sun ray)");
+    }
+    ImGui::EndTooltip();
 }
 
 // ============================================================================

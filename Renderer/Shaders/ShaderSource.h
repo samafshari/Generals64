@@ -93,4 +93,11 @@ static const char* g_shaderShadowProjectedDecal =
 #include "VulkanHLSL/ShaderShadowProjectedDecal.hlsl.inc"
 ;
 
+// Sun shadow-map depth pass. Bound by Renderer::BeginShadowPass so opaque
+// scene geometry writes depth (from the sun's POV) into a dedicated D32 RT.
+// The main Shader3D PS then samples this texture to darken shadowed pixels.
+static const char* g_shaderShadowMap =
+#include "VulkanHLSL/ShaderShadowMap.hlsl.inc"
+;
+
 } // namespace Render

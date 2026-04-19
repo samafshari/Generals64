@@ -3376,6 +3376,98 @@ int RenderReflectionMeshesDX11()
 }
 
 // ============================================================================
+// Sun shadow-map casters
+// ============================================================================
+//
+// Called by W3DDisplay::draw between Renderer::BeginShadowPass and
+// Renderer::EndShadowPass. Iterates the same scene containers as the main
+// render pass — W3DDisplay::m_3DScene and TheGameClient drawable list — and
+// submits every visible MESH/HLOD/DISTLOD/COLLECTION through ModelRenderer.
+//
+// Because BeginShadowPass has already pinned FrameConstants.viewProjection to
+// the sun's ortho VP and swapped the color RT for the shadow DSV with colour
+// writes disabled, the normal Draw3DIndexed path now writes only depth into
+// the shadow map. ModelRenderer's PS still runs (D3D11 lets colour writes go
+// to a null RT silently) — wasted ALU but correct output.
+//
+// Limitation — culling uses the main camera's frustum (via ModelRenderer's
+// cached m_frustum), so objects outside the player's view don't cast shadows
+// into the visible footprint. Fine for gameplay-tight shadows; acceptable
+// compromise to avoid a second frustum-extract pass from the sun's POV.
+//
+// Returns the number of render objects submitted (for diagnostic).
+int RenderShadowCastersDX11(CameraClass* camera)
+{
+	if (!W3DDisplay::m_3DScene)
+		return 0;
+
+	auto& renderer = Render::Renderer::Instance();
+	auto& modelRenderer = Render::ModelRenderer::Instance();
+
+	// ModelRenderer::BeginFrame applies the engine camera to the renderer's
+	// FrameConstants, but SetCamera is a no-op for viewProjection while the
+	// shadow pass is active (Renderer keeps sunVP pinned). We still need
+	// BeginFrame for its frustum extract + camera position cache, which the
+	// internal RenderMesh culling paths read.
+	modelRenderer.BeginFrame(camera);
+
+	// BeginFrame also calls SetViewport with backbuffer dimensions (the main
+	// camera's viewport rect). That's wrong for the shadow pass — our RT is
+	// the 2048² shadow depth texture, and a backbuffer-sized viewport only
+	// covers the top-left subrect of it (leaving the rest cleared to 1.0 and
+	// producing the view-space "gradient plane" bug). Re-assert the shadow
+	// viewport here so the entire shadow map gets rasterized into.
+	const float s = (float)renderer.GetShadowMapSize();
+	renderer.SetViewport(0.0f, 0.0f, s, s, 0.0f, 1.0f);
+
+	int submitted = 0;
+
+	// Intentionally NOT iterating W3DDisplay::m_3DScene here. That scene holds
+	// a lot of non-caster objects that flood the shadow map when drawn from
+	// the sun's POV:
+	//   • TheTerrainRenderObject — single mega-mesh covering the whole map
+	//   • TheWaterRenderObj      — flat plane across the entire map extent,
+	//                              plus the skybox + cloud meshes it owns
+	//                              (m_skyBox, cloud layer) which are scaled
+	//                              to fit the view volume
+	//   • light/particle lookups, tracers, ropes, ghost-object placeholders,
+	//     placement preview arrows, icons — all non-physical overlays
+	//
+	// Gameplay CASTERS live on TheGameClient's drawable list: buildings,
+	// units, infantry, props. W3DModelDraw::onRenderObjRefreshSubObjects
+	// does add the drawable's render obj to m_3DScene too, but it's also
+	// walked through TheGameClient — iterating only the drawable list keeps
+	// the caster set tight and avoids accidentally picking up environment
+	// meshes.
+	if (TheGameClient && TheTacticalView)
+	{
+		Drawable* draw = TheGameClient->getDrawableList();
+		while (draw)
+		{
+			if (!draw->isDrawableEffectivelyHidden())
+			{
+				for (DrawModule** dm = draw->getDrawModules(); *dm; ++dm)
+				{
+					ObjectDrawInterface* odi = (*dm)->getObjectDrawInterface();
+					if (!odi)
+						continue;
+					W3DModelDraw* w3dDraw = static_cast<W3DModelDraw*>(odi);
+					RenderObjClass* renderObject = w3dDraw->getRenderObject();
+					if (renderObject)
+					{
+						modelRenderer.RenderRenderObject(renderObject);
+						++submitted;
+					}
+				}
+			}
+			draw = draw->getNextDrawable();
+		}
+	}
+
+	return submitted;
+}
+
+// ============================================================================
 // Occluded-unit silhouettes
 // ============================================================================
 //
