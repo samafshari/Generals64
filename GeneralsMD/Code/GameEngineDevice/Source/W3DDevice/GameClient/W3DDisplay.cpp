@@ -101,9 +101,9 @@ bool g_debugDisableTracks = false;
 bool g_debugDisableWaypoints = false;
 bool g_debugDisableTranslucent = false;
 bool g_debugDisableParticles = false;
-// Shadow subsystem toggles — enabled by default. Projected is a no-op in
-// this DX11 build (TheTerrainRenderObject is always null) so it's safe to
-// leave on. Volumetric state-restore + null-safety fixes have landed.
+// Shadow subsystem toggles. Both projected and volumetric paths enabled.
+// Volumetric rendering prefers ZFail stencil updates to avoid
+// camera-inside-volume pillar artifacts from airborne casters.
 bool g_debugDisableProjectedShadows = false;
 bool g_debugDisableVolumetricShadows = false;
 bool g_debugDisableSnow = false;

@@ -44,6 +44,7 @@
 #ifdef BUILD_WITH_D3D11
 #include <d3d11.h>
 #include "Renderer.h"
+#include "RenderUtils.h"
 #include "Core/Device.h"
 #include "Shaders/ShaderSource.h"
 #endif
@@ -786,6 +787,10 @@ namespace
 	// DrawDynamic calls within a single frame.
 	static UINT				g_dynamicVBCursor	= 0;
 	static UINT				g_dynamicIBCursor	= 0;
+	// First map per frame must use WRITE_DISCARD so we don't race the GPU
+	// reads from the previous frame sitting at cursor=0. Flipped back after
+	// the initial Map call, reset to true at top of renderShadows.
+	static Bool				g_dynamicFirstMap	= true;
 
 	bool SetVolShadowCreateDeviceObjects(Render::Device& dev)
 	{
@@ -881,10 +886,19 @@ namespace
 		// face orientations. The DX11 two-sided stencil description is
 		// what actually drives the INCR/DECR split; the rasterizer just
 		// needs to feed both.
+		//
+		// FrontCounterClockwise=TRUE: the original D3D8 code rendered CCW
+		// triangles with INCR (pass 1: CULL_CW) and CW with DECR (pass 2:
+		// CULL_CCW). With the default DX11 convention (CW=front) our
+		// FrontFace INCR/BackFace DECR fires INCR on CW, which is INVERTED
+		// relative to the original — INCR ends up on the back of the volume
+		// and DECR on the front, leaving stencil positive on visible side
+		// walls (the "standing pillar" artifact). Flipping to CCW=front
+		// restores the original semantics.
 		D3D11_RASTERIZER_DESC rs = {};
 		rs.FillMode				= D3D11_FILL_SOLID;
 		rs.CullMode				= D3D11_CULL_NONE;
-		rs.FrontCounterClockwise	= FALSE;
+		rs.FrontCounterClockwise	= TRUE;
 		rs.DepthClipEnable		= TRUE;
 		if (FAILED(d3d->CreateRasterizerState(&rs, &g_svPipeline.rasterNoCull)))
 			return false;
@@ -952,10 +966,15 @@ namespace
 	// on it — its contents get reset on the next Draw3D call.
 	void SetVolShadowUploadWorld(Render::Device& dev, const Matrix3D* meshXform)
 	{
-		Matrix4x4 world(*meshXform);
 		Render::ObjectConstants oc = {};
-		// Matrix4x4 is already row-major float4[4] — copy directly.
-		memcpy(&oc.world, &world, sizeof(oc.world));
+		// DX11: W3D Matrix3D is column-vector convention; the shader's
+		// `mul(v, world)` expects a row-major matrix with the transpose
+		// baked in. RenderUtils::Matrix3DToFloat4x4 does exactly that —
+		// identical to how Shader3D's ObjectConstants upload works.
+		// Direct memcpy here was producing a transposed world matrix,
+		// sending every volume vertex to a garbage world position
+		// (hence "no shadows on units + triangles mid-air").
+		oc.world = RenderUtils::Matrix3DToFloat4x4(*meshXform);
 		oc.color = { 1, 1, 1, 1 };
 		oc.shaderParams = { 0, 0, 0, 0 };
 
@@ -1082,13 +1101,29 @@ void W3DVolumetricShadow::SetGeometry(W3DShadowGeometry* geometry)
 // ---------------------------------------------------------------------------
 void W3DVolumetricShadow::updateOptimalExtrusionPadding(void)
 {
-	// DX11: Terrain raycast helpers used by the original
-	// (TheTerrainRenderObject->Cast_Ray + getHeightMapHeight) aren't part of
-	// the current DX11 build, so we fall back to a fixed extrusion padding.
-	// The shadow will still reach the ground for normally-placed units and
-	// only clips very slightly on cliff edges until terrain raycast is
-	// hooked up.
-	m_extraExtrusionPadding = SHADOW_EXTRUSION_BUFFER;
+	// Distance from the caster's origin down to terrain under it, plus a
+	// small safety margin. The volume extrusion math uses this as the
+	// "virtual floor" depth — if it's too small the shadow volume never
+	// reaches real ground and stencil INCR/DECR don't balance out on
+	// scene pixels, which shows up as air-standing grey quads.
+	//
+	// Original did a cliff-edge raycast via TheTerrainRenderObject->Cast_Ray
+	// plus a safety walk along the object's X/Y footprint. We approximate
+	// with getGroundHeight at the unit's XY position; cliff-edge units may
+	// under-extrude until the raycast helper is ported.
+	if (m_robj && TheTerrainLogic)
+	{
+		Vector3 pos = m_robj->Get_Position();
+		Real ground = TheTerrainLogic->getGroundHeight(pos.X, pos.Y);
+		Real padding = pos.Z - ground + SHADOW_EXTRUSION_BUFFER;
+		if (padding < SHADOW_EXTRUSION_BUFFER)
+			padding = SHADOW_EXTRUSION_BUFFER;
+		m_extraExtrusionPadding = padding;
+	}
+	else
+	{
+		m_extraExtrusionPadding = SHADOW_EXTRUSION_BUFFER;
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1192,19 +1227,22 @@ void W3DVolumetricShadow::RenderDynamicMeshVolume(Int meshIndex, Int lightIndex,
 	UINT idxBytes = (UINT)numIndex * idxStride;
 
 	// Discard-and-reset when the dynamic buffer would overflow — mirrors the
-	// D3DLOCK_DISCARD path.
+	// D3DLOCK_DISCARD path. Also force DISCARD on the first map of each
+	// frame so we don't race the GPU's in-flight reads from the previous
+	// frame at cursor=0.
 	D3D11_MAP vbMap = D3D11_MAP_WRITE_NO_OVERWRITE;
-	if (g_dynamicVBCursor + vtxBytes > g_dynamicVBBytes)
+	if (g_dynamicFirstMap || g_dynamicVBCursor + vtxBytes > g_dynamicVBBytes)
 	{
 		vbMap = D3D11_MAP_WRITE_DISCARD;
 		g_dynamicVBCursor = 0;
 	}
 	D3D11_MAP ibMap = D3D11_MAP_WRITE_NO_OVERWRITE;
-	if (g_dynamicIBCursor + idxBytes > g_dynamicIBBytes)
+	if (g_dynamicFirstMap || g_dynamicIBCursor + idxBytes > g_dynamicIBBytes)
 	{
 		ibMap = D3D11_MAP_WRITE_DISCARD;
 		g_dynamicIBCursor = 0;
 	}
+	g_dynamicFirstMap = false;
 
 	D3D11_MAPPED_SUBRESOURCE vbMapped = {};
 	if (FAILED(ctx->Map(g_dynamicVB, 0, vbMap, 0, &vbMapped)))
@@ -1664,6 +1702,12 @@ void W3DVolumetricShadow::buildSilhouette(Int meshIndex, Vector3* lightPosObject
 
 // ---------------------------------------------------------------------------
 // constructVolume (dynamic path) — build into the in-memory Geometry buffer.
+// Original strip-shared layout: each silhouette edge becomes two side-wall
+// triangles sharing vertices with adjacent edges when possible. Open top /
+// open bottom — tall (airborne) volumes can leak through the open bottom
+// and show as grey pillars, but for ground-level casters the camera rays
+// terminate at the ground before reaching the opening so shadows are
+// correct.
 // ---------------------------------------------------------------------------
 void W3DVolumetricShadow::constructVolume(Vector3* lightPosObject, Real shadowExtrudeDistance, Int volumeIndex, Int meshIndex)
 {
@@ -1716,8 +1760,6 @@ void W3DVolumetricShadow::constructVolume(Vector3* lightPosObject, Real shadowEx
 	{
 		Short currentEdgeEnd = silhouetteIndices[i + 1];
 
-		// Find another edge starting at this one's endpoint; swap it to next
-		// position so strips can be formed (vertex-cache-friendly).
 		for (k = i + 2; k < indicesPerMesh; k += 2)
 			if (silhouetteIndices[k] == currentEdgeEnd)
 			{
@@ -1729,7 +1771,6 @@ void W3DVolumetricShadow::constructVolume(Vector3* lightPosObject, Real shadowEx
 
 		if (k >= indicesPerMesh)
 		{
-			// end of strip
 			if (currentEdgeEnd == stripStartIndex)
 			{
 				indexList[0] = (Short)lastEdgeVertex2Index;
@@ -1813,6 +1854,74 @@ void W3DVolumetricShadow::constructVolume(Vector3* lightPosObject, Real shadowEx
 			lastExtrude2Index = vertexCount + 1;
 			vertexCount += 2;
 			polygonCount += 2;
+		}
+	}
+
+	// --- Top + bottom caps (same rationale as constructVolumeVB) ---
+	// For N silhouette edges: 2 fan-center verts + 4N fresh verts (top
+	// silh pair and bottom extruded pair per edge) + 2N cap triangles.
+	// Only emits if the Geometry was allocated with enough room; otherwise
+	// fall back to the open volume. Indexed writes below depend on
+	// m_numVertex / m_numPolygon from the Create() call in
+	// allocateShadowVolume.
+	{
+		const Int N = indicesPerMesh / 2;
+		const Int capVerts  = 2 + 4 * N;
+		const Int capPolys  = 2 * N;
+		if (N > 0
+			&& (vertexCount + capVerts) <= shadowVolume->GetNumVertex()
+			&& (polygonCount + capPolys) <= shadowVolume->GetNumPolygon())
+		{
+			Vector3 centroid(0.0f, 0.0f, 0.0f);
+			for (Int s = 0; s < indicesPerMesh; ++s)
+				centroid += geomMesh->GetVertex(silhouetteIndices[s]);
+			centroid /= (Real)indicesPerMesh;
+
+			Vector3 centroidExtruded = centroid - *lightPosObject;
+			centroidExtruded *= shadowExtrudeDistance;
+			centroidExtruded += centroid;
+
+			const Int topCenterIdx = vertexCount;
+			const Int botCenterIdx = vertexCount + 1;
+			shadowVolume->SetVertex(topCenterIdx, &centroid);
+			shadowVolume->SetVertex(botCenterIdx, &centroidExtruded);
+
+			for (Int e = 0; e < N; ++e)
+			{
+				const Short si = silhouetteIndices[e * 2];
+				const Short ei = silhouetteIndices[e * 2 + 1];
+				const Vector3& vs = geomMesh->GetVertex(si);
+				const Vector3& ve = geomMesh->GetVertex(ei);
+
+				Vector3 extS = vs - *lightPosObject;
+				extS *= shadowExtrudeDistance;
+				extS += vs;
+				Vector3 extE = ve - *lightPosObject;
+				extE *= shadowExtrudeDistance;
+				extE += ve;
+
+				const Int vBase = vertexCount + 2 + e * 4;
+				shadowVolume->SetVertex(vBase + 0, &vs);
+				shadowVolume->SetVertex(vBase + 1, &ve);
+				shadowVolume->SetVertex(vBase + 2, &extS);
+				shadowVolume->SetVertex(vBase + 3, &extE);
+
+				// Top cap: (topCenter, silh_start, silh_end) — outward-up.
+				indexList[0] = (Short)topCenterIdx;
+				indexList[1] = (Short)(vBase + 0);
+				indexList[2] = (Short)(vBase + 1);
+				shadowVolume->SetPolygonIndex(polygonCount + e * 2 + 0, indexList);
+
+				// Bottom cap: (botCenter, extrude_end, extrude_start) —
+				// reversed winding for outward-down normal.
+				indexList[0] = (Short)botCenterIdx;
+				indexList[1] = (Short)(vBase + 3);
+				indexList[2] = (Short)(vBase + 2);
+				shadowVolume->SetPolygonIndex(polygonCount + e * 2 + 1, indexList);
+			}
+
+			vertexCount  += capVerts;
+			polygonCount += capPolys;
 		}
 	}
 
@@ -1912,11 +2021,40 @@ void W3DVolumetricShadow::constructVolumeVB(Vector3* lightPosObject, Real shadow
 		}
 	}
 
+	// DX11: top + bottom cap augmentation. The strip-based layout leaves
+	// the volume open at top and bottom; for thin vertical pillars (sun
+	// overhead on small-footprint casters), the camera sees strips where
+	// near/far walls don't overlap in screen space, so INCR+DECR doesn't
+	// cancel — visible grey pillars/boxes. Closing both ends with
+	// fan-triangulated caps (silhouette centroid → edge pairs at the top,
+	// extruded centroid → edge pairs at the bottom) makes the volume
+	// topologically closed so every camera ray crosses exactly two faces.
+	//
+	// Per silhouette edge: 4 fresh verts (2 for top, 2 for bottom) + 2
+	// cap triangles. Plus 2 fan-center verts (silhouette centroid and
+	// its extrusion).
+	const Int N = indicesPerMesh / 2;	// silhouette edge count
+	const Int capVertCount  = 2 + 4 * N;
+	const Int capPolyCount  = 2 * N;
+	const Int totalVertCount = vertexCount + capVertCount;
+	const Int totalPolyCount = polygonCount + capPolyCount;
+
 	DEBUG_ASSERTCRASH(m_shadowVolumeVB[volumeIndex][meshIndex] == nullptr, ("Updating Existing Static Vertex Buffer Shadow"));
-	vbSlot = m_shadowVolumeVB[volumeIndex][meshIndex] = TheW3DBufferManager->getSlot(W3DBufferManager::VBM_FVF_XYZ, vertexCount);
+	vbSlot = m_shadowVolumeVB[volumeIndex][meshIndex] = TheW3DBufferManager->getSlot(W3DBufferManager::VBM_FVF_XYZ, totalVertCount);
 
 	DEBUG_ASSERTCRASH(m_shadowVolumeIB[volumeIndex][meshIndex] == nullptr, ("Updating Existing Static Index Buffer Shadow"));
-	ibSlot = m_shadowVolumeIB[volumeIndex][meshIndex] = TheW3DBufferManager->getSlot(polygonCount * 3);
+	ibSlot = m_shadowVolumeIB[volumeIndex][meshIndex] = TheW3DBufferManager->getSlot(totalPolyCount * 3);
+
+	// If the augmented slot didn't fit, fall back to the un-capped layout
+	// (pillar artifacts reappear but the volume still renders).
+	bool wantCaps = (vbSlot != nullptr && ibSlot != nullptr);
+	if (!wantCaps)
+	{
+		if (ibSlot) TheW3DBufferManager->releaseSlot(ibSlot);
+		if (vbSlot) TheW3DBufferManager->releaseSlot(vbSlot);
+		vbSlot = m_shadowVolumeVB[volumeIndex][meshIndex] = TheW3DBufferManager->getSlot(W3DBufferManager::VBM_FVF_XYZ, vertexCount);
+		ibSlot = m_shadowVolumeIB[volumeIndex][meshIndex] = TheW3DBufferManager->getSlot(polygonCount * 3);
+	}
 
 	if (!ibSlot || !vbSlot)
 	{
@@ -1946,8 +2084,14 @@ void W3DVolumetricShadow::constructVolumeVB(Vector3* lightPosObject, Real shadow
 	return;
 #endif
 
-	shadowVolume->SetNumActivePolygon(polygonCount);
-	shadowVolume->SetNumActiveVertex(vertexCount);
+	shadowVolume->SetNumActivePolygon(wantCaps ? totalPolyCount : polygonCount);
+	shadowVolume->SetNumActiveVertex(wantCaps ? totalVertCount : vertexCount);
+
+	// Save base pointers so the bottom-cap pass can write into fixed offsets
+	// past the strip output without tracking pointer arithmetic through the
+	// strip loop. Strip code below keeps advancing `vb` / `ib`.
+	Vector3* const vbBase = vb;
+	UINT16*  const ibBase = ib;
 
 	Short* silhouetteIndices = m_silhouetteIndex[meshIndex];
 	Short stripStartIndex = silhouetteIndices[0];
@@ -2047,6 +2191,67 @@ void W3DVolumetricShadow::constructVolumeVB(Vector3* lightPosObject, Real shadow
 	}
 
 #ifdef BUILD_WITH_D3D11
+	// --- Top + bottom cap (fan from centroid and extruded centroid) ---
+	// Closes both open ends so the volume is fully closed and every
+	// camera ray that enters the volume crosses exactly two faces with
+	// matching INCR+DECR. Vertex layout after the strip:
+	//   [vertexCount + 0]             top fan center (silhouette centroid)
+	//   [vertexCount + 1]             bottom fan center (extruded centroid)
+	//   [vertexCount + 2 + 4e + 0]    silh_start (top)
+	//   [vertexCount + 2 + 4e + 1]    silh_end   (top)
+	//   [vertexCount + 2 + 4e + 2]    extrude_start (bottom)
+	//   [vertexCount + 2 + 4e + 3]    extrude_end   (bottom)
+	if (wantCaps && N > 0)
+	{
+		// Centroids in object space.
+		Vector3 centroid(0.0f, 0.0f, 0.0f);
+		for (Int s = 0; s < indicesPerMesh; ++s)
+			centroid += geomMesh->GetVertex(silhouetteIndices[s]);
+		centroid /= (Real)indicesPerMesh;
+
+		Vector3 centroidExtruded = centroid - *lightPosObject;
+		centroidExtruded *= shadowExtrudeDistance;
+		centroidExtruded += centroid;
+
+		const Int topCenterIdx = vertexCount;
+		const Int botCenterIdx = vertexCount + 1;
+		vbBase[topCenterIdx] = centroid;
+		vbBase[botCenterIdx] = centroidExtruded;
+
+		for (Int e = 0; e < N; ++e)
+		{
+			const Short si = silhouetteIndices[e * 2];
+			const Short ei = silhouetteIndices[e * 2 + 1];
+			const Vector3& vs = geomMesh->GetVertex(si);
+			const Vector3& ve = geomMesh->GetVertex(ei);
+
+			Vector3 extS = vs - *lightPosObject;
+			extS *= shadowExtrudeDistance;
+			extS += vs;
+			Vector3 extE = ve - *lightPosObject;
+			extE *= shadowExtrudeDistance;
+			extE += ve;
+
+			const Int vBase = vertexCount + 2 + e * 4;
+			vbBase[vBase + 0] = vs;
+			vbBase[vBase + 1] = ve;
+			vbBase[vBase + 2] = extS;
+			vbBase[vBase + 3] = extE;
+
+			UINT16* iCap = ibBase + polygonCount * 3 + e * 6;
+			// Top cap: (topCenter → silh_start → silh_end). For CCW
+			// silhouette this projects CCW in screen from above → FrontFace
+			// op = INCR (valid "entry" for top-down rays into the volume).
+			iCap[0] = (UINT16)topCenterIdx;
+			iCap[1] = (UINT16)(vBase + 0);
+			iCap[2] = (UINT16)(vBase + 1);
+			// Bottom cap: reversed winding for outward-down normal.
+			iCap[3] = (UINT16)botCenterIdx;
+			iCap[4] = (UINT16)(vBase + 3);
+			iCap[5] = (UINT16)(vBase + 2);
+		}
+	}
+
 	TheW3DBufferManager->unmapSlot(vbSlot);
 	TheW3DBufferManager->unmapSlot(ibSlot);
 #endif
@@ -2074,8 +2279,21 @@ Bool W3DVolumetricShadow::allocateShadowVolume(Int volumeIndex, Int meshIndex)
 
 	m_shadowVolume[volumeIndex][meshIndex] = shadowVolume;
 
-	numPolygons = m_maxSilhouetteEntries[meshIndex];
-	numVertices = m_maxSilhouetteEntries[meshIndex] * 2;
+	// DX11: Sized for strip side walls + top/bottom cap fans. For N
+	// silhouette edges (maxEntries = 2N): strip uses ≤ 2N verts / 2N polys,
+	// both caps together add 2 + 4N verts and 2N polys (top + bottom fan
+	// from centroid). Total worst case: 6N+2 verts and 4N polys.
+	// → numVertices = 3 * maxEntries + 2
+	// → numPolygons = 2 * maxEntries
+	const Int maxEntries = m_maxSilhouetteEntries[meshIndex];
+	if (maxEntries <= 0)
+	{
+		delete shadowVolume;
+		m_shadowVolume[volumeIndex][meshIndex] = nullptr;
+		return FALSE;
+	}
+	numPolygons = maxEntries * 2;
+	numVertices = maxEntries * 3 + 2;
 
 	if (shadowVolume->GetFlags() & SHADOW_DYNAMIC)
 	{
@@ -2221,6 +2439,7 @@ void W3DVolumetricShadowManager::renderShadows(Int projectionCount)
 	// Reset dynamic cursor at frame start (mirrors the original's discard).
 	g_dynamicVBCursor = 0;
 	g_dynamicIBCursor = 0;
+	g_dynamicFirstMap = true;
 
 	Bool haveShadows = (m_shadowList != nullptr) && TheGlobalData->m_useShadowVolumes;
 
@@ -2229,7 +2448,12 @@ void W3DVolumetricShadowManager::renderShadows(Int projectionCount)
 		// Bind shared pipeline for stencil passes.
 		g_svPipeline.extrudeShader.Bind(dev);
 		ctx->OMSetBlendState(g_svPipeline.blendNoColor, nullptr, 0xFFFFFFFF);
-		ctx->OMSetDepthStencilState(g_svPipeline.dsExtrudeZPass, 0x0);
+		// Camera-inside-volume is common with airborne casters. Running ZPass
+		// there leaves unmatched stencil counts (pillar/column artifacts), so
+		// prefer ZFail whenever available.
+		ctx->OMSetDepthStencilState(
+			g_svPipeline.dsExtrudeZFail ? g_svPipeline.dsExtrudeZFail : g_svPipeline.dsExtrudeZPass,
+			0x0);
 		ctx->RSSetState(g_svPipeline.rasterNoCull);
 		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
@@ -2273,11 +2497,9 @@ void W3DVolumetricShadowManager::renderShadows(Int projectionCount)
 			}
 		}
 
-		// DX11: with two-sided stencil, both INCR_SAT (front) and DECR_SAT
-		// (back) fire in the same draw — the original needed two passes
-		// because D3D8 has no per-face stencil ops. We skip the original's
-		// second cull-CCW pass entirely. ZFail branch (camera-in-volume)
-		// is stubbed — requires frustum-vs-volume test not yet ported.
+		// DX11: with two-sided stencil, both front/back ops fire in one draw.
+		// We run the ZFail state to keep counts correct when the camera is
+		// inside a volume (frequent with airborne casters).
 
 		// Flush any dynamic tasks queued but not yet drained.
 		W3DVolumetricShadowRenderTask* dyn = m_dynamicShadowVolumesToRender;
@@ -2305,20 +2527,21 @@ void W3DVolumetricShadowManager::renderShadows(Int projectionCount)
 		renderStencilShadows();
 	}
 
-	// DX11: explicit state restore — we bound VB slot 0, IB, VS cbuffer @ b1
-	// (worldCB), and PS cbuffer @ b0 (darkenCB). Any of those linger and
-	// break later passes (notably the water pass that reuses PS@b0 for its
-	// frame constants). Unbind them and then let the caller-side
-	// renderer.Restore3DState() reset the pipeline states.
+	// DX11: we bound VS@b1 (worldCB) and PS@b0 (darkenCB) directly, bypassing
+	// the Renderer's m_objectCBBound/FlushFrameConstants path. Leaving them
+	// bound to our own buffers is fine — the caller-side Restore3DState now
+	// invalidates the Draw3D rebind cache so the next Draw3D will rebind
+	// m_cbObject to VS/PS@b1 instead of trusting the stale cache. We DO
+	// still drop VB/IB state since Draw3D sets its own VB each call and
+	// there's no safety net for a stale pointer.
 	{
 		ID3D11Buffer* nullBuf = nullptr;
 		UINT nullStride = 0, nullOffset = 0;
 		ctx->IASetVertexBuffers(0, 1, &nullBuf, &nullStride, &nullOffset);
 		ctx->IASetIndexBuffer(nullptr, DXGI_FORMAT_R16_UINT, 0);
-		ctx->VSSetConstantBuffers(1, 1, &nullBuf);
-		ctx->PSSetConstantBuffers(0, 1, &nullBuf);
 		g_lastBoundVB = nullptr;
 	}
+	Render::Renderer::Instance().InvalidateObjectCBCache();
 #else
 	(void)projectionCount;
 #endif

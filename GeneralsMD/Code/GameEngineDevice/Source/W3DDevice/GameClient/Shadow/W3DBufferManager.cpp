@@ -291,6 +291,10 @@ W3DBufferManager::W3DVertexBufferSlot* W3DBufferManager::getSlot(VBM_FVF_TYPES f
 	Int sizeIndex = (size >> MIN_SLOT_SIZE_SHIFT) - 1;
 
 	DEBUG_ASSERTCRASH(sizeIndex < MAX_VB_SIZES && size, ("Allocating too large vertex buffer slot"));
+	// Hard bail in release — past-end reads on the size bucket array yield
+	// garbage pointers that then dereference to an access violation.
+	if (sizeIndex < 0 || sizeIndex >= MAX_VB_SIZES || size <= 0)
+		return nullptr;
 
 	// Fast path: hand back a previously-released slot of the exact size.
 	W3DVertexBufferSlot* vbSlot = m_W3DVertexBufferSlots[fvfType][sizeIndex];
@@ -397,6 +401,10 @@ W3DBufferManager::W3DIndexBufferSlot* W3DBufferManager::getSlot(Int size)
 	Int sizeIndex = (size >> MIN_SLOT_SIZE_SHIFT) - 1;
 
 	DEBUG_ASSERTCRASH(sizeIndex < MAX_IB_SIZES && size, ("Allocating too large index buffer slot"));
+	// Hard bail in release — past-end reads on the size bucket array yield
+	// garbage pointers that then dereference to an access violation.
+	if (sizeIndex < 0 || sizeIndex >= MAX_IB_SIZES || size <= 0)
+		return nullptr;
 
 	W3DIndexBufferSlot* ibSlot = m_W3DIndexBufferSlots[sizeIndex];
 	if (ibSlot)

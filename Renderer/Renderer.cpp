@@ -930,6 +930,13 @@ void Renderer::FlushFrameConstants()
 
 void Renderer::Restore3DState()
 {
+    // Defensive: drop the Draw3D per-frame ObjectConstants rebind cache so
+    // any subsystem that bypassed the cache (shadow volumes, custom passes)
+    // can't leave a stale "bound" flag and starve the next Draw3D of its
+    // object cbuffer. Cost is one extra VS/PS cbuffer rebind per state
+    // restore — negligible.
+    m_objectCBBound = false;
+
     m_shader3D.Bind(m_device);
     m_rasterDefault.Bind(m_device);
     m_blendOpaque.Bind(m_device);

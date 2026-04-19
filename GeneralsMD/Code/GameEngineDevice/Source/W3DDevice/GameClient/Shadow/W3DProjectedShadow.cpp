@@ -56,6 +56,13 @@
 // Heightmap sampling — used by queueDecal/queueSimpleDecal. BaseHeightMap.h
 // pulls in WorldHeightMap.h transitively.
 #include "W3DDevice/GameClient/BaseHeightMap.h"
+#include "W3DDevice/GameClient/WorldHeightMap.h"
+
+// DX11: TheTerrainRenderObject is never populated in this build (the .cpp
+// that sets it isn't compiled). The live path is GetTerrainHeightMap() —
+// it prefers TheTerrainRenderObject->getMap() and falls back to the
+// D3D11TerrainVisual's logic heightmap. Defined in D3D11Shims.cpp.
+extern WorldHeightMap* GetTerrainHeightMap();
 
 // Forward singleton — declared in shadow.h, owned by W3DShadow.cpp, pointed
 // at our instance by the umbrella manager.
@@ -433,10 +440,8 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow* shadow)
 #ifdef BUILD_WITH_D3D11
 	if (!shadow || !shadow->m_shadowTexture[0])
 		return;
-	if (!TheTerrainRenderObject)
-		return;
 
-	WorldHeightMap* hmap = TheTerrainRenderObject->getMap();
+	WorldHeightMap* hmap = GetTerrainHeightMap();
 	if (!hmap)
 		return;
 
@@ -815,25 +820,18 @@ Int W3DProjectedShadowManager::renderShadows(RenderInfoClass& rinfo)
 		return 0;
 
 	// Compute clipping extent for queueDecal from currently-drawn terrain.
-	if (TheTerrainRenderObject)
-	{
-		WorldHeightMap* hmap = TheTerrainRenderObject->getMap();
-		if (!hmap)
-			return 0;
-
-		s_drawEdgeY = hmap->getDrawOrgY() + hmap->getDrawHeight() - 1;
-		s_drawEdgeX = hmap->getDrawOrgX() + hmap->getDrawWidth() - 1;
-		if (s_drawEdgeX > (hmap->getXExtent() - 1))
-			s_drawEdgeX = hmap->getXExtent() - 1;
-		if (s_drawEdgeY > (hmap->getYExtent() - 1))
-			s_drawEdgeY = hmap->getYExtent() - 1;
-		s_drawStartX = hmap->getDrawOrgX();
-		s_drawStartY = hmap->getDrawOrgY();
-	}
-	else
-	{
+	WorldHeightMap* hmap = GetTerrainHeightMap();
+	if (!hmap)
 		return 0;
-	}
+
+	s_drawEdgeY = hmap->getDrawOrgY() + hmap->getDrawHeight() - 1;
+	s_drawEdgeX = hmap->getDrawOrgX() + hmap->getDrawWidth() - 1;
+	if (s_drawEdgeX > (hmap->getXExtent() - 1))
+		s_drawEdgeX = hmap->getXExtent() - 1;
+	if (s_drawEdgeY > (hmap->getYExtent() - 1))
+		s_drawEdgeY = hmap->getYExtent() - 1;
+	s_drawStartX = hmap->getDrawOrgX();
+	s_drawStartY = hmap->getDrawOrgY();
 
 	// ---- Object-bound shadows (SHADOW_DECAL + SHADOW_PROJECTION) --------
 	W3DShadowTexture* lastTex = nullptr;

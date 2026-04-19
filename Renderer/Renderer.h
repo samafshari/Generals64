@@ -335,6 +335,11 @@ public:
 
     Device& GetDevice() { return m_device; }
 
+    // Invalidate the Draw3D per-frame ObjectConstants (VS/PS @ b1) rebind
+    // cache. Call after any subsystem has touched VS b1 directly so the
+    // next Draw3D will re-bind m_cbObject rather than trusting the cache.
+    void InvalidateObjectCBCache() { m_objectCBBound = false; }
+
     int GetWidth() const { return m_device.GetWidth(); }
     int GetHeight() const { return m_device.GetHeight(); }
 
