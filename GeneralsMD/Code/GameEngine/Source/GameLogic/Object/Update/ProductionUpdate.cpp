@@ -606,8 +606,19 @@ UpdateSleepTime ProductionUpdate::update()
 /// @todo srj use SLEEPY_UPDATE here
 	ProductionEntry *production = m_productionQueue;
 	const ProductionUpdateModuleData *d = getProductionUpdateModuleData();
-	UnsignedInt now = TheGameLogic->getFrame();
+
+	// USA01 regression — mission 1 briefing fires a FREEZE_TIME scripted
+	// cinematic that destroys enemy ChinaBunker objects mid-frame. Their
+	// ProductionUpdate module lingered in the sleepy queue for one more
+	// frame with the underlying Object already freed; the next call landed
+	// on a dangling vtable and DEP-faulted trying to execute garbage. Bail
+	// cleanly if essential pointers are null before any virtual calls.
+	if (!d || !TheGameLogic)
+		return UPDATE_SLEEP_NONE;
 	Object *us = getObject();
+	if (!us)
+		return UPDATE_SLEEP_NONE;
+	UnsignedInt now = TheGameLogic->getFrame();
 
 	// update the door behaviors
 	if( d->m_numDoorAnimations > 0 )

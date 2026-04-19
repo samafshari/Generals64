@@ -59,9 +59,10 @@ Bool FFmpegFile::open(File *file)
 {
 	DEBUG_ASSERTCRASH(m_file == nullptr, ("already open"));
 	DEBUG_ASSERTCRASH(file != nullptr, ("null file pointer"));
-#if LOGGING_LEVEL != LOGLEVEL_NONE
-	av_log_set_level(AV_LOG_INFO);
-#endif
+	// Quiet ffmpeg: the default AV_LOG_INFO pipes "[mp3 @ 0x...] Estimating
+	// duration..." lines to stderr for every clip, drowning out real
+	// diagnostics during gameplay. AV_LOG_ERROR still reports real failures.
+	av_log_set_level(AV_LOG_ERROR);
 
 // This is required for FFmpeg older than 4.0 -> deprecated afterwards though
 #if LIBAVFORMAT_VERSION_MAJOR < 58

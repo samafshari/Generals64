@@ -1299,6 +1299,21 @@ void W3DDisplay::draw()
 	renderer.ApplySharpen();
 
 	renderer.EndPostChain();
+#else
+	// B&W cutscene filter: the full post-process chain above is disabled
+	// while Vulkan post-processing is investigated, but the script-driven
+	// FT_VIEW_BW_FILTER still needs to desaturate the scene for mission
+	// briefings (USA01, GLA campaign intros). Run ApplyCinematic() on its
+	// own outside the post chain so it only does the backbuffer→sceneRT
+	// copy + desaturation shader when SetBwFilterEnabled(true) has been
+	// called this frame (via W3DView::draw). Other cinematic flags stay
+	// off, so this is a no-op outside the BW cutscene window.
+#ifdef BUILD_WITH_D3D11
+	renderer.SetChromaEnabled(false);
+	renderer.SetVignetteEnabled(false);
+	renderer.SetColorGradeEnabled(false);
+	renderer.ApplyCinematic();
+#endif
 #endif
 
 	// Film grain removed

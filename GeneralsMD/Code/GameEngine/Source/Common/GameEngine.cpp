@@ -1007,8 +1007,11 @@ Bool GameEngine::canUpdateRegularGameLogic()
 
 #if defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
 	const Bool useFastMode = TheGlobalData->m_TiVOFastMode;
-#else	//always allow this cheat key if we're in a replay game.
-	const Bool useFastMode = TheGlobalData->m_TiVOFastMode && TheGameLogic->isInReplayGame();
+#else	//always allow this cheat key if we're in a replay game, or when the
+		//-ff / -fastforward command-line flag was passed for debug runs.
+	extern Bool g_cliFastForwardRequested;
+	const Bool useFastMode = TheGlobalData->m_TiVOFastMode &&
+		(TheGameLogic->isInReplayGame() || g_cliFastForwardRequested);
 #endif
 
 	if (useFastMode || !enabled)

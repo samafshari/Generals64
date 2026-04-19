@@ -3620,9 +3620,10 @@ void Log(const char* fmt, ...)
         buf[--n] = '\0';
 
     Panels::LogRingPush(buf);
-    // stderr mirror — ensures lines land in game_stderr.txt even if the
-    // inspector panel isn't open. Keep the newline here only.
-    fprintf(stderr, "%s\n", buf);
+    // Inspector log ring only — no stderr mirror. The ImGui Log panel is the
+    // canonical place to read engine diagnostics; mirroring to stderr turned
+    // every game run into a multi-thousand-line run_stderr.txt that was more
+    // noise than signal for the campaign-debug workflow.
 }
 
 } // namespace Inspector

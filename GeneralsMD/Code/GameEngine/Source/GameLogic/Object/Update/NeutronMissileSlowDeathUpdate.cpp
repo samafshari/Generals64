@@ -227,51 +227,37 @@ UpdateSleepTime NeutronMissileSlowDeathBehavior::update()
 	if( isSlowDeathActivated() == FALSE )
 		return UPDATE_SLEEP_NONE;
 
+	// USA01 regression guard — the scripted missile on the opening cutscene
+	// had its data cleared by the time this update fired (modData or the
+	// caster Object both went null). Bail early so we don't call virtuals
+	// on freed memory and crash with a null-vtable indirect call.
+	if( modData == nullptr )
+		return UPDATE_SLEEP_NONE;
+	Object* self = getObject();
+	if( self == nullptr )
+		return UPDATE_SLEEP_NONE;
+
 	// get the current frame
 	UnsignedInt currFrame = TheGameLogic->getFrame();
-
-#if defined(DEBUG_LOGGING)
-	{
-		Object* obj = getObject();
-		unsigned objId = obj ? (unsigned)obj->getID() : 0u;
-		char dbg[256];
-		snprintf(dbg, sizeof(dbg),
-			"[USA01-NSD] update frame=%u objId=%u activation=%u modData=%p fxList=%p\n",
-			(unsigned)currFrame, objId,
-			(unsigned)m_activationFrame,
-			(void*)modData,
-			(void*)(modData ? modData->m_fxList : nullptr));
-		OutputDebugStringA(dbg);
-	}
-#endif
 
 	// when we become activated we want to do a few things
 	if( m_activationFrame == 0 )
 	{
 		Coord3D pos;
-		const Coord3D *missilePos = getObject()->getPosition();
+		const Coord3D *missilePos = self->getPosition();
+		if( missilePos == nullptr )
+			return UPDATE_SLEEP_NONE;
 
 		// get the position to play the effect at on the ground
 		pos.x = missilePos->x;
 		pos.y = missilePos->y;
-		pos.z = TheTerrainLogic->getGroundHeight( pos.x, pos.y );
+		pos.z = TheTerrainLogic ? TheTerrainLogic->getGroundHeight( pos.x, pos.y ) : 0.0f;
 
 		// record the frame
 		m_activationFrame = currFrame;
 
-#if defined(DEBUG_LOGGING)
-		{
-			char dbg[200];
-			_snprintf(dbg, sizeof(dbg),
-				"[USA01-NSD] FIRST activation, calling doFXPos at (%.0f,%.0f,%.0f)\n",
-				pos.x, pos.y, pos.z);
-			OutputDebugStringA(dbg);
-		}
-#endif
-		FXList::doFXPos( modData->m_fxList, &pos );
-#if defined(DEBUG_LOGGING)
-		OutputDebugStringA("[USA01-NSD] FXList::doFXPos returned\n");
-#endif
+		if( modData->m_fxList )
+			FXList::doFXPos( modData->m_fxList, &pos );
 	}
 
 	// see if it's time for any explosions
@@ -286,16 +272,8 @@ UpdateSleepTime NeutronMissileSlowDeathBehavior::update()
 		if( m_completedBlasts[ i ] == FALSE &&
 				(currFrame - m_activationFrame > modData->m_blastInfo[ i ].delay) )
 		{
-#if defined(DEBUG_LOGGING)
-			{ char dbg[120]; _snprintf(dbg, sizeof(dbg),
-				"[USA01-NSD] doBlast[%d]\n", i); OutputDebugStringA(dbg); }
-#endif
 			// do the blast
 			doBlast( &modData->m_blastInfo[ i ] );
-#if defined(DEBUG_LOGGING)
-			{ char dbg[120]; _snprintf(dbg, sizeof(dbg),
-				"[USA01-NSD] doBlast[%d] returned\n", i); OutputDebugStringA(dbg); }
-#endif
 
 			// mark this blast as complete now
 			m_completedBlasts[ i ] = TRUE;
@@ -306,16 +284,8 @@ UpdateSleepTime NeutronMissileSlowDeathBehavior::update()
 		if( m_completedScorchBlasts[ i ] == FALSE &&
 		    (currFrame - m_activationFrame > modData->m_blastInfo[ i ].scorchDelay) )
 		{
-#if defined(DEBUG_LOGGING)
-			{ char dbg[120]; _snprintf(dbg, sizeof(dbg),
-				"[USA01-NSD] doScorchBlast[%d]\n", i); OutputDebugStringA(dbg); }
-#endif
 			// do the scorch blast
 			doScorchBlast( &modData->m_blastInfo[ i ] );
-#if defined(DEBUG_LOGGING)
-			{ char dbg[120]; _snprintf(dbg, sizeof(dbg),
-				"[USA01-NSD] doScorchBlast[%d] returned\n", i); OutputDebugStringA(dbg); }
-#endif
 
 			// mark this scorch blast as complete now
 			m_completedScorchBlasts[ i ] = TRUE;
@@ -340,10 +310,18 @@ void NeutronMissileSlowDeathBehavior::doBlast( const BlastInfo *blastInfo )
 
 	// get the module data
 	const NeutronMissileSlowDeathBehaviorModuleData *modData = getNeutronMissileSlowDeathBehaviorModuleData();
+	if( modData == nullptr )
+		return;
 
-	// get the object and position
+	// get the object and position — bail if the caster was destroyed under us
 	Object *missile = getObject();
+	if( missile == nullptr )
+		return;
 	const Coord3D *missilePos = missile->getPosition();
+	if( missilePos == nullptr )
+		return;
+	if( ThePartitionManager == nullptr || TheGameClient == nullptr )
+		return;
 
 	// setup a damage info structure to do some damage
 	DamageInfo damageInfo;
@@ -457,12 +435,16 @@ void NeutronMissileSlowDeathBehavior::doScorchBlast( const BlastInfo *blastInfo 
 	if( blastInfo == nullptr )
 		return;
 
-	// get the module data
-//	const NeutronMissileSlowDeathBehaviorModuleData *modData = getNeutronMissileSlowDeathBehaviorModuleData();
-
-	// get the object and position
+	// get the object and position — guard against use-after-free when the
+	// cinematic kills the caster mid-scorch-sequence.
 	Object *missile = getObject();
+	if( missile == nullptr )
+		return;
 	const Coord3D *missilePos = missile->getPosition();
+	if( missilePos == nullptr )
+		return;
+	if( ThePartitionManager == nullptr )
+		return;
 
 	// scan objects around us and do damage to objects we have "passed over" and are behind us
 	if( blastInfo->outerRadius )

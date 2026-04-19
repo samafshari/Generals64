@@ -1041,6 +1041,20 @@ Int parseFile(char *args[], int num)
 	return 2;
 }
 
+// -ff / -fastforward — turn on TiVO fast-forward mode at boot so the
+// simulation runs uncapped from the first frame. Useful for rapidly
+// reaching crash repro points in cinematics / scripted missions without
+// sitting through the real-time cutscene. GameLogic::startNewGame forces
+// m_TiVOFastMode back to FALSE on every new game start, so we can't just
+// set it once in the INI — we re-assert it post-init via a deferred flag.
+// See Win32GameEngine::init for the handoff.
+Bool g_cliFastForwardRequested = FALSE;
+Int parseFastForward(char *[], int)
+{
+	g_cliFastForwardRequested = TRUE;
+	return 1;
+}
+
 #if defined(RTS_DEBUG) && ENABLE_CONFIGURABLE_SHROUD
 Int parseNoShroud(char *args[], int)
 {
@@ -1460,6 +1474,11 @@ static CommandLineParam paramsForEngineInit[] =
 	// Load a specific map from the command line. Available in all builds so
 	// that QA and map authors can repro issues directly in shipping builds.
 	{ "-file", parseFile },
+
+	// Fast-forward: enable TiVO-mode from the first frame (no render-fps
+	// cap). Useful for racing through scripted mission intros.
+	{ "-ff",           parseFastForward },
+	{ "-fastforward",  parseFastForward },
 
 	// Launch config from external launcher (JSON file with game setup).
 	{ "-launchconfig", parseLaunchConfig },

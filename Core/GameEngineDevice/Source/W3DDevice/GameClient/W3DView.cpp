@@ -184,6 +184,15 @@ W3DView::~W3DView()
 }
 
 //-------------------------------------------------------------------------------------------------
+// True when a single-player mission cutscene is active (script-driven letterbox is on).
+// Cutscenes are framed for 50deg FOV; any widescreen/custom FOV must be suppressed.
+static inline Bool isMissionCutscene_W3DView()
+{
+	return TheGameLogic && TheGameLogic->getGameMode() == GAME_SINGLE_PLAYER
+		&& TheDisplay && TheDisplay->isLetterBoxed();
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Sets the height of the viewport, while maintaining original camera perspective. */
 //-------------------------------------------------------------------------------------------------
 void W3DView::setHeight(Int height)
@@ -218,7 +227,10 @@ void W3DView::setWidth(Int width)
 
 	//we want to maintain the same scale, so we'll need to adjust the fov.
 	//default W3D fov for full-screen is 50 degrees.
-	m_3DCamera->Set_View_Plane((Real)width/(Real)TheDisplay->getWidth()*DEG_TO_RADF(50.0f),-1);
+	const Real hfov = isMissionCutscene_W3DView()
+		? DEG_TO_RADF(50.0f)
+		: (Real)width/(Real)TheDisplay->getWidth()*DEG_TO_RADF(50.0f);
+	m_3DCamera->Set_View_Plane(hfov, -1);
 
 	m_cameraAreaConstraintsValid = false;
 	m_recalcCamera = true;
@@ -283,6 +295,10 @@ void W3DView::buildCameraTransform( Matrix3D *transform )
 	}
 	else
 	{
+		// Mission cutscenes must render at the authored 50deg FOV regardless of
+		// any custom/widescreen FOV tweak that may have mutated m_FOV.
+		if (isMissionCutscene_W3DView())
+			m_FOV = DEG_TO_RADF(50.0f);
 		sourcePos.X *= zoom;
 		sourcePos.Y *= zoom;
 		sourcePos.Z *= zoom;

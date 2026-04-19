@@ -29,10 +29,79 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
-#ifdef _WIN32
-#include <windows.h> // OutputDebugStringA for the per-module crash diagnostic
-#endif
-#include <stdio.h>    // snprintf
+// Last-module tracker globals — defined in WinMain.cpp, read by the crash
+// filter. GameLogic::update stamps these before each sleepy UpdateModule
+// update() call so a crash in u->update() names its module in crash.log.
+extern "C" {
+	extern char g_lastUpdateModuleName[128];
+	extern unsigned g_lastUpdateObjectId;
+	extern char g_lastUpdateObjectTemplate[128];
+	extern unsigned g_lastUpdateFrame;
+}
+
+// Probe the vtable of an UpdateModule and validate that its low slots look
+// like valid code pointers (inside this image's .text section). Returns
+// false if the vtable is unreadable or the slots don't look like code.
+// Kept in its own C-linkage function so the __try/__except frame has no
+// C++ objects requiring unwinding. See USA01 cutscene crash notes below.
+extern "C" int SafeCanCallUpdate(const void* modulePtr)
+{
+	// Reject obvious garbage: null, sign-extended 32-bit values (the 4065
+	// crash had a vector entry = 0xFFFFFFFF614F2C78), and anything in the
+	// bottom 64KB (MSVC CRT sentinels, uninitialized fields).
+	uintptr_t mp = reinterpret_cast<uintptr_t>(modulePtr);
+	if (mp < 0x10000) return 0;
+	if ((mp >> 48) == 0xFFFF) return 0; // sign-extended i32
+	if ((mp >> 48) != 0x0 && (mp >> 48) != 0x1 && (mp >> 48) != 0x2) return 0; // user-space x64 canonical
+
+	// Resolve .text bounds once. Our image base + PE headers tell us the
+	// [textStart, textEnd) range. A valid virtual-slot fn pointer must lie
+	// inside it; the USA01 crash had a slot pointing into .rdata (0x876418).
+	static uintptr_t s_textStart = 0;
+	static uintptr_t s_textEnd = 0;
+	if (s_textEnd == 0)
+	{
+		HMODULE hMod = GetModuleHandleA(nullptr);
+		if (!hMod) return 1; // fail-open if we can't resolve
+		auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(hMod);
+		if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 1;
+		auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+			reinterpret_cast<const BYTE*>(hMod) + dos->e_lfanew);
+		if (nt->Signature != IMAGE_NT_SIGNATURE) return 1;
+		auto* sec = IMAGE_FIRST_SECTION(nt);
+		for (int i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++sec)
+		{
+			if (memcmp(sec->Name, ".text", 6) == 0)
+			{
+				uintptr_t base = reinterpret_cast<uintptr_t>(hMod);
+				s_textStart = base + sec->VirtualAddress;
+				s_textEnd   = s_textStart + sec->Misc.VirtualSize;
+				break;
+			}
+		}
+		if (s_textEnd == 0) return 1; // fail-open
+	}
+
+	__try
+	{
+		const void* const* vtbl = *reinterpret_cast<const void* const* const*>(modulePtr);
+		if (!vtbl) return 0;
+		// Check that slots 0..7 point inside .text. Missing any of these means
+		// the "vtable" isn't really a vtable — the module memory has been freed
+		// and reused, and calling update() on it will fault.
+		for (int i = 0; i < 8; ++i)
+		{
+			uintptr_t p = reinterpret_cast<uintptr_t>(vtbl[i]);
+			if (p < s_textStart || p >= s_textEnd)
+				return 0;
+		}
+		return 1;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		return 0;
+	}
+}
 
 #include "Common/AudioAffect.h"
 #include "Common/AudioHandleSpecialValues.h"
@@ -1226,6 +1295,11 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 
 	TheWritableGlobalData->m_loadScreenRender = TRUE;	///< mark it so only a few select things are rendered during load
 	TheWritableGlobalData->m_TiVOFastMode = FALSE;	//always disable the TIVO fast-forward mode at the start of a new game.
+	// -ff / -fastforward command-line flag — re-assert after the reset
+	// above so the user can blast through scripted intros to a crash point.
+	extern Bool g_cliFastForwardRequested;
+	if (g_cliFastForwardRequested)
+		TheWritableGlobalData->m_TiVOFastMode = TRUE;
 
 	Campaign* currentCampaign = TheCampaignManager->getCurrentCampaign();
 	Bool isChallengeCampaign = m_gameMode == GAME_SINGLE_PLAYER && currentCampaign && currentCampaign->m_isChallengeCampaign;
@@ -3875,6 +3949,42 @@ void GameLogic::update()
 	}
 #endif
 
+	// Sleepy-queue scrub pass: USA01 cutscene / TrainCar04 / ChinaBunker all
+	// leave garbage entries in m_sleepyUpdates (either freed-memory pointers
+	// or 0xFFFFFFFF-prefixed sign-extended 32-bit values). Running the normal
+	// heap rebalance over such entries crashes when rebalanceChildSleepyUpdate
+	// dereferences them to compare priorities. We sweep once per frame here,
+	// drop garbage in place (swap-and-pop), re-stamp indices so the heap's
+	// reverse lookup is consistent, then sift every node from mid→0 to
+	// restore the min-heap invariant.
+	bool scrubbed = false;
+	for (int k = (int)m_sleepyUpdates.size() - 1; k >= 0; --k)
+	{
+		UpdateModulePtr u = m_sleepyUpdates[k];
+		if (!SafeCanCallUpdate(u))
+		{
+			// Don't touch u — it's garbage. Swap-with-back + pop.
+			m_sleepyUpdates[k] = m_sleepyUpdates.back();
+			m_sleepyUpdates.pop_back();
+			scrubbed = true;
+		}
+	}
+	if (scrubbed)
+	{
+		// Fix every node's m_indexInLogic to match its current vector slot,
+		// because swap-and-pop moves entries to different indices than they
+		// used to track. Skip any entry that still looks corrupt (paranoia).
+		for (int k = 0; k < (int)m_sleepyUpdates.size(); ++k)
+		{
+			UpdateModulePtr u = m_sleepyUpdates[k];
+			if (SafeCanCallUpdate(u))
+				u->friend_setIndexInLogic(k);
+		}
+		// Bottom-up heapify to restore the min-heap property.
+		for (int k = (int)m_sleepyUpdates.size() / 2 - 1; k >= 0; --k)
+			rebalanceChildSleepyUpdate(k);
+	}
+
 	int sleepyUpdateCount = 0;
 	int sleepySkipCount = 0;
 	{
@@ -3899,11 +4009,36 @@ void GameLogic::update()
 
 			UpdateSleepTime sleepLen = UPDATE_SLEEP_NONE;	// default, if it is disabled.
 
-			if (!u->friend_getObject()) {
+			const Object* modObj = u->friend_getObject();
+			if (!modObj) {
 				popSleepyUpdate();
 				continue;
 			}
-			DisabledMaskType dis = u->friend_getObject()->getDisabledFlags();
+			// Skip modules whose object is flagged destroyed. The object is still
+			// alive until processDestroyList runs at end-of-frame, but its state
+			// and vtable-bearing siblings may be half-torn-down. USA01 cutscene
+			// destroys enemy ChinaBunker mid-frame; its ProductionUpdate was still
+			// in the sleepy heap and the next touch landed on a garbage vtable
+			// slot (call [rax+0x10] into .rdata -> EXEC DEP at 0x876418).
+			if (modObj->isDestroyed()) {
+				popSleepyUpdate();
+				continue;
+			}
+			// Probe the module's vtable via SEH. If it's obviously corrupt
+			// (slots don't point inside .text), pop the module out of the
+			// sleepy heap so it doesn't come back and crash the game. We avoid
+			// writing to the module itself since the memory may already belong
+			// to another live allocation.
+			if (!SafeCanCallUpdate(u)) {
+				strncpy(g_lastUpdateModuleName, "<corrupt-vtable>", sizeof(g_lastUpdateModuleName) - 1);
+				g_lastUpdateModuleName[sizeof(g_lastUpdateModuleName) - 1] = '\0';
+				g_lastUpdateObjectTemplate[0] = '\0';
+				g_lastUpdateObjectId = 0u;
+				g_lastUpdateFrame    = (unsigned)now;
+				popSleepyUpdate();
+				continue;
+			}
+			DisabledMaskType dis = modObj->getDisabledFlags();
 			if (!dis.any() || dis.anyIntersectionWith(u->getDisabledTypesToProcess()))
 			{
 				USE_PERF_TIMER(GameLogic_update_sleepy)
@@ -3911,21 +4046,20 @@ void GameLogic::update()
 				//DEBUG_LOG(("calling update %08lx (%d %d)...",update,update->friend_getNextCallFrame(),update->friend_getNextCallPhase()));
 				m_curUpdateModule = u;
 
-				// DIAG: log every module about to run, so if u->update() crashes
-				// the last line in the debug output names the faulty module.
-				// Cheap — one OutputDebugStringA per sleepy update per frame.
+				// Last-module stamp for the crash handler. Dumps into crash.log
+				// from WinMain.cpp's CrashFilter when u->update() faults, so
+				// we can name the faulty module without per-frame file logging.
 				{
-					const Object* obj = u->friend_getObject();
-					const char* modName = TheNameKeyGenerator->keyToName(u->getModuleNameKey()).str();
-					const char* objName = obj && obj->getTemplate()
-						? obj->getTemplate()->getName().str() : "<no-obj>";
-					char dbg[256];
-					snprintf(dbg, sizeof(dbg),
-						"[UPDATE] frame=%u obj=%u (%s) module=%s\n",
-						(unsigned)now,
-						(unsigned)(obj ? obj->getID() : 0),
-						objName, modName);
-					OutputDebugStringA(dbg);
+					const Object* obj = modObj;
+					AsciiString modName = TheNameKeyGenerator->keyToName(u->getModuleNameKey());
+					const char* tmplName = obj && obj->getTemplate()
+						? obj->getTemplate()->getName().str() : "";
+					strncpy(g_lastUpdateModuleName, modName.str(), sizeof(g_lastUpdateModuleName) - 1);
+					g_lastUpdateModuleName[sizeof(g_lastUpdateModuleName) - 1] = '\0';
+					strncpy(g_lastUpdateObjectTemplate, tmplName, sizeof(g_lastUpdateObjectTemplate) - 1);
+					g_lastUpdateObjectTemplate[sizeof(g_lastUpdateObjectTemplate) - 1] = '\0';
+					g_lastUpdateObjectId = obj ? (unsigned)obj->getID() : 0u;
+					g_lastUpdateFrame    = (unsigned)now;
 				}
 
 				{

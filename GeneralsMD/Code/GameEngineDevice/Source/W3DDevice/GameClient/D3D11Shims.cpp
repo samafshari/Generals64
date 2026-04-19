@@ -5283,6 +5283,15 @@ W3DView::~W3DView()
 }
 
 //-------------------------------------------------------------------------------------------------
+// True when a single-player mission cutscene is active (script-driven letterbox is on).
+// Cutscenes are framed for 50deg FOV; any widescreen/custom FOV must be suppressed.
+static inline Bool isMissionCutscene_W3DView()
+{
+	return TheGameLogic && TheGameLogic->getGameMode() == GAME_SINGLE_PLAYER
+		&& TheDisplay && TheDisplay->isLetterBoxed();
+}
+
+//-------------------------------------------------------------------------------------------------
 void W3DView::setHeight(Int height)
 {
 	View::setHeight(height);
@@ -5312,7 +5321,10 @@ void W3DView::setWidth(Int width)
 	vMax.X=(Real)(m_originX+width)/(Real)TheDisplay->getWidth();
 	m_3DCamera->Set_Viewport(vMin,vMax);
 
-	m_3DCamera->Set_View_Plane((Real)width/(Real)TheDisplay->getWidth()*DEG_TO_RADF(50.0f),-1);
+	const Real hfov = isMissionCutscene_W3DView()
+		? DEG_TO_RADF(50.0f)
+		: (Real)width/(Real)TheDisplay->getWidth()*DEG_TO_RADF(50.0f);
+	m_3DCamera->Set_View_Plane(hfov, -1);
 
 	// Match ZH (W3DView.cpp:219-233): viewport size changes do NOT invalidate
 	// camera area constraints. See setHeight() above for the rationale.
@@ -5370,6 +5382,10 @@ void W3DView::buildCameraTransform( Matrix3D *transform )
 	}
 	else
 	{
+		// Mission cutscenes must render at the authored 50deg FOV regardless of
+		// any custom/widescreen FOV tweak that may have mutated m_FOV.
+		if (isMissionCutscene_W3DView())
+			m_FOV = DEG_TO_RADF(50.0f);
 		sourcePos.X *= zoom;
 		sourcePos.Y *= zoom;
 		sourcePos.Z *= zoom;
@@ -6398,20 +6414,26 @@ void W3DView::draw()
 		// ended.
 		else if (m_viewFilter == FT_VIEW_BW_FILTER)
 		{
-			if (g_bwFadeDirection != 0 && g_bwFadeFrames > 0)
+			if (g_bwFadeDirection < 0)
 			{
-				g_bwCurFadeFrame++;
-				if (g_bwCurFadeFrame >= g_bwFadeFrames)
+				// Fade-out: if 0 frames requested, clear immediately; otherwise
+				// count down then clear. Either way the filter must come off —
+				// scripts expect doBlackWhiteMode(false, ...) to reliably undo
+				// the BW pass at end-of-cutscene.
+				if (g_bwFadeFrames <= 0 || ++g_bwCurFadeFrame >= g_bwFadeFrames)
 				{
-					if (g_bwFadeDirection < 0)
-					{
-						// Fade-out finished — clear the filter back to
-						// default so the cinematic post-process stops
-						// applying saturation=0. Matches the original DX8
-						// code at W3DShaderManager.cpp:408-409.
-						setViewFilterMode(FM_NULL_MODE);
-						setViewFilter(FT_NULL_FILTER);
-					}
+					setViewFilterMode(FM_NULL_MODE);
+					setViewFilter(FT_NULL_FILTER);
+					g_bwCurFadeFrame = 0;
+					g_bwFadeDirection = 0;
+				}
+			}
+			else if (g_bwFadeDirection > 0 && g_bwFadeFrames > 0)
+			{
+				// Fade-in: count up and stop driving the animation once full.
+				// Leaves the filter on (script clears it later).
+				if (++g_bwCurFadeFrame >= g_bwFadeFrames)
+				{
 					g_bwCurFadeFrame = 0;
 					g_bwFadeDirection = 0;
 				}

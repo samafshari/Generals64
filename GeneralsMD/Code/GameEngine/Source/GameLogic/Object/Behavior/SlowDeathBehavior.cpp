@@ -330,6 +330,11 @@ void SlowDeathBehavior::beginSlowDeath(const DamageInfo *damageInfo)
 void SlowDeathBehavior::doPhaseStuff(SlowDeathPhaseType sdphase)
 {
 	const SlowDeathBehaviorModuleData* d = getSlowDeathBehaviorModuleData();
+	if (!d)
+		return;
+	Object* obj = getObject();
+	if (!obj)
+		return;
 	Int idx, listSize;
 
 	if (!d->m_maskOfLoadedEffects)
@@ -342,7 +347,8 @@ void SlowDeathBehavior::doPhaseStuff(SlowDeathPhaseType sdphase)
 		const FXListVec& v = d->m_fx[sdphase];
 		DEBUG_ASSERTCRASH(idx>=0&&idx<v.size(),("bad idx"));
 		const FXList* fxl = v[idx];
-		FXList::doFXObj(fxl, getObject(), nullptr);
+		if (fxl)
+			FXList::doFXObj(fxl, obj, nullptr);
 	}
 
 	listSize = d->m_ocls[sdphase].size();
@@ -352,7 +358,8 @@ void SlowDeathBehavior::doPhaseStuff(SlowDeathPhaseType sdphase)
 		const OCLVec& v = d->m_ocls[sdphase];
 		DEBUG_ASSERTCRASH(idx>=0&&idx<v.size(),("bad idx"));
 		const ObjectCreationList* ocl = v[idx];
-		ObjectCreationList::create(ocl, getObject(), nullptr);
+		if (ocl)
+			ObjectCreationList::create(ocl, obj, nullptr);
 	}
 
 	listSize = d->m_weapons[sdphase].size();
@@ -362,9 +369,9 @@ void SlowDeathBehavior::doPhaseStuff(SlowDeathPhaseType sdphase)
 		const WeaponTemplateVec& v = d->m_weapons[sdphase];
 		DEBUG_ASSERTCRASH(idx>=0&&idx<v.size(),("bad idx"));
 		const WeaponTemplate* wt = v[idx];
-		if (wt)
+		if (wt && TheWeaponStore && obj->getPosition())
 		{
-			TheWeaponStore->createAndFireTempWeapon(wt, getObject(), getObject()->getPosition());
+			TheWeaponStore->createAndFireTempWeapon(wt, obj, obj->getPosition());
 		}
 	}
 }
@@ -378,6 +385,14 @@ UpdateSleepTime SlowDeathBehavior::update()
 
 	const SlowDeathBehaviorModuleData* d = getSlowDeathBehaviorModuleData();
 	Object* obj = getObject();
+
+	// USA01 regression — the cinematic kills BaikonurRocket / CINE_BaseDozer
+	// etc. mid-sequence, and the sleepy-update queue can still hold a frame
+	// for this module after destroyObject(obj) has been called. Bail before
+	// we make any virtual call on a destroyed object (would fault indirect
+	// through a zeroed vtable slot → crash at 0x0).
+	if (!obj || !d || !TheGameLODManager || !TheGameLogic)
+		return UPDATE_SLEEP_NONE;
 
 	Real timeScale = TheGameLODManager->getSlowDeathScale();
 

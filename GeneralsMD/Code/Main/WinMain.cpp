@@ -1103,6 +1103,16 @@ static LONG WINAPI VectoredCrashHandler(EXCEPTION_POINTERS* ep)
 	return EXCEPTION_CONTINUE_SEARCH;
 }
 
+// Last-module tracker — GameLogic::update stamps these before each sleepy
+// update call so the crash filter can name the faulty module without having
+// to log every one (which was too slow for real-time play).
+extern "C" {
+    char g_lastUpdateModuleName[128] = "";
+    unsigned g_lastUpdateObjectId   = 0;
+    char g_lastUpdateObjectTemplate[128] = "";
+    unsigned g_lastUpdateFrame      = 0;
+}
+
 static LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep) {
 	char crashLogName[64];
 	if (rts::ClientInstance::getInstanceId() > 1u)
@@ -1117,10 +1127,25 @@ static LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep) {
 	fprintf(f, "CRASH: code=0x%08X addr=%p\n",
 		ep->ExceptionRecord->ExceptionCode,
 		ep->ExceptionRecord->ExceptionAddress);
+	// Last sleepy UpdateModule that started executing. If the crash sits
+	// inside u->update(), the faulty module is right here.
+	if (g_lastUpdateModuleName[0]) {
+		fprintf(f, "LAST UPDATE MODULE: %s  on obj=%u (%s)  frame=%u\n",
+			g_lastUpdateModuleName,
+			g_lastUpdateObjectId,
+			g_lastUpdateObjectTemplate,
+			g_lastUpdateFrame);
+	}
 	if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
 	    ep->ExceptionRecord->NumberParameters >= 2) {
+		// ExceptionInformation[0]: 0=READ, 1=WRITE, 8=DEP (execute NX page).
+		const ULONG_PTR kind = ep->ExceptionRecord->ExceptionInformation[0];
+		const char* kindStr = kind == 0 ? "READ"
+		                    : kind == 1 ? "WRITE"
+		                    : kind == 8 ? "EXEC(DEP)"
+		                                : "?";
 		fprintf(f, "  access %s addr=%p\n",
-			ep->ExceptionRecord->ExceptionInformation[0] ? "WRITE" : "READ",
+			kindStr,
 			(void*)ep->ExceptionRecord->ExceptionInformation[1]);
 	}
 

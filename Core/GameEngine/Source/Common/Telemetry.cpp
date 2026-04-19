@@ -232,11 +232,8 @@ bool openDb()
     const int rc = sqlite3_open(g_dbPath, &g_db);
     if (rc != SQLITE_OK)
     {
-        const char* err = g_db ? sqlite3_errmsg(g_db) : "unknown";
-        DEBUG_LOG(("Telemetry: failed to open %s: %s", g_dbPath, err));
-        // Release builds strip DEBUG_LOG. Stderr is the one channel that
-        // survives so "my DB is missing" always leaves a breadcrumb.
-        std::fprintf(stderr, "[Telemetry] failed to open %s: %s\n", g_dbPath, err);
+        DEBUG_LOG(("Telemetry: failed to open %s: %s", g_dbPath,
+            g_db ? sqlite3_errmsg(g_db) : "unknown"));
         if (g_db) { sqlite3_close(g_db); g_db = nullptr; }
         return false;
     }
@@ -277,8 +274,6 @@ bool openDb()
     }
 
     DEBUG_LOG(("Telemetry: session=%lld file=%s", (long long)g_sessionId, g_dbPath));
-    std::fprintf(stderr, "[Telemetry] session=%lld file=%s\n",
-                 (long long)g_sessionId, g_dbPath);
     return true;
 }
 
@@ -397,7 +392,6 @@ void writeShutdownReport()
     }
 
     std::fclose(fp);
-    std::fprintf(stderr, "[Telemetry] wrote %s\n", reportPath);
 }
 
 // --- Writer thread -------------------------------------------------------
