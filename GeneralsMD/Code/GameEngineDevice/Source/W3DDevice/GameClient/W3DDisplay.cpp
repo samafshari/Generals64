@@ -106,8 +106,7 @@ bool g_debugDisableParticles = false;
 // Volumetric rendering prefers ZFail stencil updates to avoid
 // camera-inside-volume pillar artifacts from airborne casters.
 bool g_debugDisableProjectedShadows = false;
-bool g_debugDisableVolumetricShadows = true;  // Stencil volume system is being replaced by shadow mapping
-bool g_debugDisableSunShadowMap = false;      // Sun shadow map pass (new, replacing stencil volumes)
+bool g_debugDisableSunShadowMap     = false; // Sun shadow map pass (replaces stencil volumes)
 bool g_debugDisableSnow = false;
 bool g_debugDisableUI = false;
 bool g_debugDisableBegin2DEnd2D = false;  // skip the inner Begin2D/End2D in drawViews
@@ -950,13 +949,14 @@ void W3DDisplay::draw()
 		renderer.Restore3DState();
 	}
 
-	// Volumetric stencil shadows — render after opaque/translucent meshes
-	// so the depth buffer contains all potential shadow occluders.
-	if (camera && TheW3DShadowManager && !g_debugDisableVolumetricShadows)
+	// Stencil-volume shadow pass removed. Sun shadow mapping runs as a
+	// pre-pass earlier in draw(); the trailing call into DoShadows with
+	// stencilPass=TRUE now exists only to clear the shadow-scene latch
+	// set by the projected-decal pre-pass.
+	if (camera && TheW3DShadowManager)
 	{
 		RenderInfoClass rinfo(*camera);
 		DoShadows(rinfo, TRUE);
-		renderer.Restore3DState();
 	}
 
 	// --- Occluded-unit silhouettes ---

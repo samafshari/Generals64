@@ -29,6 +29,11 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+#ifdef _WIN32
+#include <windows.h> // OutputDebugStringA for the per-module crash diagnostic
+#endif
+#include <stdio.h>    // snprintf
+
 #include "Common/AudioAffect.h"
 #include "Common/AudioHandleSpecialValues.h"
 #include "Common/BuildAssistant.h"
@@ -3905,6 +3910,23 @@ void GameLogic::update()
 
 				//DEBUG_LOG(("calling update %08lx (%d %d)...",update,update->friend_getNextCallFrame(),update->friend_getNextCallPhase()));
 				m_curUpdateModule = u;
+
+				// DIAG: log every module about to run, so if u->update() crashes
+				// the last line in the debug output names the faulty module.
+				// Cheap — one OutputDebugStringA per sleepy update per frame.
+				{
+					const Object* obj = u->friend_getObject();
+					const char* modName = TheNameKeyGenerator->keyToName(u->getModuleNameKey()).str();
+					const char* objName = obj && obj->getTemplate()
+						? obj->getTemplate()->getName().str() : "<no-obj>";
+					char dbg[256];
+					snprintf(dbg, sizeof(dbg),
+						"[UPDATE] frame=%u obj=%u (%s) module=%s\n",
+						(unsigned)now,
+						(unsigned)(obj ? obj->getID() : 0),
+						objName, modName);
+					OutputDebugStringA(dbg);
+				}
 
 				{
 				LARGE_INTEGER muStart, muEnd, muFreq;

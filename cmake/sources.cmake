@@ -373,7 +373,6 @@ set(GAME_SOURCES
     GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/W3DPoly.cpp
     GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DShadow.cpp
     GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DProjectedShadow.cpp
-    GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DVolumetricShadow.cpp
     GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/Shadow/W3DBufferManager.cpp
     GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/WW3DAssetCompat.cpp
     GeneralsMD/Code/GameEngineDevice/Source/W3DDevice/GameClient/WW3DMeshCompat.cpp

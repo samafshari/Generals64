@@ -81,14 +81,6 @@ static const char* g_shaderDebug =
 #include "VulkanHLSL/ShaderDebug.hlsl.inc"
 ;
 
-static const char* g_shaderShadowVolumeExtrude =
-#include "VulkanHLSL/ShaderShadowVolumeExtrude.hlsl.inc"
-;
-
-static const char* g_shaderShadowVolumeDarken =
-#include "VulkanHLSL/ShaderShadowVolumeDarken.hlsl.inc"
-;
-
 static const char* g_shaderShadowProjectedDecal =
 #include "VulkanHLSL/ShaderShadowProjectedDecal.hlsl.inc"
 ;

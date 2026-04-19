@@ -744,7 +744,6 @@ xcopy /Y /D "$(SolutionDir)extern\sdl3\bin\*.dll" "$(OutDir)"</Command>
     <ClCompile Include="GeneralsMD\Code\GameEngineDevice\Source\W3DDevice\GameClient\W3DPoly.cpp" />
     <ClCompile Include="GeneralsMD\Code\GameEngineDevice\Source\W3DDevice\GameClient\Shadow\W3DShadow.cpp" />
     <ClCompile Include="GeneralsMD\Code\GameEngineDevice\Source\W3DDevice\GameClient\Shadow\W3DProjectedShadow.cpp" />
-    <ClCompile Include="GeneralsMD\Code\GameEngineDevice\Source\W3DDevice\GameClient\Shadow\W3DVolumetricShadow.cpp" />
     <ClCompile Include="GeneralsMD\Code\GameEngineDevice\Source\W3DDevice\GameClient\Shadow\W3DBufferManager.cpp" />
     <ClCompile Include="GeneralsMD\Code\GameEngineDevice\Source\W3DDevice\GameClient\WW3DAssetCompat.cpp" />
     <ClCompile Include="GeneralsMD\Code\GameEngineDevice\Source\W3DDevice\GameClient\WW3DMeshCompat.cpp" />

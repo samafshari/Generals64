@@ -25,7 +25,10 @@
 #include "WW3D2/rinfo.h"
 #include "W3DDevice/GameClient/W3DShadow.h"
 #include "W3DDevice/GameClient/W3DProjectedShadow.h"
-#include "W3DDevice/GameClient/W3DVolumetricShadow.h"
+// Stencil-volume shadow system removed — sun shadow mapping now handles
+// all opaque-mesh shadow casting from W3DDisplay::draw. SHADOW_VOLUME type
+// in ThingTemplate data is treated as "no per-object shadow record" because
+// the shadow-map pass walks all scene meshes unconditionally.
 
 // Distance of the sun light source from ground. Arbitrary but far enough
 // that the direction vector dominates over position for shadow projection.
@@ -41,23 +44,19 @@ static Vector3 s_lightPosWorld[MAX_SHADOW_LIGHTS] =
 	Vector3(94.0161f, 50.499f, 200.0f)
 };
 
-// Called twice per scene render by W3DDisplay::draw — once before opaque
-// meshes (stencilPass=false) for projected decals, once after
-// (stencilPass=true) for volumetric stencil shadows.
+// Called once per scene render by W3DDisplay::draw (stencilPass=false)
+// to render the projected decal shadows. The old stencilPass=true branch
+// used to run volumetric stencil shadows; that system has been replaced
+// by the sun shadow-map pre-pass in W3DDisplay::draw, so the stencilPass
+// argument is now ignored other than for terminating the shadow-scene
+// latch after the second call.
 void DoShadows(RenderInfoClass& rinfo, Bool stencilPass)
 {
-	// The expected init-order is: INI load → GlobalData::setTimeOfDay →
-	// TheGameClient->setTimeOfDay → ... → W3DShadowManager::setTimeOfDay.
-	// In this build the W3DTerrainLogic::loadMap post-INI hop never fires
-	// (map load goes through a different path), so m_terrainLightPos is
-	// never refreshed from the INI and s_lightPosWorld stays at its
-	// construction-time default (straight-down (0,0,10000)).
-	//
 	// Authoritative source for the sun direction per time-of-day is
-	// m_terrainObjectsLighting[tod][0].lightPos — that array IS populated
-	// directly from the INI field parsers and is valid by the time any
-	// frame renders. Refresh s_lightPosWorld from it here once per frame.
-	// Cheap: it's just a few arithmetic ops.
+	// m_terrainObjectsLighting[tod][0].lightPos — populated directly from
+	// INI by the field parsers. Refresh s_lightPosWorld every frame so
+	// the sun shadow-map pass and the projected decal pass always agree
+	// with the current time-of-day light.
 	if (TheW3DShadowManager && TheGlobalData && !stencilPass)
 	{
 		TimeOfDay tod = TheGlobalData->m_timeOfDay;
@@ -65,27 +64,15 @@ void DoShadows(RenderInfoClass& rinfo, Bool stencilPass)
 			TheW3DShadowManager->setTimeOfDay(tod);
 	}
 
-	Int projectionCount = 0;
-
-	// Projected shadows render first because they may fill the stencil
-	// buffer, which volumetric shadows then consume.
+	// Projected decal shadows (small ground stamps under units and
+	// buildings). Independent of the shadow-map system.
 	if (stencilPass == FALSE && TheW3DProjectedShadowManager)
 	{
 		if (TheW3DShadowManager && TheW3DShadowManager->isShadowScene())
-			projectionCount = TheW3DProjectedShadowManager->renderShadows(rinfo);
+			TheW3DProjectedShadowManager->renderShadows(rinfo);
 	}
 
-	if (stencilPass == TRUE && TheW3DVolumetricShadowManager)
-	{
-		// The scene render path can fire this hook more than once; the
-		// shadowScene flag guards against rendering shadows twice in one
-		// logical frame.
-		if (TheW3DShadowManager && TheW3DShadowManager->isShadowScene())
-			TheW3DVolumetricShadowManager->renderShadows(projectionCount);
-	}
-
-	// After the stencil pass, clear the shadowScene flag so any further
-	// draws this frame don't re-render shadows.
+	// Clear the shadowScene latch after the trailing call.
 	if (TheW3DShadowManager && stencilPass)
 		TheW3DShadowManager->queueShadows(FALSE);
 }
@@ -95,7 +82,7 @@ W3DShadowManager::W3DShadowManager(void)
 	, m_shadowColor(0x7fa0a0a0)
 	, m_stencilShadowMask(0)
 {
-	DEBUG_ASSERTCRASH(TheW3DVolumetricShadowManager == nullptr && TheW3DProjectedShadowManager == nullptr,
+	DEBUG_ASSERTCRASH(TheW3DProjectedShadowManager == nullptr,
 		("Creating new shadow managers without deleting old ones"));
 
 	// Derive initial sun position from global terrain light direction.
@@ -105,60 +92,40 @@ W3DShadowManager::W3DShadowManager(void)
 	lightRay.Normalize();
 	s_lightPosWorld[0] = lightRay * SUN_DISTANCE_FROM_GROUND;
 
-	TheW3DVolumetricShadowManager = NEW W3DVolumetricShadowManager;
 	TheProjectedShadowManager = TheW3DProjectedShadowManager = NEW W3DProjectedShadowManager;
 }
 
 W3DShadowManager::~W3DShadowManager(void)
 {
-	delete TheW3DVolumetricShadowManager;
-	TheW3DVolumetricShadowManager = nullptr;
 	delete TheW3DProjectedShadowManager;
 	TheProjectedShadowManager = TheW3DProjectedShadowManager = nullptr;
 }
 
 Bool W3DShadowManager::init(void)
 {
-	Bool result = true;
-
-	if (TheW3DVolumetricShadowManager && TheW3DVolumetricShadowManager->init())
-	{
-		if (TheW3DVolumetricShadowManager->ReAcquireResources())
-			result = true;
-	}
 	if (TheW3DProjectedShadowManager && TheW3DProjectedShadowManager->init())
 	{
 		if (TheW3DProjectedShadowManager->ReAcquireResources())
-			result = true;
+			return true;
 	}
-
-	return result;
+	return true;
 }
 
 void W3DShadowManager::Reset(void)
 {
-	if (TheW3DVolumetricShadowManager)
-		TheW3DVolumetricShadowManager->reset();
 	if (TheW3DProjectedShadowManager)
 		TheW3DProjectedShadowManager->reset();
 }
 
 Bool W3DShadowManager::ReAcquireResources(void)
 {
-	Bool result = true;
-
-	if (TheW3DVolumetricShadowManager && !TheW3DVolumetricShadowManager->ReAcquireResources())
-		result = false;
 	if (TheW3DProjectedShadowManager && !TheW3DProjectedShadowManager->ReAcquireResources())
-		result = false;
-
-	return result;
+		return false;
+	return true;
 }
 
 void W3DShadowManager::ReleaseResources(void)
 {
-	if (TheW3DVolumetricShadowManager)
-		TheW3DVolumetricShadowManager->ReleaseResources();
 	if (TheW3DProjectedShadowManager)
 		TheW3DProjectedShadowManager->ReleaseResources();
 }
@@ -173,9 +140,10 @@ Shadow* W3DShadowManager::addShadow(RenderObjClass* robj, Shadow::ShadowTypeInfo
 	switch (type)
 	{
 	case SHADOW_VOLUME:
-		if (TheW3DVolumetricShadowManager)
-			return (Shadow*)TheW3DVolumetricShadowManager->addShadow(robj, shadowInfo, draw);
-		break;
+		// Stencil-volume shadows are gone. Shadow mapping (from the sun)
+		// handles opaque casters globally at render time — no per-object
+		// Shadow record needed.
+		return nullptr;
 	case SHADOW_PROJECTION:
 	case SHADOW_DECAL:
 		if (TheW3DProjectedShadowManager)
@@ -196,16 +164,12 @@ void W3DShadowManager::removeShadow(Shadow* shadow)
 
 void W3DShadowManager::removeAllShadows(void)
 {
-	if (TheW3DVolumetricShadowManager)
-		TheW3DVolumetricShadowManager->removeAllShadows();
 	if (TheW3DProjectedShadowManager)
 		TheW3DProjectedShadowManager->removeAllShadows();
 }
 
 void W3DShadowManager::invalidateCachedLightPositions(void)
 {
-	if (TheW3DVolumetricShadowManager)
-		TheW3DVolumetricShadowManager->invalidateCachedLightPositions();
 	if (TheW3DProjectedShadowManager)
 		TheW3DProjectedShadowManager->invalidateCachedLightPositions();
 }
