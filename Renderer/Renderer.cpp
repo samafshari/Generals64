@@ -120,9 +120,19 @@ bool Renderer::Init(void* nativeWindowHandle, bool debug)
     m_frameData.shroudParams = { 0.0f, 0.0f, 0.0f, 0.0f }; // disabled until game sets it
     m_frameData.atmosphereParams = { 0.0f, 0.0f, 0.0f, 0.0f }; // atmosphere off by default
     m_frameData.sunViewProjection = Float4x4Identity();
-    // shadowParams: x=darkness(0.9), y=depthBias(0.0005), z=1/shadowMapSize, w=0(disabled until ready)
-    m_frameData.shadowParams = { 0.9f, 0.0005f, 1.0f / (float)kShadowMapSize, 0.0f };
+    // Defaults tuned visually in-game via the Inspector Shadows panel
+    // (2026-04-19). See screenshot in the shadow-port status notes.
+    // shadowParams: x=darkness, y=depthBias, z=1/shadowMapSize, w=enabled(0 until ready)
+    m_frameData.shadowParams = { 0.49f, 0.0005f, 1.0f / (float)kShadowMapSize, 0.0f };
     m_frameData.shadowParams2 = { 0.0f, 0.0f, 0.0f, 0.0f };
+    // Cloud shadow defaults — on by default, tuned to match the classic
+    // Generals look: mid-size broken cloud patches drifting slowly across
+    // the map with high contrast.
+    //   x=intensity 0.72, y=scale 586 world units, z=speed 13 u/s, w=coverage -0.23
+    m_frameData.cloudParams = { 0.72f, 586.0f, 13.0f, -0.23f };
+    // cloudParams2: x=wind angle 45° (0.7854 rad, drift toward NE), y=sharpness 0.98
+    // gives soft, naturally-rounded patch boundaries.
+    m_frameData.cloudParams2 = { 0.7854f, 0.98f, 0.0f, 0.0f };
 
     // Sun shadow map — D32_FLOAT with SRV so the main shaders can sample it.
     if (!m_shadowMap.CreateDepthTarget(m_device, kShadowMapSize, kShadowMapSize))

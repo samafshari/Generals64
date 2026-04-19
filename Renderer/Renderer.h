@@ -36,6 +36,19 @@ struct alignas(16) FrameConstants
     //      with per-caster hashed color — set by shadow pass only),
     // z, w = reserved.
     Render::Float4 shadowParams2;
+    // Animated cloud-shadow noise. Layered on top of the sun shadow so a slow
+    // procedural noise drifts across the map and darkens ground as if large
+    // clouds were passing between sun and scene.
+    //   x = intensity        (0 = off, 1 = strong darkening under cloud peaks)
+    //   y = scale            (noise period in world units; larger = bigger clouds)
+    //   z = speed            (drift rate; world units per second)
+    //   w = coverage offset  (-0.5 .. 0.5, shifts mean density)
+    Render::Float4 cloudParams;
+    // Additional cloud knobs (split so cloudParams layout stays stable):
+    //   x = wind angle in radians (direction clouds drift toward)
+    //   y = sharpness (1 = smooth, >1 sharpens edges via pow())
+    //   z,w = reserved
+    Render::Float4 cloudParams2;
 };
 
 // Per-object constants
@@ -366,6 +379,8 @@ public:
     // on the next 3D pass.
     Render::Float4& ShadowParams()  { return m_frameData.shadowParams; }
     Render::Float4& ShadowParams2() { return m_frameData.shadowParams2; }
+    Render::Float4& CloudParams()   { return m_frameData.cloudParams; }
+    Render::Float4& CloudParams2()  { return m_frameData.cloudParams2; }
 
 #ifdef BUILD_WITH_D3D11
     // SRV of the shadow depth target, for displaying the shadow map as an

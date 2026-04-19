@@ -2531,6 +2531,35 @@ void DrawShadowsPanel()
                         "reports the first caster bounding-box it hits.");
     ImGui::Separator();
 
+    // --- Animated cloud shadows ---
+    auto& cp  = renderer.CloudParams();
+    auto& cp2 = renderer.CloudParams2();
+    bool cloudsOn = cp.x > 0.0001f;
+    if (ImGui::Checkbox("Animated cloud shadows", &cloudsOn))
+    {
+        // Toggle intensity between 0 and its most-recent non-zero value so
+        // unchecking preserves the user's tuned strength for when they
+        // flip it back on.
+        static float s_lastCloudIntensity = 0.35f;
+        if (cloudsOn) { cp.x = s_lastCloudIntensity > 0 ? s_lastCloudIntensity : 0.35f; }
+        else          { s_lastCloudIntensity = cp.x; cp.x = 0.0f; }
+    }
+    if (cloudsOn)
+    {
+        ImGui::SliderFloat("Intensity##cloud_x", &cp.x, 0.0f, 1.0f,     "%.2f");
+        ImGui::SliderFloat("Scale (world)##cloud_y", &cp.y, 10.0f, 2000.0f, "%.0f");
+        ImGui::SliderFloat("Drift speed##cloud_z",   &cp.z, 0.0f,   500.0f,  "%.0f u/s");
+        ImGui::SliderFloat("Coverage##cloud_w",      &cp.w, -0.5f,  0.5f,    "%.2f");
+        // Wind shown as degrees for readability, converted to radians on write.
+        float windDeg = cp2.x * (180.0f / 3.14159265f);
+        if (ImGui::SliderFloat("Wind direction##cloud_w2x", &windDeg, 0.0f, 360.0f, "%.0f°"))
+            cp2.x = windDeg * (3.14159265f / 180.0f);
+        ImGui::SliderFloat("Sharpness##cloud_w2y",   &cp2.y, 0.3f,  4.0f,    "%.2f");
+        ImGui::TextDisabled("Simplex noise + 5-octave fBm with per-octave rotation — "
+                            "no axis-aligned artifacts. Zero intensity = no-op.");
+    }
+    ImGui::Separator();
+
     // --- Shadow map preview ---
 #ifdef BUILD_WITH_D3D11
     ImGui::Text("Shadow depth map");

@@ -18,6 +18,8 @@ cbuffer FrameConstants : register(b0)
     row_major float4x4 sunViewProjection; // world -> sun clip space
     float4 shadowParams;  // x = darkness [0..1], y = depth bias, z = 1/shadowMapSize, w = enabled (0 = no shadows)
     float4 shadowParams2; // x = debugMode (int cast), y,z,w = reserved
+    float4 cloudParams;   // x = intensity, y = world-space scale, z = drift speed, w = coverage offset
+    float4 cloudParams2;  // x = wind angle (rad), y = sharpness, z,w = reserved
 };
 
 cbuffer ObjectConstants : register(b1)
@@ -84,6 +86,98 @@ SamplerComparisonState shadowSampler : register(s2); // SampleCmp for shadow PCF
 float3 SafeNormal(float3 N)
 {
     return length(N) > 0.001 ? normalize(N) : float3(0, 1, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Cloud shadow noise — classic simplex noise (Ashima/Ian McEwan, public
+// domain) + multi-octave fBm. Drifts in a wind direction controlled by
+// cloudParams2.x, with per-octave rotation so the result has no axis-aligned
+// artifacts (unlike the earlier sum-of-sines implementation).
+//
+// Tunables:
+//   cloudParams.x  = intensity    (0 = off, 1 = strong darkening)
+//   cloudParams.y  = scale        (world-space period — smaller = smaller clouds)
+//   cloudParams.z  = drift speed  (world units / second)
+//   cloudParams.w  = coverage     (-0.5..0.5 shifts mean density)
+//   cloudParams2.x = wind angle   (radians, direction clouds drift toward)
+//   cloudParams2.y = sharpness    (1 = soft, >1 sharper edges via pow)
+// ---------------------------------------------------------------------------
+float3 sn_mod289v3(float3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+float2 sn_mod289v2(float2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+float3 sn_permute(float3 x)  { return sn_mod289v3(((x * 34.0) + 1.0) * x); }
+
+float Simplex2D(float2 v)
+{
+    const float4 C = float4(0.211324865405187,
+                            0.366025403784439,
+                           -0.577350269189626,
+                            0.024390243902439);
+    float2 i  = floor(v + dot(v, C.yy));
+    float2 x0 = v - i + dot(i, C.xx);
+    float2 i1 = (x0.x > x0.y) ? float2(1.0, 0.0) : float2(0.0, 1.0);
+    float4 x12 = x0.xyxy + C.xxzz;
+    x12.xy -= i1;
+    i = sn_mod289v2(i);
+    float3 p = sn_permute(sn_permute(i.y + float3(0.0, i1.y, 1.0))
+                        + i.x + float3(0.0, i1.x, 1.0));
+    float3 m = max(0.5 - float3(dot(x0, x0),
+                                dot(x12.xy, x12.xy),
+                                dot(x12.zw, x12.zw)), 0.0);
+    m = m * m;
+    m = m * m;
+    float3 xg = 2.0 * frac(p * C.www) - 1.0;
+    float3 h  = abs(xg) - 0.5;
+    float3 ox = floor(xg + 0.5);
+    float3 a0 = xg - ox;
+    m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);
+    float3 g;
+    g.x   = a0.x  * x0.x  + h.x  * x0.y;
+    g.yz  = a0.yz * x12.xz + h.yz * x12.yw;
+    return 130.0 * dot(m, g); // roughly in [-1, 1]
+}
+
+float CloudShadow(float3 worldPos)
+{
+    if (cloudParams.x <= 0.001)
+        return 1.0;
+
+    float tSec = lightingOptions.y * 0.001; // ms -> seconds
+    float scale = max(cloudParams.y, 1.0);
+
+    // Wind direction & speed → world-space offset that moves over time.
+    float ang = cloudParams2.x;
+    float2 wind = float2(cos(ang), sin(ang)) * cloudParams.z * tSec;
+    float2 p = (worldPos.xy + wind) / scale;
+
+    // fBm — 5 octaves. Per-octave 2D rotation (~37°) breaks residual
+    // lattice alignment inherent to any grid-based noise, so the sum
+    // doesn't have preferred axes.
+    const float2x2 rot = float2x2( 0.8, -0.6, 0.6, 0.8); // cos(~37), sin(~37)
+    float n   = 0.0;
+    float amp = 0.55;
+    float freq = 1.0;
+    float norm = 0.0;
+    [unroll]
+    for (int i = 0; i < 5; ++i)
+    {
+        n    += amp * Simplex2D(p * freq);
+        norm += amp;
+        p     = mul(rot, p);
+        freq *= 2.03;
+        amp  *= 0.5;
+    }
+    n /= max(norm, 1e-3); // now roughly [-1, 1]
+
+    // density in [0,1]; coverage shifts the mean up or down.
+    float density = saturate(n * 0.5 + 0.5 + cloudParams.w);
+
+    // Sharpness — pow() compresses the mid-range so patches have clearer
+    // edges without hard clipping. sharpness = 1 leaves linear.
+    float sharp = max(cloudParams2.y, 0.2);
+    density = pow(density, sharp);
+
+    // density 0 = no cloud, 1 = full cloud. Visibility is 1 - intensity*density.
+    return 1.0 - density * cloudParams.x;
 }
 
 // -----------------------------------------------------------------------------
@@ -166,6 +260,10 @@ float3 ComputeLighting(float3 worldPos, float3 N)
     // shadowed; shadowParams.x scales how much that matters.
     float sunVis = ComputeShadowVisibility(worldPos);
     float sunAtten = lerp(1.0, sunVis, shadowParams.x);
+    // Animated cloud shadow: multiplies the sun contribution before NdotL so
+    // the effect modulates the lit surface instead of the ambient fill. No
+    // perf cost when cloudParams.x == 0 (early-out inside CloudShadow).
+    sunAtten *= CloudShadow(worldPos);
 
     [unroll]
     for (int i = 0; i < MAX_DIRECTIONAL_LIGHTS; ++i)
@@ -300,6 +398,8 @@ PSInput2Tex VSMainTwoTex(VSInput2Tex input)
     output.normal = nLen > 0.001 ? worldNormal / nLen : float3(0, 1, 0);
     output.texcoord0 = input.texcoord0;
     output.texcoord1 = input.texcoord1;
+)HLSL"
+R"HLSL(
     output.color = input.color * objectColor;
     return output;
 }
@@ -415,8 +515,6 @@ float3 ApplyShaderEffect(float3 inColor, float3 worldPos, float3 N, float4 objCo
     }
     if (variant == 3) // Shimmer — bright sparkles
     {
-)HLSL"
-R"HLSL(
         float sparkle = Hash12(worldPos.xy * 30.0 + t * 8.0);
         return inColor + teamRgb * pow(sparkle, 6.0) * 1.6;
     }
@@ -668,6 +766,8 @@ float4 PSGhost(PSInput input) : SV_TARGET
 // Custom edge art pass: ALPHAREF=0x84, ALPHAFUNC=GREATEREQUAL
 float4 PSMainAlphaTestEdge(PSInput input) : SV_TARGET
 {
+)HLSL"
+R"HLSL(
     float4 texColor = diffuseTexture.Sample(linearSampler, input.texcoord);
     clip(texColor.a - (132.0f / 255.0f));
     float3 N = SafeNormal(input.normal);
@@ -749,8 +849,6 @@ float4 PSMainWaterBump(PSInput input) : SV_TARGET
         // shore on a typical RTS perspective camera.
         int2 sc = int2(input.position.xy);
         float sd = depthTexture.Load(int3(sc, 0)).r;
-)HLSL"
-R"HLSL(
         float shore = saturate((sd - input.position.z) / 0.00002);
         finalColor.a *= shore;
         return finalColor;

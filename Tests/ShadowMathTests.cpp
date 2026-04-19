@@ -570,6 +570,8 @@ struct FrameConstants
     Render::Float4x4 sunViewProjection;
     Render::Float4 shadowParams;
     Render::Float4 shadowParams2;
+    Render::Float4 cloudParams;
+    Render::Float4 cloudParams2;
 };
 
 } // namespace HLSLLayoutMirror
@@ -596,7 +598,9 @@ static void TestFrameConstantsLayout()
     CHECK_FLOAT((float)offsetof(FrameConstants, sunViewProjection),    368.0f);
     CHECK_FLOAT((float)offsetof(FrameConstants, shadowParams),         432.0f);
     CHECK_FLOAT((float)offsetof(FrameConstants, shadowParams2),        448.0f);
-    CHECK_FLOAT((float)sizeof(FrameConstants),                         464.0f);
+    CHECK_FLOAT((float)offsetof(FrameConstants, cloudParams),          464.0f);
+    CHECK_FLOAT((float)offsetof(FrameConstants, cloudParams2),         480.0f);
+    CHECK_FLOAT((float)sizeof(FrameConstants),                         496.0f);
 }
 
 // ----------------------------------------------------------------------------

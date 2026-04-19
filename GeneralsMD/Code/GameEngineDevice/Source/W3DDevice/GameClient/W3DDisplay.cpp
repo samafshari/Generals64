@@ -540,10 +540,11 @@ void W3DDisplay::step()
 // Larger = more shadows in frame but softer / lower effective resolution;
 // smaller = sharper but shadows pop at camera movement. The Inspector's
 // Shadows panel edits these live, so they're mutable globals (not constexpr).
-float g_shadowFootprint  = 2400.0f;
-float g_sunEyeDistance   = 5000.0f;
-float g_sunNear          = 1.0f;
-float g_sunFar           = 10000.0f;
+// Defaults tuned visually in-game (2026-04-19).
+float g_shadowFootprint  = 1500.0f;
+float g_sunEyeDistance   = 6500.0f;
+float g_sunNear          = 0.1f;
+float g_sunFar           = 45000.0f;
 
 static Render::Float4x4 BuildSunViewProjection(CameraClass* camera)
 {
