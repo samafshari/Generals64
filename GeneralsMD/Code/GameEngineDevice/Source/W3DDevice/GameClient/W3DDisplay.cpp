@@ -1873,6 +1873,14 @@ void W3DDisplay::applyLightPulsesToRenderer()
 
 void W3DDisplay::setTimeOfDay(TimeOfDay tod)
 {
+	{
+		char buf[192];
+		sprintf(buf, "W3DDISPLAY_TOD tod=%d shadowMgr=%p lightsOverridden=%d\n",
+			(int)tod, (void*)TheW3DShadowManager,
+			(int)Render::Renderer::Instance().LightsOverridden());
+		OutputDebugStringA(buf);
+	}
+
 	// Apply lighting from GlobalData's terrain lighting settings
 	if (!TheGlobalData)
 		return;

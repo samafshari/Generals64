@@ -43,6 +43,7 @@
 
 #ifdef BUILD_WITH_D3D11
 #include <d3d11.h>
+#include <cstdio>
 #include "Renderer.h"
 #include "RenderUtils.h"
 #include "Core/Device.h"
@@ -1396,6 +1397,30 @@ void W3DVolumetricShadow::updateMeshVolume(Int meshIndex, Int lightIndex, const 
 	Bool isLightMoving = false;
 
 	Matrix4x4 objectToWorld(*meshXform);
+
+#ifdef BUILD_WITH_D3D11
+	// DX11 diagnostic: shadows appear to rotate with the camera. Math in this
+	// function is world-space so that should not happen — log meshXform
+	// translation + X-basis + world-space light once per caster, every 60th
+	// time we hit that caster. If either value changes as the camera rotates,
+	// transforms are being polluted (view-space leak) or the light is being
+	// re-written somewhere.
+	{
+		static unsigned s_callCount = 0;
+		if ((s_callCount++ % 60u) == 0u && meshIndex == 0 && lightIndex == 0)
+		{
+			Vector3 lpw = TheW3DShadowManager->getLightPosWorld(0);
+			char buf[256];
+			sprintf(buf,
+				"SHADOW_DIAG this=%p xform T=(%.2f,%.2f,%.2f) Xaxis=(%.3f,%.3f,%.3f) lightW=(%.1f,%.1f,%.1f)\n",
+				(void*)this,
+				(*meshXform)[0][3], (*meshXform)[1][3], (*meshXform)[2][3],
+				(*meshXform)[0][0], (*meshXform)[1][0], (*meshXform)[2][0],
+				lpw.X, lpw.Y, lpw.Z);
+			OutputDebugStringA(buf);
+		}
+	}
+#endif
 	Matrix4x4* prevXForm = &m_objectXformHistory[lightIndex][meshIndex];
 
 	// Normalized-axis orientation comparison (CNC3 variant).

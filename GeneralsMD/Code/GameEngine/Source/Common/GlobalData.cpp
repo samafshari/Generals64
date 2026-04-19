@@ -34,6 +34,11 @@
 
 #include "Common/GlobalData.h"
 
+#include <stdio.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #define DEFINE_TERRAIN_LOD_NAMES
 #define DEFINE_TIME_OF_DAY_NAMES
 #define DEFINE_WEATHER_NAMES
@@ -1105,6 +1110,22 @@ GlobalData::~GlobalData()
 //-------------------------------------------------------------------------------------------------
 Bool GlobalData::setTimeOfDay( TimeOfDay tod )
 {
+#ifdef _WIN32
+	{
+		char buf[256];
+		sprintf(buf,
+			"GLOBALDATA_TOD new=%d cur=%d srcMorningObjLight=(%.2f,%.2f,%.2f) srcMorningTerrLight=(%.2f,%.2f,%.2f)\n",
+			(int)tod, (int)m_timeOfDay,
+			m_terrainObjectsLighting[TIME_OF_DAY_MORNING][0].lightPos.x,
+			m_terrainObjectsLighting[TIME_OF_DAY_MORNING][0].lightPos.y,
+			m_terrainObjectsLighting[TIME_OF_DAY_MORNING][0].lightPos.z,
+			m_terrainLighting[TIME_OF_DAY_MORNING][0].lightPos.x,
+			m_terrainLighting[TIME_OF_DAY_MORNING][0].lightPos.y,
+			m_terrainLighting[TIME_OF_DAY_MORNING][0].lightPos.z);
+		OutputDebugStringA(buf);
+	}
+#endif
+
 	if( tod >= TIME_OF_DAY_COUNT || tod < TIME_OF_DAY_FIRST )
 	{
 		return FALSE;

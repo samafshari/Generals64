@@ -27,6 +27,11 @@
 #include "W3DDevice/GameClient/W3DProjectedShadow.h"
 #include "W3DDevice/GameClient/W3DVolumetricShadow.h"
 
+#ifdef BUILD_WITH_D3D11
+#include <windows.h>
+#include <cstdio>
+#endif
+
 // Distance of the sun light source from ground. Arbitrary but far enough
 // that the direction vector dominates over position for shadow projection.
 #define SUN_DISTANCE_FROM_GROUND	10000.0f
@@ -46,6 +51,25 @@ static Vector3 s_lightPosWorld[MAX_SHADOW_LIGHTS] =
 // (stencilPass=true) for volumetric stencil shadows.
 void DoShadows(RenderInfoClass& rinfo, Bool stencilPass)
 {
+	// The expected init-order is: INI load → GlobalData::setTimeOfDay →
+	// TheGameClient->setTimeOfDay → ... → W3DShadowManager::setTimeOfDay.
+	// In this build the W3DTerrainLogic::loadMap post-INI hop never fires
+	// (map load goes through a different path), so m_terrainLightPos is
+	// never refreshed from the INI and s_lightPosWorld stays at its
+	// construction-time default (straight-down (0,0,10000)).
+	//
+	// Authoritative source for the sun direction per time-of-day is
+	// m_terrainObjectsLighting[tod][0].lightPos — that array IS populated
+	// directly from the INI field parsers and is valid by the time any
+	// frame renders. Refresh s_lightPosWorld from it here once per frame.
+	// Cheap: it's just a few arithmetic ops.
+	if (TheW3DShadowManager && TheGlobalData && !stencilPass)
+	{
+		TimeOfDay tod = TheGlobalData->m_timeOfDay;
+		if (tod >= TIME_OF_DAY_FIRST && tod < TIME_OF_DAY_COUNT)
+			TheW3DShadowManager->setTimeOfDay(tod);
+	}
+
 	Int projectionCount = 0;
 
 	// Projected shadows render first because they may fill the stencil
@@ -85,6 +109,20 @@ W3DShadowManager::W3DShadowManager(void)
 		-TheGlobalData->m_terrainLightPos[0].z);
 	lightRay.Normalize();
 	s_lightPosWorld[0] = lightRay * SUN_DISTANCE_FROM_GROUND;
+
+#ifdef BUILD_WITH_D3D11
+	{
+		char buf[256];
+		sprintf(buf,
+			"SHADOW_CTOR tod=%d srcTerrainLightPos=(%.3f,%.3f,%.3f) s_lightPosWorld=(%.1f,%.1f,%.1f)\n",
+			(int)TheGlobalData->m_timeOfDay,
+			TheGlobalData->m_terrainLightPos[0].x,
+			TheGlobalData->m_terrainLightPos[0].y,
+			TheGlobalData->m_terrainLightPos[0].z,
+			s_lightPosWorld[0].X, s_lightPosWorld[0].Y, s_lightPosWorld[0].Z);
+		OutputDebugStringA(buf);
+	}
+#endif
 
 	TheW3DVolumetricShadowManager = NEW W3DVolumetricShadowManager;
 	TheProjectedShadowManager = TheW3DProjectedShadowManager = NEW W3DProjectedShadowManager;
@@ -212,6 +250,18 @@ void W3DShadowManager::setTimeOfDay(TimeOfDay tod)
 	Vector3 lightRay(-ol->lightPos.x, -ol->lightPos.y, -ol->lightPos.z);
 	lightRay.Normalize();
 	lightRay *= SUN_DISTANCE_FROM_GROUND;
+
+#ifdef BUILD_WITH_D3D11
+	{
+		char buf[256];
+		sprintf(buf,
+			"SHADOW_TOD tod=%d srcLightPos=(%.3f,%.3f,%.3f) computedLightW=(%.1f,%.1f,%.1f)\n",
+			(int)tod,
+			ol->lightPos.x, ol->lightPos.y, ol->lightPos.z,
+			lightRay.X, lightRay.Y, lightRay.Z);
+		OutputDebugStringA(buf);
+	}
+#endif
 
 	setLightPosition(0, lightRay.X, lightRay.Y, lightRay.Z);
 }

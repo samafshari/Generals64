@@ -33,6 +33,10 @@
 #include "W3DDevice/GameClient/WorldHeightMap.h"
 #include "Common/PerfTimer.h"
 #include "Common/MapReaderWriterInfo.h"
+#include <stdio.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include "Common/GlobalData.h"
 #include "Common/Xfer.h"
 #include "GameClient/GameClient.h"
@@ -165,6 +169,12 @@ Bool W3DTerrainLogic::loadMap( AsciiString filename , Bool query )
 		return FALSE;
 
 	// Map file now contains lighting & time of day info.
+	{
+		char buf[160];
+		sprintf(buf, "W3DTERRAIN_LOADMAP tod=%d client=%p writeOK=1\n",
+			(int)TheGlobalData->m_timeOfDay, (void*)TheGameClient);
+		OutputDebugStringA(buf);
+	}
 	if( TheWritableGlobalData->setTimeOfDay( TheGlobalData->m_timeOfDay ) )
 		TheGameClient->setTimeOfDay( TheGlobalData->m_timeOfDay );
 
