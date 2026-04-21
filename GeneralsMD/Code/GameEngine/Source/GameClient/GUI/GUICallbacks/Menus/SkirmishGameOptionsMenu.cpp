@@ -516,20 +516,35 @@ AsciiString SkirmishPreferences::getPreferredMap()
 
 static const char superweaponRestrictionKey[] = "SuperweaponRestrict";
 
-Bool SkirmishPreferences::getSuperweaponRestricted() const
+UnsignedShort SkirmishPreferences::getSuperweaponRestricted() const
 {
   const_iterator it = find(superweaponRestrictionKey);
   if (it == end())
   {
-    return false;
+    // No stored value → match the GameLogic / LAN lobby default of 3.
+    // Prior builds returned "unrestricted" (0) here, which under the
+    // DeterminedBySuperweaponRestriction semantic actually means
+    // "superweapons disabled", not "unlimited".
+    return 3;
   }
 
-  return ( it->second.compareNoCase( "yes" ) == 0 );
+  // Legacy builds stored a Bool as "Yes"/"No"; collapse that to 1/3 so
+  // users coming from the old format still get a sane experience
+  // (checked = restrict to 1, unchecked = the default cap of 3).
+  if ( it->second.compareNoCase( "yes" ) == 0 )
+    return 1;
+  if ( it->second.compareNoCase( "no" ) == 0 )
+    return 3;
+
+  // Numeric form written by setSuperweaponRestricted(UnsignedShort).
+  return (UnsignedShort)atoi( it->second.str() );
 }
 
-void SkirmishPreferences::setSuperweaponRestricted( Bool superweaponRestricted )
+void SkirmishPreferences::setSuperweaponRestricted( UnsignedShort superweaponLimit )
 {
-  (*this)[superweaponRestrictionKey] = superweaponRestricted ? "Yes" : "No";
+  AsciiString option;
+  option.format( "%u", (unsigned)superweaponLimit );
+  (*this)[superweaponRestrictionKey] = option;
 }
 
 static const char startingCashKey[] = "StartingCash";
@@ -576,7 +591,7 @@ Bool SkirmishPreferences::write()
 	(*this)["UserName"] = UnicodeStringToQuotedPrintable(TheSkirmishGameInfo->getConstSlot(0)->getName());
 
   setStartingCash( TheSkirmishGameInfo->getStartingCash() );
-  setSuperweaponRestricted( TheSkirmishGameInfo->getSuperweaponRestriction() != 0 );
+  setSuperweaponRestricted( TheSkirmishGameInfo->getSuperweaponRestriction() );
 
 	setSlotList();
 
@@ -1690,7 +1705,7 @@ void SkirmishGameOptionsMenuInit( WindowLayout *layout, void *userData )
 	}
 
   TheSkirmishGameInfo->setStartingCash( prefs.getStartingCash() );
-  TheSkirmishGameInfo->setSuperweaponRestriction( prefs.getSuperweaponRestricted() ? 1 : 0 );
+  TheSkirmishGameInfo->setSuperweaponRestriction( prefs.getSuperweaponRestricted() );
 
   TheSkirmishGameInfo->setMap(prefs.getPreferredMap());
 	const MapMetaData *md = TheMapCache->findMap(TheSkirmishGameInfo->getMap());

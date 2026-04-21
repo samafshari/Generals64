@@ -13,6 +13,8 @@
 #include "Common/PlayerList.h"
 #include "Common/PlayerTemplate.h"
 #include "Common/ScoreKeeper.h"
+#include "Common/ThingFactory.h"
+#include "Common/ThingTemplate.h"
 #include "GameLogic/GameLogic.h"
 #include "GameNetwork/GameInfo.h"
 #include "GameNetwork/LANAPI.h"
@@ -62,6 +64,43 @@ static void appendJsonEscaped(AsciiString &dst, const char *src)
 // Mirrors GeneralsRemastered.Data.Entities.PlayerResult so the byte on
 // the wire matches what StatsService expects.
 enum : Int { RES_UNKNOWN = 0, RES_WIN = 1, RES_LOSS = 2, RES_DRAW = 3, RES_DISCONNECT = 4 };
+
+// One-shot flag: whether we've already attached a ThingFactory manifest
+// to a GAMERESULT in this engine process. The full mapping is large
+// (~500 entries, ~15KB of JSON) but static across the engine's life,
+// so we ship it once and let the server catalog persist it across
+// sessions and games.
+static Bool s_thingManifestShipped = FALSE;
+
+// Walk every ThingTemplate the factory knows about and append
+//    "ThingManifest":{"1":"AmericaTankCrusader","2":"ChinaTankOverlord",...}
+// to <dst>. Caller is responsible for placing the comma that precedes
+// the "ThingManifest" key; this helper writes the key and value only.
+// Called at most once per engine process (see s_thingManifestShipped).
+static void appendThingManifestJson(AsciiString &dst)
+{
+	if (!TheThingFactory)
+		return;
+	dst.concat("\"ThingManifest\":{");
+	Bool first = TRUE;
+	char buf[32];
+	for (const ThingTemplate *t = TheThingFactory->firstTemplate();
+	     t != nullptr;
+	     t = const_cast<ThingTemplate*>(t)->friend_getNextTemplate())
+	{
+		const UnsignedShort id = t->getTemplateID();
+		if (id == 0) continue;          // engine uses 0 as invalid
+		const AsciiString &name = t->getName();
+		if (name.isEmpty()) continue;
+		if (!first) dst.concat(",");
+		first = FALSE;
+		sprintf(buf, "\"%u\":\"", (unsigned)id);
+		dst.concat(buf);
+		appendJsonEscaped(dst, name.str());
+		dst.concat("\"");
+	}
+	dst.concat("}");
+}
 
 GameTelemetry::GameTelemetry()
 : m_active(FALSE)
@@ -319,7 +358,23 @@ void GameTelemetry::sendGameResultToRelay(Int localResult)
 		json.concat(buf);
 	}
 
-	json.concat("]}");
+	json.concat("]");
+
+	// First GAMERESULT of this engine process: attach the ThingFactory
+	// id → name manifest so the server can resolve wire-level numeric
+	// ids (observation builds, favourite-unit dashboard) to template
+	// names without the engine ever having to emit names on the hot
+	// observation path. Skipped on subsequent results — the server
+	// catalogs the manifest once and it remains valid until the engine
+	// reloads its INI (which doesn't happen in a normal session).
+	if (!s_thingManifestShipped)
+	{
+		json.concat(",");
+		appendThingManifestJson(json);
+		s_thingManifestShipped = TRUE;
+	}
+
+	json.concat("}");
 
 	TheLAN->relaySendGameResult(json.str(), json.getLength());
 	m_resultSent = TRUE;

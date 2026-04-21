@@ -44,6 +44,20 @@ extern "C" {
 	// WinMain resolves names from these pointers at crash time under SEH.
 	extern const void* g_lastUpdateModulePtr;
 	extern const void* g_lastUpdateObjectPtr;
+	// typeid(*u).name() for the module being dispatched. Static storage
+	// (compiler type_info table), so storing the pointer is always safe.
+	extern const char* g_lastUpdateModuleClass;
+	// Dispatch ring buffer — see WinMain.cpp for layout.
+	struct DispatchRingEntry {
+		const void* modulePtr;
+		const void* objectPtr;
+		unsigned    objectId;
+		unsigned    frame;
+		const char* className;
+	};
+	enum { DISPATCH_RING_SIZE = 32 };
+	extern DispatchRingEntry g_dispatchRing[DISPATCH_RING_SIZE];
+	extern unsigned g_dispatchRingHead;
 }
 
 // Probe the vtable of an UpdateModule and validate that its low slots look
@@ -3974,11 +3988,19 @@ void GameLogic::update()
 	LIVE_PERF_SCOPE("GameLogic::update/sleepyUpdates");
 
 	// Scrub phase: O(N) over the whole sleepy vector, probing each entry's
-	// vtable via SafeCanCallUpdate. On a big map this IS the linear-with-unit-
-	// count tax the fork added.
+	// vtable via SafeCanCallUpdate. On a big map this is the linear-with-unit-
+	// count tax the fork added. Garbage vtables only appear when a unit is
+	// destroyed mid-frame, which is rare — running the probe every frame was
+	// ~1.4 s/min at 500+ units. Throttling to once every SCRUB_FRAME_INTERVAL
+	// frames (~1 second at 30 Hz) catches garbage before it can crash the heap
+	// rebalancer on the NEXT sleepy dispatch, while amortizing the scan cost.
+	constexpr UnsignedInt SCRUB_FRAME_INTERVAL = 30;
+	const bool runScrub = (now % SCRUB_FRAME_INTERVAL) == 0;
 	{
 	LIVE_PERF_SCOPE("GameLogic::update/sleepyScrub");
 	bool scrubbed = false;
+	if (runScrub)
+	{
 	for (int k = (int)m_sleepyUpdates.size() - 1; k >= 0; --k)
 	{
 		UpdateModulePtr u = m_sleepyUpdates[k];
@@ -4005,6 +4027,7 @@ void GameLogic::update()
 		for (int k = (int)m_sleepyUpdates.size() / 2 - 1; k >= 0; --k)
 			rebalanceChildSleepyUpdate(k);
 	}
+	} // end if (runScrub)
 	} // end sleepyScrub
 
 	int sleepyUpdateCount = 0;
@@ -4032,6 +4055,27 @@ void GameLogic::update()
 
 			UpdateSleepTime sleepLen = UPDATE_SLEEP_NONE;	// default, if it is disabled.
 
+			// Validate the module's vtable FIRST, before any friend_getObject() /
+			// isDestroyed() deref. If u points to freed memory its m_object field
+			// is garbage and touching it crashes (observed after 15 min of play at
+			// frame 25674, access READ at 0xA8 on a freed module's internal field).
+			// SafeCanCallUpdate uses an SEH __try to probe the vtable safely.
+			// The scrub pass catches long-lived garbage periodically, but the
+			// 30-frame throttle leaves a window where per-dispatch validation is
+			// essential. Cost: one pointer-bounds check + 8 vtable slot checks
+			// per dispatch, ~200 ns — negligible next to the fork's prior
+			// keyToName+strncpy crash stamp (which was the real hot-path cost,
+			// still removed).
+			if (!SafeCanCallUpdate(u)) {
+				g_lastUpdateModulePtr   = u;
+				g_lastUpdateObjectPtr   = nullptr;
+				g_lastUpdateObjectId    = 0u;
+				g_lastUpdateFrame       = (unsigned)now;
+				g_lastUpdateModuleClass = "<corrupt-vtable>";
+				popSleepyUpdate();
+				continue;
+			}
+
 			const Object* modObj = u->friend_getObject();
 			if (!modObj) {
 				popSleepyUpdate();
@@ -4047,12 +4091,6 @@ void GameLogic::update()
 				popSleepyUpdate();
 				continue;
 			}
-			// The scrub pass at the top of this frame already ran SafeCanCallUpdate
-			// on every sleepy entry and popped the garbage. No new entries have
-			// been added since — so the main loop can trust the vtable without
-			// re-probing. Removing this per-dispatch SEH __try frame was a measured
-			// perf win on high-unit-count frames (fork regression; original 2003
-			// code did no vtable probe at all).
 			DisabledMaskType dis = modObj->getDisabledFlags();
 			if (!dis.any() || dis.anyIntersectionWith(u->getDisabledTypesToProcess()))
 			{
@@ -4066,10 +4104,27 @@ void GameLogic::update()
 				// SEH. The prior version called TheNameKeyGenerator->keyToName()
 				// + two strncpy per dispatch; at 500 dispatches × 70Hz that was
 				// the dominant cost in the sleepy main loop (~50 ms/frame).
-				g_lastUpdateModulePtr = u;
-				g_lastUpdateObjectPtr = modObj;
-				g_lastUpdateObjectId  = modObj ? (unsigned)modObj->getID() : 0u;
-				g_lastUpdateFrame     = (unsigned)now;
+				// typeid(*u).name() is a static-storage pointer, free to stash.
+				const char* modClassName = typeid(*u).name();
+				g_lastUpdateModulePtr   = u;
+				g_lastUpdateObjectPtr   = modObj;
+				g_lastUpdateObjectId    = modObj ? (unsigned)modObj->getID() : 0u;
+				g_lastUpdateFrame       = (unsigned)now;
+				g_lastUpdateModuleClass = modClassName;
+
+				// Dispatch ring: keeps the last 32 modules executed so a crash
+				// log can show the context leading up to the fault, even if the
+				// fault itself is inside u->update(). Single-writer from the
+				// logic thread — no synchronization needed.
+				{
+					const unsigned idx = g_dispatchRingHead & (DISPATCH_RING_SIZE - 1);
+					g_dispatchRing[idx].modulePtr = u;
+					g_dispatchRing[idx].objectPtr = modObj;
+					g_dispatchRing[idx].objectId  = g_lastUpdateObjectId;
+					g_dispatchRing[idx].frame     = (unsigned)now;
+					g_dispatchRing[idx].className = modClassName;
+					++g_dispatchRingHead;
+				}
 
 				{
 					// Per-module-class timing. typeid().name() returns a pointer

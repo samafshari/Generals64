@@ -37,6 +37,8 @@
 #endif
 #include <stdlib.h>
 #include <string>
+#include <csignal>
+#include <exception>
 #ifdef _WIN32
 #include <crtdbg.h>
 #include <eh.h>
@@ -1005,6 +1007,22 @@ static LONG WINAPI UnHandledExceptionFilter( struct _EXCEPTION_POINTERS* e_info 
 // it sees abort() / __fastfail before they bypass our top-level CrashFilter.
 // We only want to capture the FIRST crash and ignore harmless recoverable
 // exceptions (e.g., DLL_PROCESS_ATTACH probes, C++ exception unwinding).
+// Shared one-shot flag between VectoredCrashHandler and CrashFilter. Without
+// this, both handlers would open crash.log with "w" in sequence — the second
+// truncating whatever the first wrote, yielding an empty file if the second
+// handler itself faulted during its dump. The handler that wins the race
+// writes the "CRASH" header with "w"; the other appends supplemental info
+// (vectored handler captures the original exception; CrashFilter has access
+// to the last-module state / ring buffer).
+static LONG g_crashLogFired = 0;
+
+// Strip buffering so every fprintf hits disk. Critical for partial-write
+// survival when the filter itself faults or the process is terminated
+// before fclose runs.
+static void CrashLogUnbuffered(FILE* f) {
+	if (f) setvbuf(f, nullptr, _IONBF, 0);
+}
+
 static LONG WINAPI VectoredCrashHandler(EXCEPTION_POINTERS* ep)
 {
 	const DWORD code = ep->ExceptionRecord->ExceptionCode;
@@ -1033,8 +1051,7 @@ static LONG WINAPI VectoredCrashHandler(EXCEPTION_POINTERS* ep)
 	if (!isFatal)
 		return EXCEPTION_CONTINUE_SEARCH;
 
-	static LONG sFired = 0;
-	if (InterlockedExchange(&sFired, 1) != 0)
+	if (InterlockedExchange(&g_crashLogFired, 1) != 0)
 		return EXCEPTION_CONTINUE_SEARCH;
 
 	char crashLogName[64];
@@ -1046,6 +1063,10 @@ static LONG WINAPI VectoredCrashHandler(EXCEPTION_POINTERS* ep)
 
 	FILE* f = fopen(crashLogName, "w");
 	if (!f) return EXCEPTION_CONTINUE_SEARCH;
+	CrashLogUnbuffered(f);
+	SYSTEMTIME st; GetLocalTime(&st);
+	fprintf(f, "=== VECTORED CRASH %04u-%02u-%02u %02u:%02u:%02u ===\n",
+		st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
 	fprintf(f, "VECTORED CRASH code=0x%08X addr=%p flags=0x%X\n",
 		code, ep->ExceptionRecord->ExceptionAddress, ep->ExceptionRecord->ExceptionFlags);
 	if (ep->ExceptionRecord->NumberParameters > 0) {
@@ -1117,6 +1138,121 @@ extern "C" {
     unsigned g_lastUpdateFrame      = 0;
     const void* g_lastUpdateModulePtr = nullptr;
     const void* g_lastUpdateObjectPtr = nullptr;
+    const char* g_lastUpdateModuleClass = nullptr;  // typeid(*u).name()
+
+    // Dispatch ring buffer — GameLogic stamps every sleepy u->update() call
+    // into one of these 32 slots, wrapping. When a crash happens we dump the
+    // newest-to-oldest entries so we can see what the loop was doing just
+    // before the fault, even if the fault is inside u->update() itself.
+    struct DispatchRingEntry {
+        const void* modulePtr;
+        const void* objectPtr;
+        unsigned    objectId;
+        unsigned    frame;
+        const char* className;  // typeid(*u).name() — static storage
+    };
+    enum { DISPATCH_RING_SIZE = 32 };
+    DispatchRingEntry g_dispatchRing[DISPATCH_RING_SIZE] = {};
+    unsigned g_dispatchRingHead = 0;  // next write slot; (head-1) is newest
+}
+
+// ---- Crash-dump helpers ---------------------------------------------------
+// All dumpers are SEH-wrapped because the memory we're probing may itself be
+// corrupt (that's often why the game crashed in the first place).
+
+// Hex-dump `len` bytes starting at `p`. 16 bytes per line, with ASCII sidecar.
+// Protected against bad pointers via VirtualQuery + IsBadReadPtr.
+static void DumpBytesSEH(FILE* f, const char* label, const void* p, size_t len) {
+	fprintf(f, "\n--- %s @ %p (%zu bytes) ---\n", label, p, len);
+	if (!p) { fprintf(f, "  (null)\n"); return; }
+	// Validate the entire span before we touch it.
+	if (IsBadReadPtr(p, len)) {
+		// Partial read — probe page-by-page and dump what we can.
+		const unsigned char* q = (const unsigned char*)p;
+		size_t done = 0;
+		while (done < len) {
+			size_t chunk = 16;
+			if (done + chunk > len) chunk = len - done;
+			if (IsBadReadPtr(q + done, chunk)) {
+				fprintf(f, "  +%04zx  <unreadable>\n", done);
+				break;
+			}
+			fprintf(f, "  +%04zx ", done);
+			for (size_t i = 0; i < chunk; ++i) fprintf(f, "%02X ", q[done + i]);
+			for (size_t i = chunk; i < 16; ++i) fprintf(f, "   ");
+			fprintf(f, " ");
+			for (size_t i = 0; i < chunk; ++i) {
+				unsigned char c = q[done + i];
+				fputc(c >= 0x20 && c < 0x7F ? c : '.', f);
+			}
+			fputc('\n', f);
+			done += chunk;
+		}
+		return;
+	}
+	const unsigned char* q = (const unsigned char*)p;
+	for (size_t off = 0; off < len; off += 16) {
+		fprintf(f, "  +%04zx ", off);
+		size_t row = (len - off < 16) ? (len - off) : 16;
+		for (size_t i = 0; i < row; ++i) fprintf(f, "%02X ", q[off + i]);
+		for (size_t i = row; i < 16; ++i) fprintf(f, "   ");
+		fprintf(f, " ");
+		for (size_t i = 0; i < row; ++i) {
+			unsigned char c = q[off + i];
+			fputc(c >= 0x20 && c < 0x7F ? c : '.', f);
+		}
+		fputc('\n', f);
+	}
+}
+
+// Walks the module's vtable (first 8 slots), prints each slot's address and
+// the owning module (.text section) it lies in. If any slot is outside any
+// module's .text the module memory is definitely corrupt.
+static void DumpVtableSEH(FILE* f, const void* modulePtr) {
+	fprintf(f, "\n--- VTABLE of module @ %p ---\n", modulePtr);
+	if (!modulePtr || IsBadReadPtr(modulePtr, sizeof(void*))) {
+		fprintf(f, "  (unreadable this-pointer)\n");
+		return;
+	}
+	const void* const* vtbl = *(const void* const* const*)modulePtr;
+	if (!vtbl || IsBadReadPtr(vtbl, sizeof(void*) * 8)) {
+		fprintf(f, "  vtable=%p (unreadable)\n", vtbl);
+		return;
+	}
+	fprintf(f, "  vtable=%p\n", vtbl);
+	for (int i = 0; i < 8; ++i) {
+		const void* slot = vtbl[i];
+		HMODULE mod = nullptr;
+		GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+			GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			(LPCSTR)slot, &mod);
+		char modName[MAX_PATH] = "?";
+		if (mod) GetModuleFileNameA(mod, modName, sizeof(modName));
+		const char* base = strrchr(modName, '\\');
+		base = base ? base + 1 : modName;
+		uintptr_t off = mod ? (uintptr_t)slot - (uintptr_t)mod : 0;
+		fprintf(f, "  vtbl[%d] = %p  %s+0x%llx\n",
+			i, slot, base, (unsigned long long)off);
+	}
+}
+
+// Dump the dispatch ring in newest-to-oldest order. The most recent entry
+// (head-1) is typically the module that was running when the crash happened.
+static void DumpDispatchRingSEH(FILE* f) {
+	fprintf(f, "\n--- DISPATCH RING (newest first, last %d) ---\n", (int)DISPATCH_RING_SIZE);
+	unsigned head = g_dispatchRingHead;
+	for (int back = 0; back < DISPATCH_RING_SIZE; ++back) {
+		unsigned idx = (head - 1 - back) & (DISPATCH_RING_SIZE - 1);
+		const DispatchRingEntry& e = g_dispatchRing[idx];
+		if (!e.modulePtr && !e.className) continue;
+		fprintf(f, "  [-%02d]  frame=%u  class=%s  mod=%p  obj=%p  id=%u\n",
+			back,
+			e.frame,
+			e.className ? e.className : "<null>",
+			e.modulePtr,
+			e.objectPtr,
+			e.objectId);
+	}
 }
 
 static LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep) {
@@ -1127,18 +1263,34 @@ static LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep) {
 	else
 		strcpy(crashLogName, "crash.log");
 
-	FILE* f = fopen(crashLogName, "w");
+	// If VectoredCrashHandler already opened and truncated the log with "w",
+	// we must open in append mode or we'll wipe its contents.
+	const bool vectoredRanFirst = (g_crashLogFired != 0);
+	FILE* f = fopen(crashLogName, vectoredRanFirst ? "a" : "w");
 	if (!f) return EXCEPTION_EXECUTE_HANDLER;
+	CrashLogUnbuffered(f);
 
+	// Timestamp for correlation across multiple runs.
+	SYSTEMTIME st; GetLocalTime(&st);
+	if (vectoredRanFirst) {
+		fprintf(f, "\n=== CRASH FILTER (follow-up) %04u-%02u-%02u %02u:%02u:%02u ===\n",
+			st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+	} else {
+		g_crashLogFired = 1;  // mark so subsequent handlers append
+		fprintf(f, "=== CRASH %04u-%02u-%02u %02u:%02u:%02u ===\n",
+			st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+	}
 	fprintf(f, "CRASH: code=0x%08X addr=%p\n",
 		ep->ExceptionRecord->ExceptionCode,
 		ep->ExceptionRecord->ExceptionAddress);
+	fflush(f);
 	// Last sleepy UpdateModule that started executing. The hot path only
 	// stamps pointers; resolve names here under SEH so a corrupt module or
 	// name table can't crash the crash filter.
 	__try {
 		if (g_lastUpdateModulePtr) {
-			fprintf(f, "LAST UPDATE MODULE ptr=%p obj=%p id=%u frame=%u\n",
+			fprintf(f, "LAST UPDATE MODULE class=%s ptr=%p obj=%p id=%u frame=%u\n",
+				g_lastUpdateModuleClass ? g_lastUpdateModuleClass : "<unknown>",
 				g_lastUpdateModulePtr,
 				g_lastUpdateObjectPtr,
 				g_lastUpdateObjectId,
@@ -1214,11 +1366,148 @@ static LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep) {
 			&handlerData, &establisherFrame, &nvCtx);
 		if (!walk.Rip) break;
 	}
+
+	// --- Memory context dumps --------------------------------------------
+	// Everything below is SEH-guarded. If any individual dumper faults, we
+	// skip it and continue to the next one — can't let crash reporting crash
+	// the crash reporter.
+
+	// Code bytes at RIP — shows the exact instruction that faulted.
+	__try {
+		DumpBytesSEH(f, "CODE AROUND RIP (64 bytes, RIP-16 .. RIP+48)",
+			(const void*)((uintptr_t)ctx->Rip - 16), 64);
+	} __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+	// Faulting memory address — the thing being read/written that caused the AV.
+	if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+	    ep->ExceptionRecord->NumberParameters >= 2) {
+		uintptr_t fault = (uintptr_t)ep->ExceptionRecord->ExceptionInformation[1];
+		__try {
+			// Dump a small window around the faulting address — bounded so we
+			// don't read off a page boundary into unmapped memory.
+			const uintptr_t start = fault >= 32 ? fault - 32 : 0;
+			DumpBytesSEH(f, "MEMORY AT FAULT ADDRESS (-32..+64)",
+				(const void*)start, 96);
+		} __except (EXCEPTION_EXECUTE_HANDLER) {}
+	}
+
+	// Module + object state at the time of the crash.
+	__try {
+		if (g_lastUpdateModulePtr) {
+			DumpBytesSEH(f, "MODULE memory (128 bytes from this-ptr)",
+				g_lastUpdateModulePtr, 128);
+			DumpVtableSEH(f, g_lastUpdateModulePtr);
+		}
+	} __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+	__try {
+		if (g_lastUpdateObjectPtr) {
+			DumpBytesSEH(f, "OBJECT memory (256 bytes from this-ptr)",
+				g_lastUpdateObjectPtr, 256);
+		}
+	} __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+	// 512 bytes of stack around RSP — lets a reader spot return addresses
+	// and locals the stack walker may have skipped.
+	__try {
+		DumpBytesSEH(f, "STACK BYTES (RSP .. RSP+512)",
+			(const void*)ctx->Rsp, 512);
+	} __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+	// Dispatch ring — shows the last 32 modules the sleepy loop executed.
+	__try {
+		DumpDispatchRingSEH(f);
+	} __except (EXCEPTION_EXECUTE_HANDLER) {
+		fprintf(f, "(dispatch ring: resolver faulted)\n");
+	}
 #endif
 
+	fprintf(f, "\n=== end of crash log ===\n");
+	fflush(f);
 	fclose(f);
 	return EXCEPTION_EXECUTE_HANDLER;
 }
+// atexit hook — fires when the process exits CLEANLY (exit(), return from main).
+// Game-over / defeat / scripted-quit paths can call exit() without triggering
+// SEH, so without this hook a crash-on-cleanup leaves no log at all. We append
+// to the same crash.log so it's always the single source of truth.
+static void AtExitDumpState(void) {
+	// If a real crash already captured state, don't clobber it.
+	if (g_crashLogFired) return;
+	char crashLogName[64];
+	if (rts::ClientInstance::getInstanceId() > 1u)
+		snprintf(crashLogName, sizeof(crashLogName), "crash_Instance%.2u.log",
+			rts::ClientInstance::getInstanceId());
+	else
+		strcpy(crashLogName, "crash.log");
+	FILE* f = fopen(crashLogName, "w");
+	if (!f) return;
+	CrashLogUnbuffered(f);
+	SYSTEMTIME st; GetLocalTime(&st);
+	fprintf(f, "=== ATEXIT (clean shutdown) %04u-%02u-%02u %02u:%02u:%02u ===\n",
+		st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+	// Even a clean-looking exit() can be triggered by a fatal code path (defeat
+	// screen double-free, etc.) — dump the last sleepy-loop state so we have
+	// something to triage against if game feels wrong afterwards.
+	if (g_lastUpdateModulePtr) {
+		fprintf(f, "LAST UPDATE MODULE class=%s ptr=%p obj=%p id=%u frame=%u\n",
+			g_lastUpdateModuleClass ? g_lastUpdateModuleClass : "<unknown>",
+			g_lastUpdateModulePtr,
+			g_lastUpdateObjectPtr,
+			g_lastUpdateObjectId,
+			g_lastUpdateFrame);
+	}
+	__try { DumpDispatchRingSEH(f); }
+	__except(EXCEPTION_EXECUTE_HANDLER) {
+		fprintf(f, "(dispatch ring: resolver faulted on exit)\n");
+	}
+	fflush(f);
+	fclose(f);
+}
+
+// Handler for abort() — typically called from assertion failures or __fastfail.
+// The C runtime raises SIGABRT *after* uninstalling its default abort handler,
+// so a signal hook is our only hope of logging.
+static void OnSigAbrt(int sig) {
+	(void)sig;
+	// Reuse the vectored path by logging directly. Guard against re-entrance.
+	static LONG fired = 0;
+	if (InterlockedExchange(&fired, 1) != 0) return;
+	char name[64];
+	strcpy(name, "crash.log");
+	FILE* f = fopen(name, g_crashLogFired ? "a" : "w");
+	if (!f) return;
+	CrashLogUnbuffered(f);
+	g_crashLogFired = 1;
+	SYSTEMTIME st; GetLocalTime(&st);
+	fprintf(f, "=== SIGABRT %04u-%02u-%02u %02u:%02u:%02u ===\n",
+		st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+	if (g_lastUpdateModulePtr) {
+		fprintf(f, "LAST UPDATE MODULE class=%s ptr=%p obj=%p id=%u frame=%u\n",
+			g_lastUpdateModuleClass ? g_lastUpdateModuleClass : "<unknown>",
+			g_lastUpdateModulePtr, g_lastUpdateObjectPtr,
+			g_lastUpdateObjectId, g_lastUpdateFrame);
+	}
+	__try { DumpDispatchRingSEH(f); }
+	__except(EXCEPTION_EXECUTE_HANDLER) {}
+	fflush(f);
+	fclose(f);
+}
+
+// Centralized hook installer — called from every entry point.
+static void InstallCrashHooks() {
+	static LONG installed = 0;
+	if (InterlockedExchange(&installed, 1) != 0) return;
+	AddVectoredExceptionHandler(1, VectoredCrashHandler);
+	SetUnhandledExceptionFilter(CrashFilter);
+	atexit(AtExitDumpState);
+	signal(SIGABRT, OnSigAbrt);
+	std::set_terminate([]() {
+		OnSigAbrt(0); // reuse the dump path
+		std::abort();  // preserves process-exit semantics
+	});
+}
+
 #endif // _WIN32 (exception handlers)
 
 // StartupTraceC is intentionally a no-op in shipping builds.  It was used
@@ -1498,7 +1787,7 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	(void)lpCmdLine;
 	(void)nCmdShow;
 
-	SetUnhandledExceptionFilter(CrashFilter);
+	InstallCrashHooks();
 
 	// DPI awareness for proper physical pixel sizes
 	{
@@ -1533,11 +1822,10 @@ int main(int argc, char* argv[])
 	// Get HINSTANCE for Win32 APIs that still need it
 	ApplicationHInstance = GetModuleHandle(nullptr);
 
-	// Vectored handler runs BEFORE SEH frames, so it can capture aborts and
-	// fast-fail conditions that the top-level UnhandledExceptionFilter never
-	// sees. The first parameter (1) makes it the FIRST handler in the chain.
-	AddVectoredExceptionHandler(1, VectoredCrashHandler);
-	SetUnhandledExceptionFilter(CrashFilter);
+	// Install vectored + unhandled + atexit + SIGABRT + set_terminate together.
+	// Vectored runs before SEH frames and catches abort() / fastfail / heap
+	// corruption that the top-level UnhandledExceptionFilter never sees.
+	InstallCrashHooks();
 
 	// DPI awareness
 	{
