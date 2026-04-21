@@ -1106,11 +1106,17 @@ static LONG WINAPI VectoredCrashHandler(EXCEPTION_POINTERS* ep)
 // Last-module tracker — GameLogic::update stamps these before each sleepy
 // update call so the crash filter can name the faulty module without having
 // to log every one (which was too slow for real-time play).
+// As of the sleepy-loop perf fix, the hot path only stamps the pointer
+// fields (g_lastUpdateModulePtr / g_lastUpdateObjectPtr / id / frame) — name
+// strings are resolved lazily in CrashFilter under SEH so a corrupt name
+// table won't crash the crash dumper itself.
 extern "C" {
     char g_lastUpdateModuleName[128] = "";
     unsigned g_lastUpdateObjectId   = 0;
     char g_lastUpdateObjectTemplate[128] = "";
     unsigned g_lastUpdateFrame      = 0;
+    const void* g_lastUpdateModulePtr = nullptr;
+    const void* g_lastUpdateObjectPtr = nullptr;
 }
 
 static LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep) {
@@ -1127,14 +1133,26 @@ static LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep) {
 	fprintf(f, "CRASH: code=0x%08X addr=%p\n",
 		ep->ExceptionRecord->ExceptionCode,
 		ep->ExceptionRecord->ExceptionAddress);
-	// Last sleepy UpdateModule that started executing. If the crash sits
-	// inside u->update(), the faulty module is right here.
-	if (g_lastUpdateModuleName[0]) {
-		fprintf(f, "LAST UPDATE MODULE: %s  on obj=%u (%s)  frame=%u\n",
-			g_lastUpdateModuleName,
-			g_lastUpdateObjectId,
-			g_lastUpdateObjectTemplate,
-			g_lastUpdateFrame);
+	// Last sleepy UpdateModule that started executing. The hot path only
+	// stamps pointers; resolve names here under SEH so a corrupt module or
+	// name table can't crash the crash filter.
+	__try {
+		if (g_lastUpdateModulePtr) {
+			fprintf(f, "LAST UPDATE MODULE ptr=%p obj=%p id=%u frame=%u\n",
+				g_lastUpdateModulePtr,
+				g_lastUpdateObjectPtr,
+				g_lastUpdateObjectId,
+				g_lastUpdateFrame);
+		}
+		if (g_lastUpdateModuleName[0]) {
+			fprintf(f, "LAST NAMED MODULE:  %s  on obj=%u (%s)  frame=%u\n",
+				g_lastUpdateModuleName,
+				g_lastUpdateObjectId,
+				g_lastUpdateObjectTemplate,
+				g_lastUpdateFrame);
+		}
+	} __except (EXCEPTION_EXECUTE_HANDLER) {
+		fprintf(f, "LAST UPDATE MODULE: (unavailable — resolver faulted)\n");
 	}
 	if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
 	    ep->ExceptionRecord->NumberParameters >= 2) {

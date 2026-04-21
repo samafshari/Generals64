@@ -53,6 +53,8 @@
 #include "W3DDevice/GameClient/ImageCache.h"
 #endif
 
+#include "Inspector/Inspector.h"
+
 // Heightmap sampling — used by queueDecal/queueSimpleDecal. BaseHeightMap.h
 // pulls in WorldHeightMap.h transitively.
 #include "W3DDevice/GameClient/BaseHeightMap.h"
@@ -608,17 +610,49 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow* shadow)
 		diffuseABGR = (a << 24) | (b << 16) | (g << 8) | r;
 	}
 
+	// When the caller asked for a horizontal (non-terrain-conforming) decal —
+	// e.g. UI radius cursors (guard ring, artillery target) — lock every
+	// vertex to the highest terrain cell under the footprint. That keeps
+	// the ring a flat plane over rough terrain instead of a sawtooth that
+	// disappears into valleys.
+	const Bool flattenToMax = !shadow->m_allowWorldAlign;
+	Real forcedZ = 0.0f;
+	if (flattenToMax)
+	{
+		Real maxZ = (Real)hmap->getHeight(startX, startY) * MAP_HEIGHT_SCALE;
+		for (Int j = startY; j <= endY; ++j)
+		{
+			for (Int i = startX; i <= endX; ++i)
+			{
+				Real h = (Real)hmap->getHeight(i, j) * MAP_HEIGHT_SCALE;
+				if (h > maxZ)
+					maxZ = h;
+			}
+		}
+		forcedZ = maxZ + 0.5f;	// lift slightly so the peak doesn't z-fight
+	}
+
 	for (Int j = startY; j <= endY; ++j)
 	{
 		const Real worldY = (Real)(j - borderSize) * MAP_XY_FACTOR;
 		for (Int i = startX; i <= endX; ++i)
 		{
 			const Real worldX = (Real)(i - borderSize) * MAP_XY_FACTOR;
-			Real worldZ = (Real)hmap->getHeight(i, j) * MAP_HEIGHT_SCALE;
-			if (layerHeight)
-				worldZ = std::max(worldZ, layerHeight);
+			Real worldZ;
+			if (flattenToMax)
+			{
+				worldZ = forcedZ;
+				if (layerHeight)
+					worldZ = std::max(worldZ, layerHeight);
+			}
 			else
-				worldZ += 0.01f * MAP_XY_FACTOR;	// tiny bias to avoid z-fight with terrain
+			{
+				worldZ = (Real)hmap->getHeight(i, j) * MAP_HEIGHT_SCALE;
+				if (layerHeight)
+					worldZ = std::max(worldZ, layerHeight);
+				else
+					worldZ += 0.01f * MAP_XY_FACTOR;	// tiny bias to avoid z-fight with terrain
+			}
 
 			Render::Vertex3D v;
 			v.position = { worldX, worldY, worldZ };
@@ -916,10 +950,15 @@ Int W3DProjectedShadowManager::renderShadows(RenderInfoClass& rinfo)
 	// ---- Loose decals (m_decalList) --------------------------------------
 	lastTex = nullptr;
 	lastType = SHADOW_NONE;
+	Int looseCount = 0, looseSkipped = 0, looseQueued = 0;
 	for (W3DProjectedShadow* shadow = m_decalList; shadow; shadow = shadow->m_next)
 	{
+		++looseCount;
 		if (!shadow->m_isEnabled || shadow->m_isInvisibleEnabled)
+		{
+			++looseSkipped;
 			continue;
+		}
 
 		if (lastTex == nullptr)
 			lastTex = shadow->m_shadowTexture[0];
@@ -940,10 +979,23 @@ Int W3DProjectedShadowManager::renderShadows(RenderInfoClass& rinfo)
 		{
 			queueDecal(shadow);
 			++projectionCount;
+			++looseQueued;
 		}
 	}
 
 	flushDecals(lastTex, lastType);
+
+	// Log loose-decal count when it changes — helps diagnose why UI radius
+	// decals (guard ring, etc.) may not be rendering.
+	static Int s_prevLooseCount = -1;
+	static Int s_prevLooseQueued = -1;
+	if (looseCount != s_prevLooseCount || looseQueued != s_prevLooseQueued)
+	{
+		Inspector::Log("[LooseDecal] frame: list=%d skipped=%d queued=%d",
+			looseCount, looseSkipped, looseQueued);
+		s_prevLooseCount = looseCount;
+		s_prevLooseQueued = looseQueued;
+	}
 #else
 	(void)rinfo;
 #endif

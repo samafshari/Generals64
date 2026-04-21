@@ -20,8 +20,8 @@ struct Visibility
     bool log           = true;
     bool hierarchy     = true;
     bool properties    = true;
-    bool players       = true;
-    bool minimap       = true;
+    bool players       = false; // Off by default — tabs in with Properties when enabled.
+    bool minimap       = false; // Off by default — tabs in with Properties when enabled.
     bool perfHud       = true;
     bool script        = false; // Mission script debugger (off by default)
     bool game          = true;  // The "game viewport" ImGui window
@@ -69,6 +69,12 @@ DebugOverlayFlags& GetDebugFlags();
 // Also exposed via the toolbar's View menu so users can reset after
 // dragging windows around.
 void RequestLayoutReset();
+
+// True on the exact frame the layout is being reset (before
+// Panels::DrawAll clears the flag again). Inspector.cpp reads this
+// to snap the floating toolbar window back to its default bottom-
+// right anchor on the same frame the dockspace is rebuilt.
+bool IsLayoutResetPending();
 
 // True if the given OS-window pixel coordinate is inside the visible
 // content area of the "Game" ImGui window (i.e., the rectangle where

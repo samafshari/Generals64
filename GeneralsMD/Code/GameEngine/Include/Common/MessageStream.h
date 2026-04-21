@@ -246,6 +246,7 @@ public:
 		MSG_META_TOGGLE_CONTROL_BAR,								///< show/hide controlbar
 		MSG_META_TOGGLE_PLAYER_OBSERVER,						///< a contributor @feature Toggle the player observer view in game
 		MSG_META_TOGGLE_PERF_METRICS,								///< show/hide top-right perf HUD (game timer, render fps, clock, network latency)
+		MSG_META_TOGGLE_LOFI_MODE,									///< F8 — toggle lo-fi rendering (shadows/post-FX/volumetrics off) for perf bisection
 
 		MSG_META_BEGIN_PATH_BUILD,									///< enter path-building mode
 		MSG_META_END_PATH_BUILD,										///< exit path-building mode

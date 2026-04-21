@@ -784,6 +784,10 @@ protected:
 	UnsignedInt									m_lastRenderFps;
 	UnsignedInt									m_lastRenderFpsLimit;
 	UnsignedInt									m_lastRenderFpsUpdateMs;
+	// Tracks the lo-fi-mode state used when the FPS string was last
+	// formatted, so flipping F8 while the FPS is steady still rewrites
+	// the "LO-FI MODE" badge on the next updateRenderFpsString() tick.
+	Bool											m_lastLoFiMode;
 
 	// System Time
 	DisplayString *										m_systemTimeString;

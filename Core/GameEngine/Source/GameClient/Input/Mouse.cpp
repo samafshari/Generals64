@@ -1166,8 +1166,25 @@ Bool Mouse::getActiveTooltipForOverlay(char* outUtf8, int bufSize, int* outX, in
 	if (!wide || wide[0] == L'\0')
 		return FALSE;
 
+	// Strip the `&` hotkey markers that the engine's label strings embed
+	// (e.g. "&Move", "Atta&ck") before handing text to the ImGui overlay.
+	// Matches the rule in D3D11Shims.cpp / Render2DSentence's ParseHotKey
+	// path: drop `&` when it's followed by a printable (> ' ') non-newline
+	// char; otherwise leave it as a literal. ImGui can't underline a single
+	// char in TextUnformatted so we just drop the marker.
+	WideChar cleaned[1024];
+	size_t clen = 0;
+	const size_t cap = sizeof(cleaned) / sizeof(cleaned[0]) - 1;
+	for (const WideChar* p = wide; *p && clen < cap; ++p)
+	{
+		if (*p == L'&' && p[1] > L' ' && p[1] != L'\n')
+			continue;	// skip the marker; next iteration emits the hotkey char
+		cleaned[clen++] = *p;
+	}
+	cleaned[clen] = L'\0';
+
 	const int written = ::WideCharToMultiByte(
-		CP_UTF8, 0, wide, -1,
+		CP_UTF8, 0, cleaned, -1,
 		outUtf8, bufSize - 1,
 		nullptr, nullptr);
 	if (written <= 0)
@@ -1370,6 +1387,10 @@ void INI::parseMouseDefinition( INI* ini )
 	{
 		// parse the ini weapon definition
 		ini->initFromINI( TheMouse, TheMouseFieldParseTable );
+		// Override the retail INI's slow hover delay — tooltips should snap
+		// in quickly. Per-widget setCursorTooltip(text, delay) overrides
+		// still win because those feed m_tooltipDelay, not this baseline.
+		TheMouse->m_tooltipDelayTime = 50;
 	}
 }
 

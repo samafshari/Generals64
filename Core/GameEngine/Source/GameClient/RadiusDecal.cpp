@@ -26,6 +26,7 @@
 #include "GameClient/RadiusDecal.h"
 #include "GameClient/Shadow.h"
 #include "GameLogic/GameLogic.h"
+#include "Inspector/Inspector.h"
 
 
 // ------------------------------------------------------------------------------------------------
@@ -41,7 +42,7 @@ RadiusDecalTemplate::RadiusDecalTemplate() :
 }
 
 // ------------------------------------------------------------------------------------------------
-void RadiusDecalTemplate::createRadiusDecal(const Coord3D& /*pos*/, Real radius, const Player* owningPlayer, RadiusDecal& result) const
+void RadiusDecalTemplate::createRadiusDecal(const Coord3D& pos, Real radius, const Player* owningPlayer, RadiusDecal& result) const
 {
 	result.clear();
 
@@ -52,10 +53,67 @@ void RadiusDecalTemplate::createRadiusDecal(const Coord3D& /*pos*/, Real radius,
 	}
 
 	if (m_name.isEmpty() || radius <= 0.0f)
+	{
+		Inspector::Log("[RadiusDecal] create SKIP name='%s' radius=%.1f",
+			m_name.str() ? m_name.str() : "(null)", (double)radius);
 		return;
+	}
 
 	result.m_empty = false;
 	result.m_template = this;
+
+	if (!TheProjectedShadowManager)
+	{
+		Inspector::Log("[RadiusDecal] create FAIL TheProjectedShadowManager=null name='%s'", m_name.str());
+		return;
+	}
+
+	Shadow::ShadowTypeInfo info;
+	memset(&info, 0, sizeof(info));
+	const char* name = m_name.str();
+	size_t len = strlen(name);
+	if (len >= sizeof(info.m_ShadowName))
+		len = sizeof(info.m_ShadowName) - 1;
+	memcpy(info.m_ShadowName, name, len);
+	info.m_ShadowName[len] = '\0';
+	info.m_type = m_shadowType;
+	info.allowUpdates = false;
+	// allowWorldAlign=false makes queueDecal flatten the footprint to the
+	// tallest terrain cell under it, so the ring shows as a single plane
+	// above the highest point rather than diving into valleys.
+	info.allowWorldAlign = false;
+	info.m_sizeX = radius * 2.0f;
+	info.m_sizeY = radius * 2.0f;
+	info.m_offsetX = 0.0f;
+	info.m_offsetY = 0.0f;
+
+	result.m_shadow = TheProjectedShadowManager->addDecal(&info);
+	if (result.m_shadow)
+	{
+		result.m_shadow->setSize(info.m_sizeX, info.m_sizeY);
+		result.m_shadow->setColor((UnsignedInt)m_color);
+		result.m_shadow->setOpacity((Int)(m_minOpacity * 255.0f));
+		result.m_shadow->setPosition(pos.x, pos.y, pos.z);
+
+		// Visibility policy: the decal must still exist (isEmpty==false) so
+		// net sync matches across players; we just hide it when the local
+		// player isn't the owner.
+		Bool hidden = false;
+		if (m_onlyVisibleToOwningPlayer
+			&& ThePlayerList
+			&& ThePlayerList->getLocalPlayer() != owningPlayer)
+		{
+			result.m_shadow->enableShadowInvisible(true);
+			hidden = true;
+		}
+		Inspector::Log("[RadiusDecal] create OK name='%s' radius=%.1f size=%.1fx%.1f type=0x%X hidden=%d",
+			m_name.str(), (double)radius, (double)info.m_sizeX, (double)info.m_sizeY,
+			(unsigned)info.m_type, hidden ? 1 : 0);
+	}
+	else
+	{
+		Inspector::Log("[RadiusDecal] create FAIL addDecal returned null name='%s'", m_name.str());
+	}
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -95,6 +153,7 @@ void RadiusDecalTemplate::xferRadiusDecalTemplate( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 RadiusDecal::RadiusDecal() :
 	m_template(nullptr),
+	m_shadow(nullptr),
 	m_empty(true)
 {
 }
@@ -102,6 +161,7 @@ RadiusDecal::RadiusDecal() :
 // ------------------------------------------------------------------------------------------------
 RadiusDecal::RadiusDecal(const RadiusDecal& /*that*/) :
 	m_template(nullptr),
+	m_shadow(nullptr),
 	m_empty(true)
 {
 	DEBUG_CRASH(("not fully implemented"));
@@ -112,8 +172,7 @@ RadiusDecal& RadiusDecal::operator=(const RadiusDecal& that)
 {
 	if (this != &that)
 	{
-		m_template = nullptr;
-		m_empty = true;
+		clear();
 		DEBUG_CRASH(("not fully implemented"));
 	}
 	return *this;
@@ -131,6 +190,11 @@ void RadiusDecal::xferRadiusDecal( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 void RadiusDecal::clear()
 {
+	if (m_shadow)
+	{
+		m_shadow->release();
+		m_shadow = nullptr;
+	}
 	m_template = nullptr;
 	m_empty = true;
 }
@@ -144,13 +208,38 @@ RadiusDecal::~RadiusDecal()
 // ------------------------------------------------------------------------------------------------
 void RadiusDecal::update()
 {
+	if (!m_shadow || !m_template || !TheGameLogic)
+		return;
+
+	const UnsignedInt throb = m_template->m_opacityThrobTime;
+	if (throb == 0)
+	{
+		m_shadow->setOpacity((Int)(m_template->m_maxOpacity * 255.0f));
+		return;
+	}
+
+	// Triangle wave between min and max over throbTime frames.
+	const UnsignedInt frame = TheGameLogic->getFrame() % throb;
+	Real phase = (Real)frame / (Real)throb;		// 0..1
+	Real tri = 1.0f - (Real)fabs(2.0f * phase - 1.0f);	// 0..1..0
+	const Real minO = m_template->m_minOpacity;
+	const Real maxO = m_template->m_maxOpacity;
+	const Real o = minO + (maxO - minO) * tri;
+	m_shadow->setOpacity((Int)(o * 255.0f));
 }
 
-void RadiusDecal::setOpacity( Real /*o*/ )
+void RadiusDecal::setOpacity( Real o )
 {
+	if (!m_shadow)
+		return;
+	if (o < 0.0f) o = 0.0f;
+	else if (o > 1.0f) o = 1.0f;
+	m_shadow->setOpacity((Int)(o * 255.0f));
 }
 
 // ------------------------------------------------------------------------------------------------
-void RadiusDecal::setPosition(const Coord3D& /*pos*/)
+void RadiusDecal::setPosition(const Coord3D& pos)
 {
+	if (m_shadow)
+		m_shadow->setPosition(pos.x, pos.y, pos.z);
 }

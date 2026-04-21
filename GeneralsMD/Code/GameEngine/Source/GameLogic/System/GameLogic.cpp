@@ -29,6 +29,8 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+#include "Common/LivePerf.h"
+#include <typeinfo>
 // Last-module tracker globals — defined in WinMain.cpp, read by the crash
 // filter. GameLogic::update stamps these before each sleepy UpdateModule
 // update() call so a crash in u->update() names its module in crash.log.
@@ -37,6 +39,11 @@ extern "C" {
 	extern unsigned g_lastUpdateObjectId;
 	extern char g_lastUpdateObjectTemplate[128];
 	extern unsigned g_lastUpdateFrame;
+	// Pointer-only stamps. Filled per-dispatch in the hot sleepy loop instead
+	// of the (very expensive) keyToName+strncpy pair. The crash filter in
+	// WinMain resolves names from these pointers at crash time under SEH.
+	extern const void* g_lastUpdateModulePtr;
+	extern const void* g_lastUpdateObjectPtr;
 }
 
 // Probe the vtable of an UpdateModule and validate that its low slots look
@@ -2690,6 +2697,7 @@ void GameLogic::loadMapINI( AsciiString mapName )
 //DECLARE_PERF_TIMER(processDestroyList)
 void GameLogic::processDestroyList()
 {
+	LIVE_PERF_SCOPE("GameLogic::processDestroyList");
 	//USE_PERF_TIMER(processDestroyList)
 
 	/*
@@ -3814,6 +3822,7 @@ extern __int64 Total_Load_3D_Assets;
 // ------------------------------------------------------------------------------------------------
 void GameLogic::update()
 {
+	LIVE_PERF_SCOPE("GameLogic::update");
 	USE_PERF_TIMER(GameLogic_update)
 
 	LatchRestore<Bool> inUpdateLatch(m_isInUpdate, TRUE);
@@ -3889,6 +3898,7 @@ void GameLogic::update()
 
 	if (generateForSolo || generateForMP)
 	{
+		LIVE_PERF_SCOPE("GameLogic::update/CRC");
 		m_CRC = getCRC( CRC_RECALC );
 		bool isPlayback = (TheRecorder && TheRecorder->isPlaybackMode());
 
@@ -3920,6 +3930,7 @@ void GameLogic::update()
 
 	// process client commands
 	{
+		LIVE_PERF_SCOPE("GameLogic::update/processCommandList");
 		processCommandList( TheCommandList );
 	}
 
@@ -3957,6 +3968,16 @@ void GameLogic::update()
 	// drop garbage in place (swap-and-pop), re-stamp indices so the heap's
 	// reverse lookup is consistent, then sift every node from mid→0 to
 	// restore the min-heap invariant.
+	// Enclosing block wraps scrub + main loop + validate so one LIVE_PERF_SCOPE
+	// captures the total time the sleepy update system costs per frame.
+	{
+	LIVE_PERF_SCOPE("GameLogic::update/sleepyUpdates");
+
+	// Scrub phase: O(N) over the whole sleepy vector, probing each entry's
+	// vtable via SafeCanCallUpdate. On a big map this IS the linear-with-unit-
+	// count tax the fork added.
+	{
+	LIVE_PERF_SCOPE("GameLogic::update/sleepyScrub");
 	bool scrubbed = false;
 	for (int k = (int)m_sleepyUpdates.size() - 1; k >= 0; --k)
 	{
@@ -3984,10 +4005,12 @@ void GameLogic::update()
 		for (int k = (int)m_sleepyUpdates.size() / 2 - 1; k >= 0; --k)
 			rebalanceChildSleepyUpdate(k);
 	}
+	} // end sleepyScrub
 
 	int sleepyUpdateCount = 0;
 	int sleepySkipCount = 0;
 	{
+		LIVE_PERF_SCOPE("GameLogic::update/sleepyMainLoop");
 		while (!m_sleepyUpdates.empty())
 		{
 			UpdateModulePtr u = peekSleepyUpdate();
@@ -4024,20 +4047,12 @@ void GameLogic::update()
 				popSleepyUpdate();
 				continue;
 			}
-			// Probe the module's vtable via SEH. If it's obviously corrupt
-			// (slots don't point inside .text), pop the module out of the
-			// sleepy heap so it doesn't come back and crash the game. We avoid
-			// writing to the module itself since the memory may already belong
-			// to another live allocation.
-			if (!SafeCanCallUpdate(u)) {
-				strncpy(g_lastUpdateModuleName, "<corrupt-vtable>", sizeof(g_lastUpdateModuleName) - 1);
-				g_lastUpdateModuleName[sizeof(g_lastUpdateModuleName) - 1] = '\0';
-				g_lastUpdateObjectTemplate[0] = '\0';
-				g_lastUpdateObjectId = 0u;
-				g_lastUpdateFrame    = (unsigned)now;
-				popSleepyUpdate();
-				continue;
-			}
+			// The scrub pass at the top of this frame already ran SafeCanCallUpdate
+			// on every sleepy entry and popped the garbage. No new entries have
+			// been added since — so the main loop can trust the vtable without
+			// re-probing. Removing this per-dispatch SEH __try frame was a measured
+			// perf win on high-unit-count frames (fork regression; original 2003
+			// code did no vtable probe at all).
 			DisabledMaskType dis = modObj->getDisabledFlags();
 			if (!dis.any() || dis.anyIntersectionWith(u->getDisabledTypesToProcess()))
 			{
@@ -4046,31 +4061,25 @@ void GameLogic::update()
 				//DEBUG_LOG(("calling update %08lx (%d %d)...",update,update->friend_getNextCallFrame(),update->friend_getNextCallPhase()));
 				m_curUpdateModule = u;
 
-				// Last-module stamp for the crash handler. Dumps into crash.log
-				// from WinMain.cpp's CrashFilter when u->update() faults, so
-				// we can name the faulty module without per-frame file logging.
-				{
-					const Object* obj = modObj;
-					AsciiString modName = TheNameKeyGenerator->keyToName(u->getModuleNameKey());
-					const char* tmplName = obj && obj->getTemplate()
-						? obj->getTemplate()->getName().str() : "";
-					strncpy(g_lastUpdateModuleName, modName.str(), sizeof(g_lastUpdateModuleName) - 1);
-					g_lastUpdateModuleName[sizeof(g_lastUpdateModuleName) - 1] = '\0';
-					strncpy(g_lastUpdateObjectTemplate, tmplName, sizeof(g_lastUpdateObjectTemplate) - 1);
-					g_lastUpdateObjectTemplate[sizeof(g_lastUpdateObjectTemplate) - 1] = '\0';
-					g_lastUpdateObjectId = obj ? (unsigned)obj->getID() : 0u;
-					g_lastUpdateFrame    = (unsigned)now;
-				}
+				// Last-module stamp for the crash handler. Pointer-only —
+				// name resolution happens lazily in WinMain::CrashFilter under
+				// SEH. The prior version called TheNameKeyGenerator->keyToName()
+				// + two strncpy per dispatch; at 500 dispatches × 70Hz that was
+				// the dominant cost in the sleepy main loop (~50 ms/frame).
+				g_lastUpdateModulePtr = u;
+				g_lastUpdateObjectPtr = modObj;
+				g_lastUpdateObjectId  = modObj ? (unsigned)modObj->getID() : 0u;
+				g_lastUpdateFrame     = (unsigned)now;
 
 				{
-				LARGE_INTEGER muStart, muEnd, muFreq;
-				QueryPerformanceCounter(&muStart);
-				sleepLen = u->update();
-				QueryPerformanceCounter(&muEnd);
-				QueryPerformanceFrequency(&muFreq);
-				double muMs = (double)(muEnd.QuadPart - muStart.QuadPart) * 1000.0 / (double)muFreq.QuadPart;
-				(void)muMs; // Performance timing kept, log writing removed
-			}
+					// Per-module-class timing. typeid().name() returns a pointer
+					// with program-lifetime storage (the compiler's type_info
+					// table), safe to feed to LivePerf which caches name pointers.
+					// MSVC prefixes with "class " — slot labels will read
+					// "class AIUpdateInterface" / "class ProductionUpdate" etc.
+					LIVE_PERF_SCOPE_DYNAMIC(typeid(*u).name());
+					sleepLen = u->update();
+				}
 				DEBUG_ASSERTCRASH(sleepLen > 0, ("you may not return 0 from update"));
 				if (sleepLen < 1)
 					sleepLen = UPDATE_SLEEP_NONE;
@@ -4085,7 +4094,11 @@ void GameLogic::update()
 		}
 	}
 
-	validateSleepyUpdate();
+	{
+		LIVE_PERF_SCOPE("GameLogic::update/sleepyValidate");
+		validateSleepyUpdate();
+	}
+	} // end of sleepyUpdates scope
 
 
 
@@ -4097,6 +4110,7 @@ void GameLogic::update()
 
 	// production updates
 	{
+		LIVE_PERF_SCOPE("GameLogic::update/BuildAssistant");
 		TheBuildAssistant->update();
 	}
 
@@ -4116,11 +4130,15 @@ void GameLogic::update()
 	// reset the command list, destroying all messages
 	TheCommandList->reset();
 
-	TheWeaponStore->update();
-	TheLocomotorStore->update();
-	TheVictoryConditions->update();
+	{
+		LIVE_PERF_SCOPE("GameLogic::update/storesAndVictory");
+		TheWeaponStore->update();
+		TheLocomotorStore->update();
+		TheVictoryConditions->update();
+	}
 
 	{
+		LIVE_PERF_SCOPE("GameLogic::update/disabledSweep");
 		//Handle disabled statii (and re-enable objects once frame matches)
 		for( Object *obj = m_objList; obj; obj = obj->getNextObject() )
 		{

@@ -464,75 +464,67 @@ namespace
     }
 
     // Build a dockspace layout placing every inspector panel at a
-    // sensible default location around a central passthru hole that
-    // exposes the game viewport. Called once on startup and again
+    // sensible default location. Called on first F10 open and again
     // whenever Panels::RequestLayoutReset() is invoked.
     //
     // Layout:
     //
-    //   +-----------------------------------------------+
-    //   |  HIER       |                |   PLAYERS      |
-    //   |  ARCHY      |                +----------------+
-    //   |             |   game shows   |   MINI-MAP     |
-    //   |-------------|   through      +----------------+
-    //   |  PROPS      |   here         |   PERF HUD     |
-    //   |             |                |                |
-    //   +-------------+----------------+----------------+
-    //   |                LOG                            |
-    //   +-----------------------------------------------+
+    //   +-------------+---------------------------------+
+    //   | HIERARCHY / |                                 |
+    //   | PERF HUD    |                                 |
+    //   | (tabs)      |            GAME                 |
+    //   |             |                                 |
+    //   |             |                                 |
+    //   +-------------+                                 |
+    //   |             |                                 |
+    //   | PROPERTIES  |                                 |
+    //   | (+ Model /  +---------------------------------+
+    //   |  Players /  |                                 |
+    //   |  Mini-map   |            LOG                  |
+    //   |  tabs when  |                                 |
+    //   |  toggled on)|                                 |
+    //   +-------------+---------------------------------+
     //
-    // The central node has the PassthruCentralNode flag so it draws
-    // nothing — the engine renders directly through. Mouse events in
-    // the central area pass through to the game (ImGui doesn't claim
-    // them). Panels are docked to leftTop/leftBot/rightTop/rightMid/
-    // rightBot/bottom nodes around the central hole.
+    // The Game window displays the off-screen render target via
+    // ImGui::Image — the user can drag, resize, and undock it like
+    // any other panel. Players / Mini-map are default-off (see
+    // Panels.h Visibility) so they sit quietly as tabs in the
+    // bottom-left cell until the user turns them on.
     void SetupDockspaceLayout(ImGuiID dockspaceID, ImVec2 size)
     {
         ImGui::DockBuilderRemoveNode(dockspaceID);
-        // No PassthruCentralNode anymore — the central area is now
-        // occupied by the "Game" window which displays the off-screen
-        // game render target via ImGui::Image. The user can drag,
-        // resize, and undock that window like any other panel.
         ImGui::DockBuilderAddNode(dockspaceID, ImGuiDockNodeFlags_DockSpace);
         ImGui::DockBuilderSetNodeSize(dockspaceID, size);
 
         ImGuiID center = dockspaceID;
 
-        // Bottom: Log strip first so it spans the FULL width.
+        // Left narrow column (~23% width). Hierarchy + Perf HUD tab
+        // group on top, Properties (plus optional Model/Players/
+        // Mini-map tabs) on the bottom.
+        ImGuiID leftID = ImGui::DockBuilderSplitNode(
+            center, ImGuiDir_Left, 0.23f, nullptr, &center);
+        ImGuiID leftBotID = 0;
+        ImGuiID leftTopID = ImGui::DockBuilderSplitNode(
+            leftID, ImGuiDir_Up, 0.70f, nullptr, &leftBotID);
+
+        // Right column (whatever's left after the left split): Game
+        // on top, Log occupying the bottom strip only — unlike the
+        // old layout the log does NOT span full width, so the
+        // Properties / Hierarchy side still runs floor-to-ceiling.
         ImGuiID bottomID = ImGui::DockBuilderSplitNode(
             center, ImGuiDir_Down, 0.20f, nullptr, &center);
 
-        // Left column: Hierarchy on top, Properties below it
-        ImGuiID leftID = ImGui::DockBuilderSplitNode(
-            center, ImGuiDir_Left, 0.18f, nullptr, &center);
-        ImGuiID leftBotID = 0;
-        ImGuiID leftTopID = ImGui::DockBuilderSplitNode(
-            leftID, ImGuiDir_Up, 0.55f, nullptr, &leftBotID);
-
-        // Right column: Players on top, Mini-map middle, Perf HUD bottom
-        ImGuiID rightID = ImGui::DockBuilderSplitNode(
-            center, ImGuiDir_Right, 0.24f, nullptr, &center);
-        ImGuiID rightMidID = 0;
-        ImGuiID rightTopID = ImGui::DockBuilderSplitNode(
-            rightID, ImGuiDir_Up, 0.40f, nullptr, &rightMidID);
-        ImGuiID rightBotID = 0;
-        ImGuiID rightMid2ID = ImGui::DockBuilderSplitNode(
-            rightMidID, ImGuiDir_Up, 0.55f, nullptr, &rightBotID);
-
-        // Game window goes in the central node (what's left of `center`
-        // after all the side splits). This is the area that previously
-        // had PassthruCentralNode; now it holds the Game ImGui::Image.
-        ImGui::DockBuilderDockWindow("Game",       center);
+        // Dock windows. Tab order inside a single node is the order
+        // DockBuilderDockWindow is called — so Hierarchy ends up as
+        // the active / leftmost tab with Perf HUD behind it, matching
+        // the screenshot.
         ImGui::DockBuilderDockWindow("Hierarchy",  leftTopID);
+        ImGui::DockBuilderDockWindow("Perf HUD",   leftTopID);
         ImGui::DockBuilderDockWindow("Properties", leftBotID);
-        // Dock Model into the same tab group as Properties so it
-        // shares the bottom-left slot. Off by default; user toggles
-        // it from the View menu and can drag it elsewhere if they
-        // want both Properties and Model visible at once.
         ImGui::DockBuilderDockWindow("Model",      leftBotID);
-        ImGui::DockBuilderDockWindow("Players",    rightTopID);
-        ImGui::DockBuilderDockWindow("Mini-map",   rightMid2ID);
-        ImGui::DockBuilderDockWindow("Perf HUD",   rightBotID);
+        ImGui::DockBuilderDockWindow("Players",    leftBotID);
+        ImGui::DockBuilderDockWindow("Mini-map",   leftBotID);
+        ImGui::DockBuilderDockWindow("Game",       center);
         ImGui::DockBuilderDockWindow("Log",        bottomID);
 
         ImGui::DockBuilderFinish(dockspaceID);
@@ -685,6 +677,8 @@ Visibility& GetVisibility() { return s_visibility; }
 DebugOverlayFlags& GetDebugFlags() { return g_debugFlags; }
 
 void RequestLayoutReset() { s_needsLayout = true; }
+
+bool IsLayoutResetPending() { return s_needsLayout; }
 
 bool IsPointInGameViewport(int x, int y)
 {
@@ -2048,29 +2042,57 @@ void DrawPerfHudPanel()
             ImGuiTableFlags_Borders     |
             ImGuiTableFlags_Sortable    |
             ImGuiTableFlags_Resizable   |
+            ImGuiTableFlags_ScrollX     |   // horizontal scroll for the 15 minute cols
             ImGuiTableFlags_ScrollY     |
-            ImGuiTableFlags_SizingStretchProp;
+            ImGuiTableFlags_SizingFixedFit; // fixed-fit so columns don't get crushed
 
-        if (ImGui::BeginTable("##liveperf", 6, kTableFlags, ImVec2(0, 220)))
+        // Stretch the table to fill the rest of the parent panel. Prior
+        // ImVec2(0, 220) pinned it at 220 px regardless of window height,
+        // which clipped all but ~4 rows. ImVec2(-FLT_MIN, 0) tells ImGui
+        // "consume remaining content region" on both axes.
+        const int kBaseCols = 6;
+        const int kTotalCols = kBaseCols + ::LivePerf::MINUTE_BUCKETS;
+        if (ImGui::BeginTable("##liveperf", kTotalCols, kTableFlags,
+                              ImVec2(-FLT_MIN, 0.0f)))
         {
-            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::TableSetupScrollFreeze(1, 1); // keep Scope column + header visible
             ImGui::TableSetupColumn("Scope",
-                ImGuiTableColumnFlags_WidthStretch, 3.0f, 0);
+                ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoHide,
+                280.0f, 0);
             ImGui::TableSetupColumn("Calls",
-                ImGuiTableColumnFlags_WidthStretch, 1.0f, 1);
+                ImGuiTableColumnFlags_WidthFixed, 55.0f, 1);
             ImGui::TableSetupColumn("Last ms",
-                ImGuiTableColumnFlags_WidthStretch |
-                ImGuiTableColumnFlags_DefaultSort, 1.2f, 2);
+                ImGuiTableColumnFlags_WidthFixed |
+                ImGuiTableColumnFlags_DefaultSort, 70.0f, 2);
             ImGui::TableSetupColumn("Avg ms",
-                ImGuiTableColumnFlags_WidthStretch, 1.2f, 3);
+                ImGuiTableColumnFlags_WidthFixed, 70.0f, 3);
             // σ identifies spiky scopes — high σ relative to avg means the
             // scope is inconsistent (zone recalc, combat pathfinding, etc.).
             // Raw UTF-8 bytes for the lowercase sigma (U+03C3) so MSVC c++20's
             // char8_t-strict u8"" literals don't force a cast here.
             ImGui::TableSetupColumn("\xCF\x83 ms",
-                ImGuiTableColumnFlags_WidthStretch, 1.0f, 5);
+                ImGuiTableColumnFlags_WidthFixed, 60.0f, 5);
             ImGui::TableSetupColumn("Peak ms",
-                ImGuiTableColumnFlags_WidthStretch, 1.2f, 4);
+                ImGuiTableColumnFlags_WidthFixed, 70.0f, 4);
+            // 15 trailing-minute avg columns. Column user-id 100..114 so the
+            // sort-spec lookup can recognise them and sort by that minute's
+            // average ms if the user clicks the header. Labels read "now" for
+            // the in-progress minute and "-1m"..."-14m" for the history.
+            static char s_minuteHdr[::LivePerf::MINUTE_BUCKETS][8] = {};
+            static bool s_minuteHdrInit = false;
+            if (!s_minuteHdrInit) {
+                std::snprintf(s_minuteHdr[0], sizeof(s_minuteHdr[0]), "now");
+                for (int m = 1; m < ::LivePerf::MINUTE_BUCKETS; ++m)
+                    std::snprintf(s_minuteHdr[m], sizeof(s_minuteHdr[m]), "-%dm", m);
+                s_minuteHdrInit = true;
+            }
+            for (int m = 0; m < ::LivePerf::MINUTE_BUCKETS; ++m)
+            {
+                ImGui::TableSetupColumn(s_minuteHdr[m],
+                    ImGuiTableColumnFlags_WidthFixed |
+                    ImGuiTableColumnFlags_NoSort,  // per-minute is view-only
+                    52.0f, 100 + m);
+            }
             ImGui::TableHeadersRow();
 
             // Pull the live sort spec out of ImGui — clicking a header
@@ -2221,6 +2243,120 @@ void DrawPerfHudPanel()
 
                 ImGui::TableSetColumnIndex(5);
                 ImGui::Text("%6.3f", s.peakMs);
+
+                // 15 minute-bucket cells. Each cell shows the TOTAL seconds
+                // this scope spent running during that minute (sum, not
+                // average). The cell background is a growth-delta heatmap:
+                // comparing this minute's total to the previous (older)
+                // minute's total, saturated at ±50% change with a 9-stop
+                // gradient for granularity.
+                //
+                //   -50%+   teal           (big improvement)
+                //   -25%    green
+                //    -8%    light green
+                //     0%    neutral (no background)
+                //    +8%    pale yellow
+                //   +25%    amber
+                //   +50%    orange
+                //   +100%+  red            (cost doubled — hot regression)
+                //
+                // Running current minute (m=0) uses the same rule against -1m,
+                // but its total is still growing toward the full minute so its
+                // color will stabilize as the minute fills in.
+                auto lerp4 = [](const ImVec4& a, const ImVec4& b, float t) {
+                    t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+                    return ImVec4(
+                        a.x + (b.x - a.x) * t,
+                        a.y + (b.y - a.y) * t,
+                        a.z + (b.z - a.z) * t,
+                        a.w + (b.w - a.w) * t);
+                };
+                // 9-stop palette in percent-delta space. Values tuned for
+                // visual gradient, alpha capped at 0.7 to keep text legible.
+                auto heatColor = [&](float pctDelta) -> ImVec4 {
+                    // Stops (t range, colorA, colorB): pctDelta mapped into
+                    // seven linear segments so transitions feel smooth.
+                    const ImVec4 C[9] = {
+                        ImVec4(0.10f, 0.55f, 0.80f, 0.65f), // -100%+  deep teal
+                        ImVec4(0.15f, 0.60f, 0.60f, 0.55f), //  -50%   teal
+                        ImVec4(0.25f, 0.70f, 0.35f, 0.45f), //  -25%   green
+                        ImVec4(0.45f, 0.80f, 0.45f, 0.28f), //   -8%   light green
+                        ImVec4(0.20f, 0.20f, 0.20f, 0.00f), //    0%   transparent
+                        ImVec4(0.95f, 0.90f, 0.45f, 0.30f), //   +8%   pale yellow
+                        ImVec4(0.95f, 0.75f, 0.25f, 0.50f), //  +25%   amber
+                        ImVec4(0.95f, 0.50f, 0.15f, 0.60f), //  +50%   orange
+                        ImVec4(0.95f, 0.20f, 0.20f, 0.70f), // +100%+  red
+                    };
+                    // Map pctDelta (clamped to [-1, +1]) to segment index:
+                    //   -1.00 .. -0.50 -> C[0..1]
+                    //   -0.50 .. -0.25 -> C[1..2]
+                    //   -0.25 .. -0.08 -> C[2..3]
+                    //   -0.08 ..  0.00 -> C[3..4]
+                    //    0.00 .. +0.08 -> C[4..5]
+                    //   +0.08 .. +0.25 -> C[5..6]
+                    //   +0.25 .. +0.50 -> C[6..7]
+                    //   +0.50 .. +1.00 -> C[7..8]
+                    float p = pctDelta;
+                    if (p < -1.0f) p = -1.0f;
+                    if (p >  1.0f) p =  1.0f;
+                    const float edges[] = { -1.0f, -0.50f, -0.25f, -0.08f, 0.0f,
+                                             0.08f,  0.25f,  0.50f, 1.0f };
+                    for (int i = 0; i < 8; ++i) {
+                        if (p <= edges[i + 1]) {
+                            const float span = edges[i + 1] - edges[i];
+                            const float t = span > 0.0f ? (p - edges[i]) / span : 0.0f;
+                            return lerp4(C[i], C[i + 1], t);
+                        }
+                    }
+                    return C[8];
+                };
+
+                for (int m = 0; m < ::LivePerf::MINUTE_BUCKETS; ++m)
+                {
+                    ImGui::TableSetColumnIndex(6 + m);
+                    const float sec = s.minuteSec[m];
+                    const float old = (m + 1 < ::LivePerf::MINUTE_BUCKETS)
+                                          ? s.minuteSec[m + 1] : 0.0f;
+
+                    // Heatmap background: only meaningful when both cells hold
+                    // a nonzero total (so we have something to diff) AND at
+                    // least one side is above the 0.01 s noise floor.
+                    const bool haveBoth   = sec > 0.0f && old > 0.0f;
+                    const bool aboveFloor = sec >= 0.01f || old >= 0.01f;
+                    if (haveBoth && aboveFloor)
+                    {
+                        const float pct = (sec - old) / old;   // e.g. +0.35 = +35%
+                        const ImVec4 bg = heatColor(pct);
+                        ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
+                            ImGui::GetColorU32(bg));
+                    }
+
+                    if (sec <= 0.0f) {
+                        ImGui::TextDisabled(" ");
+                        continue;
+                    }
+
+                    // Text color: pure magnitude tint, so hot scopes still
+                    // read red even if their growth is flat. Thresholds pick
+                    // reasonable "seconds per minute" cutoffs:
+                    //   >= 10 s/min  → red (scope alone burns ≥17% of wall time)
+                    //   >=  3 s/min  → yellow
+                    //   >=  1 s/min  → green
+                    //   <  0.01      → dim
+                    ImVec4 mcol(0.90f, 0.90f, 0.90f, 1.0f);
+                    if      (sec >= 10.0f) mcol = ImVec4(1.00f, 0.60f, 0.60f, 1.0f);
+                    else if (sec >=  3.0f) mcol = ImVec4(1.00f, 0.92f, 0.55f, 1.0f);
+                    else if (sec >=  1.0f) mcol = ImVec4(0.70f, 0.95f, 0.70f, 1.0f);
+                    else if (sec <  0.01f) mcol = ImVec4(0.55f, 0.55f, 0.55f, 1.0f);
+                    ImGui::PushStyleColor(ImGuiCol_Text, mcol);
+                    // Format: 2 decimals when < 10 s ("9.34"), 1 decimal for
+                    // 10–999 s ("123.4"), integer beyond that. Keeps the
+                    // column narrow while preserving the most useful precision.
+                    if      (sec < 10.0f)   ImGui::Text("%4.2f", sec);
+                    else if (sec < 1000.0f) ImGui::Text("%4.1f", sec);
+                    else                    ImGui::Text("%4.0f", sec);
+                    ImGui::PopStyleColor();
+                }
             }
 
             ImGui::EndTable();

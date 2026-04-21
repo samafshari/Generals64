@@ -595,8 +595,21 @@ void BeginFrame()
     if (s_showToolbar)
     {
         const ImGuiViewport* vp = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + 16, vp->WorkPos.y + 16),
-            ImGuiCond_FirstUseEver);
+        // Anchor the floating toolbar at the bottom-right corner of
+        // the viewport. The (1,1) pivot means the window's own
+        // bottom-right corner lands on the given point — no need to
+        // know the toolbar's auto-resized dimensions in advance.
+        // Uses Always when a layout reset is pending (so Reset Layout
+        // snaps the toolbar back) and FirstUseEver otherwise (so the
+        // user's drag-positioned toolbar sticks across frames).
+        const ImGuiCond toolbarPosCond = Panels::IsLayoutResetPending()
+            ? ImGuiCond_Always
+            : ImGuiCond_FirstUseEver;
+        ImGui::SetNextWindowPos(
+            ImVec2(vp->WorkPos.x + vp->WorkSize.x - 16,
+                   vp->WorkPos.y + vp->WorkSize.y - 16),
+            toolbarPosCond,
+            ImVec2(1.0f, 1.0f));
         ImGui::SetNextWindowBgAlpha(0.85f);
 
         ImGuiWindowFlags toolbarFlags =

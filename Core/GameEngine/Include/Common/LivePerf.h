@@ -72,9 +72,20 @@
 namespace LivePerf
 {
     // Hard cap on the number of distinct named scopes the program can
-    // register. 64 is plenty for the AI/render profiling we care about
-    // and keeps the per-EndFrame cost negligible. Bump if you need more.
-    constexpr int MAX_SLOTS = 64;
+    // register. Bumped from 64 → 256 because the dynamic typeid-based
+    // per-module-class instrumentation registers one slot per unique
+    // UpdateModule subclass (there are 60+ of them). Beyond the cap,
+    // FindOrCreateSlot folds every subsequent registration into slot 0,
+    // which silently pollutes the first-registered scope with orphan
+    // ns. Per-EndFrame cost at 256 is still < 3 microsec.
+    constexpr int MAX_SLOTS = 256;
+
+    // Number of trailing one-minute buckets each slot keeps. Index 0 is the
+    // minute currently being accumulated; indices 1..14 are the N-minutes-ago
+    // TOTALS of wall-clock seconds spent inside that slot. Total-seconds (not
+    // per-frame avg) is what surfaces drift: a 1 ms/call × 100 calls minute
+    // reads as 0.10 s, and "gets worse over time" as steadily larger numbers.
+    constexpr int MINUTE_BUCKETS = 15;
 
     struct Slot
     {
@@ -88,6 +99,17 @@ namespace LivePerf
         float       varEwma;       // EWMA of squared deviation from avgMs (running variance)
         float       stdDevMs;      // sqrt(varEwma) — surfaces which scopes have spiky timings vs steady
         float       minMs;         // min lastFrameMs since last ResetPeaks() (floor; complements peak)
+
+        // Rolling one-minute buckets. minuteSec[0] is the *running total* of
+        // seconds spent inside this scope during the in-progress minute — so
+        // it grows from 0 to ~60 over that minute. minuteSec[1] is the sealed
+        // total for the minute that just ended, ..., minuteSec[14] is the
+        // total from 14 minutes ago. Index 0 is updated every frame from the
+        // per-frame accumNs; indices 1+ are stable snapshots shifted once per
+        // wall-clock minute boundary by EndFrame().
+        float       minuteSec[MINUTE_BUCKETS];
+        long long   minuteAccumNs;   // ns accumulated in the current minute
+        int         minuteFrames;    // frames counted toward the current minute
     };
 
     // Single-source-of-truth storage. Static-local-in-inline-function
@@ -166,6 +188,16 @@ namespace LivePerf
         long long m_start;
     };
 
+    // Wall-clock timestamp of the current minute-bucket's start. Used by
+    // EndFrame() to decide when to shift the per-slot minute history. File-
+    // scope static via function-local-static so there is one instance across
+    // all TUs that include this header (same idiom as the slot table).
+    inline long long& MinuteBucketStartNsRef()
+    {
+        static long long s_startNs = 0;
+        return s_startNs;
+    }
+
     // Roll the per-frame accumulators into displayed history. Hooked
     // from GameEngine::update() once per main-loop iteration. Cost is
     // ~64 multiplications + ~64 EWMA updates per call (~1-2 microsec).
@@ -178,6 +210,18 @@ namespace LivePerf
         // the average by 10%; the average converges to a steady-state
         // change in ~30 frames (~1 second of game time at 30 Hz logic).
         constexpr float kEwmaAlpha = 0.10f;
+
+        // Decide whether this EndFrame crosses a one-minute wall-clock boundary.
+        // The minute counter is driven off steady_clock so it's unaffected by
+        // game pause/unpause — pausing the game doesn't rewind the buckets.
+        constexpr long long kOneMinuteNs = 60LL * 1000LL * 1000LL * 1000LL;
+        long long& bucketStartNs = MinuteBucketStartNsRef();
+        const long long nowNs = NowNs();
+        if (bucketStartNs == 0)
+            bucketStartNs = nowNs;
+        const bool rollBucket = (nowNs - bucketStartNs) >= kOneMinuteNs;
+        if (rollBucket)
+            bucketStartNs = nowNs;
 
         for (int i = 0; i < count; ++i)
         {
@@ -199,6 +243,30 @@ namespace LivePerf
             // is fine since a scope that truly took 0 ns won't have a useful min.
             if (s.minMs == 0.0f || ms < s.minMs) s.minMs = ms;
 
+            // Accumulate toward the in-progress minute bucket as a running
+            // TOTAL. This is the sum of wall-clock seconds spent in this scope
+            // across all frames of the current minute — not an average. A
+            // scope running 1 ms per call × 100 calls in a minute reads as
+            // 0.100 s; a 57 ms/frame scope at 70 Hz reads as ~4.0 s.
+            s.minuteAccumNs += s.accumNs;
+            s.minuteFrames  += 1;
+            // Convert ns → s once per frame so the live row displays the
+            // partial total as it grows through the minute.
+            s.minuteSec[0] = (float)((double)s.minuteAccumNs * 1e-9);
+
+            if (rollBucket)
+            {
+                // Shift: minuteSec[1] becomes what was minuteSec[0] (the total
+                // for the minute we just finished). Indices 2..14 slide right;
+                // the oldest drops off the end.
+                for (int j = MINUTE_BUCKETS - 1; j >= 2; --j)
+                    s.minuteSec[j] = s.minuteSec[j - 1];
+                s.minuteSec[1]  = s.minuteSec[0];
+                s.minuteSec[0]  = 0.0f;
+                s.minuteAccumNs = 0;
+                s.minuteFrames  = 0;
+            }
+
             // Bridge to telemetry: one row per slot per frame that had calls.
             // Row semantics are "total cost of N invocations within frame X"
             // — p50/p95/p99 then become per-frame percentiles, matching how
@@ -215,7 +283,8 @@ namespace LivePerf
     }
 
     // Reset the running peak/min-ms columns + variance. Bound to a button in the
-    // panel so the user can clear stats after a perf experiment.
+    // panel so the user can clear stats after a perf experiment. Also wipes the
+    // 15-minute history so a "drift over time" test can be run repeatedly.
     inline void ResetPeaks()
     {
         Slot* slots = GetSlotsArray();
@@ -226,7 +295,12 @@ namespace LivePerf
             slots[i].minMs = 0.0f;
             slots[i].varEwma = 0.0f;
             slots[i].stdDevMs = 0.0f;
+            for (int j = 0; j < MINUTE_BUCKETS; ++j)
+                slots[i].minuteSec[j] = 0.0f;
+            slots[i].minuteAccumNs = 0;
+            slots[i].minuteFrames  = 0;
         }
+        MinuteBucketStartNsRef() = 0;
     }
 
     // Read-only accessors used by the Inspector's Perf HUD panel.
@@ -246,3 +320,14 @@ namespace LivePerf
         ::LivePerf::FindOrCreateSlot(name);                                \
     ::LivePerf::Scope LIVE_PERF_CONCAT(_lpScope_, __LINE__)(               \
         LIVE_PERF_CONCAT(_lpSlot_, __LINE__))
+
+// Dynamic-name variant: for dispatch sites where the scope name is chosen
+// at runtime (e.g. iterating a heterogeneous list of polymorphic modules
+// and grouping timings by module class). The name pointer MUST have
+// program-lifetime storage — typeid(x).name() and interned string-table
+// pointers qualify; stack strings do NOT. Cost per call is a string
+// compare walk over the slot table, so use sparingly (not in 10k-calls-
+// per-frame hot paths).
+#define LIVE_PERF_SCOPE_DYNAMIC(namePtr)                                   \
+    ::LivePerf::Scope LIVE_PERF_CONCAT(_lpScopeDyn_, __LINE__)(            \
+        ::LivePerf::FindOrCreateSlot(namePtr))

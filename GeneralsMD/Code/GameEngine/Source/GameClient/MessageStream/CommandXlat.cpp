@@ -3427,6 +3427,20 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			break;
 
 		//-----------------------------------------------------------------------------------------
+		case GameMessage::MSG_META_TOGGLE_LOFI_MODE:
+			// F8: stomp all modern rendering (shadows, post-FX, volumetric
+			// particles, bloom, god-rays …) OFF in one shot so perf cliffs
+			// can be bisected against the DX8-era pipeline. Defined in
+			// W3DDisplay.cpp — declare locally to avoid dragging the
+			// W3D headers into the command translator.
+			{
+				extern void ToggleLoFiMode();
+				ToggleLoFiMode();
+			}
+			disp = DESTROY_MESSAGE;
+			break;
+
+		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_TOGGLE_ATTACKMOVE:
 			TheInGameUI->toggleAttackMoveToMode();
 			break;
