@@ -98,3 +98,5 @@ AppxPackages
 /build-*
 /GameData/run_*.txt
 /GameData/Shaders/spirv/*.spv
+/Tests/DesyncSim/test_unordered_map_iteration.exe
+/Tests/DesyncSim/test_unordered_map_iteration.obj

@@ -932,7 +932,6 @@ xcopy /Y /D "$(SolutionDir)extern\sdl3\bin\*.dll" "$(OutDir)"</Command>
     <ClCompile Include="GeneralsMD\Code\GameEngine\Source\GameLogic\AI\AIGuard.cpp" />
     <ClCompile Include="GeneralsMD\Code\GameEngine\Source\GameLogic\AI\AIGuardRetaliate.cpp" />
     <ClCompile Include="GeneralsMD\Code\GameEngine\Source\GameLogic\AI\AIPathfind.cpp" />
-    <ClCompile Include="GeneralsMD\Code\GameEngine\Source\GameLogic\AI\AIPathfindFlowField.cpp" />
     <ClCompile Include="GeneralsMD\Code\GameEngine\Source\GameLogic\AI\AIPathfindPrecomputed.cpp" />
     <ClCompile Include="GeneralsMD\Code\GameEngine\Source\GameLogic\AI\AIPlayer.cpp" />
     <ClCompile Include="GeneralsMD\Code\GameEngine\Source\GameLogic\AI\AISkirmishPlayer.cpp" />
@@ -1987,7 +1986,6 @@ xcopy /Y /D "$(SolutionDir)extern\sdl3\bin\*.dll" "$(OutDir)"</Command>
     <ClInclude Include="GeneralsMD\Code\GameEngine\Include\GameLogic\AIGuard.h" />
     <ClInclude Include="GeneralsMD\Code\GameEngine\Include\GameLogic\AIGuardRetaliate.h" />
     <ClInclude Include="GeneralsMD\Code\GameEngine\Include\GameLogic\AIPathfind.h" />
-    <ClInclude Include="GeneralsMD\Code\GameEngine\Include\GameLogic\AIPathfindFlowField.h" />
     <ClInclude Include="GeneralsMD\Code\GameEngine\Include\GameLogic\AIPathfindPrecomputed.h" />
     <ClInclude Include="GeneralsMD\Code\GameEngine\Include\GameLogic\AIPlayer.h" />
     <ClInclude Include="GeneralsMD\Code\GameEngine\Include\GameLogic\AISkirmishPlayer.h" />

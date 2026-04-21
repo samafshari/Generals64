@@ -1026,7 +1026,7 @@ Bool AIPlayer::isLocationSafe(const Coord3D *pos, const ThingTemplate *tthing )
 		| ((((UnsignedInt64)(UnsignedInt)qy) & 0xFFFFFFULL) << 24)
 		| (((UnsignedInt64)(UnsignedInt)tthing->getTemplateID()) << 48);
 	{
-		std::unordered_map<UnsignedInt64, LocationSafeCacheEntry>::iterator it = m_locationSafeCache.find(cacheKey);
+		std::map<UnsignedInt64, LocationSafeCacheEntry>::iterator it = m_locationSafeCache.find(cacheKey);
 		if (it != m_locationSafeCache.end() && (nowFrameLS - it->second.frame) < LOCATION_SAFE_CACHE_TTL) {
 			return it->second.result;
 		}
@@ -1081,12 +1081,7 @@ Bool AIPlayer::isLocationSafe(const Coord3D *pos, const ThingTemplate *tthing )
 void AIPlayer::onUnitProduced( Object *factory, Object *unit )
 {
 	Bool found = false;
-	// To keep retail compatibility it needs to be set true in VS6 builds.
-#if defined(_MSC_VER) && _MSC_VER < 1300
-	Bool supplyTruck = true;
-#else
 	Bool supplyTruck = false;
-#endif
 
 	// factory could be null at the start of the game.
 	if (factory == nullptr) {
@@ -3610,6 +3605,13 @@ void AIPlayer::xfer( Xfer *xfer )
 	xfer->xferBool( &m_dozerQueuedForRepair );
 	xfer->xferBool( &m_dozerIsRepairing );
 	xfer->xferInt( &m_bridgeTimer );
+
+	// Perf-caches: not game state, rebuild cheaply from deterministic logic.
+	// Clear on every xfer pass so neither side carries stale entries across a
+	// save/load boundary. All clients will rebuild identically.
+	m_supplySourceCache.clear();
+	m_ownCashGenNearSourceCache.clear();
+	m_locationSafeCache.clear();
 
 }
 

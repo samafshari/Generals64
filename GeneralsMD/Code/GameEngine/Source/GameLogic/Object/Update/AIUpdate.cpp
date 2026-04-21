@@ -5135,12 +5135,13 @@ void AIUpdateInterface::crc( Xfer *x )
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 5: Added m_cachedMoodTargetID (fork mood-target cache, determinism fix) */
 // ------------------------------------------------------------------------------------------------
 void AIUpdateInterface::xfer( Xfer *xfer )
 {
   // version
-  const XferVersion currentVersion = 4;
+  const XferVersion currentVersion = 5;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 
@@ -5353,6 +5354,16 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 		xfer->xferInt(&repulsorCountdown);
 	}
 
+	// Version 5: mood-target cache added by fork (determinism fix).
+	// Treat as a perf-hint that can reset on load from older saves.
+	if (version >= 5)
+	{
+		xfer->xferObjectID(&m_cachedMoodTargetID);
+	}
+	else if (xfer->getXferMode() == XFER_LOAD)
+	{
+		m_cachedMoodTargetID = INVALID_ID;
+	}
 
 }
 

@@ -1179,7 +1179,24 @@ Bool AISkirmishPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *powe
 // ------------------------------------------------------------------------------------------------
 void AISkirmishPlayer::crc( Xfer *xfer )
 {
+	// Cover all persistent AISkirmishPlayer members so the MP CRC detector can
+	// catch AI-state divergence as early as possible.
 
+	xfer->xferInt( &m_curFrontBaseDefense );
+	xfer->xferInt( &m_curFlankBaseDefense );
+
+	xfer->xferReal( &m_curFrontLeftDefenseAngle );
+	xfer->xferReal( &m_curFrontRightDefenseAngle );
+	xfer->xferReal( &m_curLeftFlankLeftDefenseAngle );
+	xfer->xferReal( &m_curLeftFlankRightDefenseAngle );
+	xfer->xferReal( &m_curRightFlankLeftDefenseAngle );
+	xfer->xferReal( &m_curRightFlankRightDefenseAngle );
+
+	xfer->xferUnsignedInt( &m_frameToCheckEnemy );
+
+	// m_currentEnemy is a Player pointer; CRC the player index (or -1 for null).
+	Int enemyPlayerIndex = m_currentEnemy ? (Int)m_currentEnemy->getPlayerIndex() : -1;
+	xfer->xferInt( &enemyPlayerIndex );
 }
 
 // ------------------------------------------------------------------------------------------------

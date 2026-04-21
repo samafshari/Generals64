@@ -4032,7 +4032,6 @@ void Pathfinder::reset()
 	m_map = nullptr;
 
 	m_precomputed.release();
-	m_flowCache.release();
 	// Drop any stale (obj, goal-cell) memos — new map → object IDs will be
 	// recycled → false cache hits otherwise.
 	findPathMemoReset();
@@ -4697,11 +4696,6 @@ void Pathfinder::newMap()
 	m_precomputed.allocate( this, m_extent );
 	m_precomputed.buildAll();
 
-	// Flow-field cache for shared-goal fast path. 32 entries × ~1 MB covers
-	// the common case (a few active move orders per faction). LRU eviction
-	// makes capacity graceful.
-	m_flowCache.allocate( this, m_extent, 32 );
-
 	m_isMapReady = true;
 }
 
@@ -4794,7 +4788,6 @@ void Pathfinder::forceMapRecalculation()
 	// classifyMap rewrites every cell's type, pinched flag, and zone —
 	// precomp workers must be fully joined before it runs.
 	m_precomputed.waitForAsync();
-	m_flowCache.invalidateAll();
 	// A goal previously declared unreachable may now be reachable (or vice
 	// versa) after a full reclassify; flush the findPath cooldown ring so
 	// stale failures don't shadow the new topology.
@@ -5985,7 +5978,6 @@ void Pathfinder::processPathfindQueue()
 		// Any precomp workers from the previous recalc may still be reading
 		// cell zones; wait for them before mutating.
 		m_precomputed.waitForAsync();
-		m_flowCache.invalidateAll();	// zone changes invalidate shared-goal fields
 		findPathMemoReset();			// same rationale — topology just changed under our feet
 		m_zoneManager.calculateZones(m_map, m_layers, m_extent);
 		// Zones just changed, so every jump-table and the zone-distance matrix
@@ -6266,113 +6258,6 @@ struct ExamineCellsStruct
 	return 0;	// keep going
 }
 
-
-//-----------------------------------------------------------------------------
-// Flow-field fast path. When 30 units are told to move to the same spot, the
-// cache serves the first request by building a Dijkstra flow field (~20 ms
-// one-time) and every subsequent unit consumes it in O(path length) — with no
-// A* at all. Per-unit cost becomes independent of unit count for shared goals,
-// which is the dominant RTS case.
-//
-// Determinism: integer costs + monotonic tiebreak in Dijkstra; cache state
-// evolves identically on every MP client because findPath is dispatched from
-// the lockstep logic queue in identical order.
-//-----------------------------------------------------------------------------
-Path *Pathfinder::tryFlowFieldPath( const Object *obj, const LocomotorSet& locomotorSet,
-                                    const Coord3D *from, const Coord3D *to )
-{
-	if ( !m_isMapReady )
-		return nullptr;
-
-	// Skip flow field on exotic traversal modes — let classic A* handle them.
-	if ( locomotorSet.isDownhillOnly() )
-		return nullptr;
-
-	const Bool isCrusher = obj ? ( obj->getCrusherLevel() > 0 ) : false;
-	const PFLocoClass cls = PathfindPrecomputed::classifyLocomotorSet(
-		locomotorSet.getValidSurfaces(), isCrusher );
-
-	// Skip if the unit's layer isn't ground — bridges/walls use separate grids
-	// the flow-field builder doesn't scan.
-	PathfindLayerEnum fromLayer = LAYER_GROUND;
-	if ( obj ) fromLayer = obj->getLayer();
-	if ( fromLayer != LAYER_GROUND )
-		return nullptr;
-
-	ICoord2D fromCell, toCell;
-	worldToCell( from, &fromCell );
-	worldToCell( to, &toCell );
-
-	PathfindFlowField* ff = m_flowCache.getOrBuild( cls, toCell.x, toCell.y );
-	if ( !ff )
-		return nullptr;
-
-	// Flow field must cover the start cell.
-	UnsignedByte dir = ff->getDir( fromCell.x, fromCell.y );
-	if ( dir == PF_FLOW_UNREACHABLE )
-		return nullptr;
-
-	// Build the Path by forward-walking the flow field. Emit a PathNode at the
-	// start, at every direction change (the "bends"), and at the goal. Caps
-	// at a generous step limit so a corrupted field can't loop forever.
-	Path* path = newInstance( Path );
-
-	// First node = exact start position (matches buildActualPath/prependCells
-	// convention). optimize() will merge this with the first bend if LOS.
-	Coord3D p = *from;
-	p.z = TheTerrainLogic->getLayerHeight( p.x, p.y, LAYER_GROUND );
-	path->appendNode( &p, LAYER_GROUND );
-
-	Int cx = fromCell.x;
-	Int cy = fromCell.y;
-	UnsignedByte lastDir = dir;
-
-	const Int MAX_STEPS = 4096;	// worst-case map traverse
-	Int steps = 0;
-	while ( dir != PF_FLOW_GOAL && steps++ < MAX_STEPS )
-	{
-		// Advance one cell in the current flow direction.
-		cx += PF_DIR_DX[dir];
-		cy += PF_DIR_DY[dir];
-
-		UnsignedByte nextDir = ff->getDir( cx, cy );
-		if ( nextDir == PF_FLOW_UNREACHABLE )
-		{
-			// Field disagrees with itself — bail out so A* can handle it.
-			deleteInstance( path );
-			return nullptr;
-		}
-
-		if ( nextDir != lastDir )
-		{
-			// Direction bend — emit a waypoint so Path::optimize has something
-			// to work with. Fewer nodes than emitting every cell, still lets
-			// LOS-based optimisation kick in.
-			p.x = ( static_cast<Real>( cx ) + 0.5f ) * PATHFIND_CELL_SIZE_F;
-			p.y = ( static_cast<Real>( cy ) + 0.5f ) * PATHFIND_CELL_SIZE_F;
-			p.z = TheTerrainLogic->getLayerHeight( p.x, p.y, LAYER_GROUND );
-			path->appendNode( &p, LAYER_GROUND );
-			lastDir = nextDir;
-		}
-		dir = nextDir;
-	}
-
-	if ( dir != PF_FLOW_GOAL )
-	{
-		// Never reached goal (step cap hit) — abandon so classic A* can try.
-		deleteInstance( path );
-		return nullptr;
-	}
-
-	// Final waypoint — exact destination, not cell centre, so the unit stops
-	// where the player clicked rather than snapping to a grid.
-	Coord3D goalPos = *to;
-	goalPos.z = TheTerrainLogic->getLayerHeight( goalPos.x, goalPos.y, LAYER_GROUND );
-	path->appendNode( &goalPos, LAYER_GROUND );
-
-	path->optimize( obj, locomotorSet.getValidSurfaces(), false );
-	return path;
-}
 
 //-----------------------------------------------------------------------------
 // JPS+ integration helper. Adds long-range jump-point successors to the open

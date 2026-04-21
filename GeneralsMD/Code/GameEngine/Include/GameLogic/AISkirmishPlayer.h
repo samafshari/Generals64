@@ -35,6 +35,10 @@ class BuildListInfo;
 class SpecialPowerTemplate;
 
 
+// DETERMINISM: every persistent member added here MUST be added to xfer()
+// below. Perf-caches can be cleared inside xfer() instead. Missing xfer
+// coverage = invisible MP desync.
+
 /**
  * The computer-controlled opponent.
  */

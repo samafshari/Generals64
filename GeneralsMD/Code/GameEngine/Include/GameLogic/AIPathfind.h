@@ -37,7 +37,6 @@
 #include "GameLogic/LocomotorSet.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/AIPathfindPrecomputed.h"
-#include "GameLogic/AIPathfindFlowField.h"
 
 class Bridge;
 class Object;
@@ -868,13 +867,6 @@ protected:
 										const LocomotorSet& locomotorSet, const Object *obj,
 										Int attackDistance);
 
-	/// Flow-field fast path for findPath(). Tries the shared-goal cache; on
-	/// hit, walks the field from `from` to build a Path in O(path length).
-	/// Returns nullptr on cache miss or if the flow field can't reach the
-	/// goal from the start — caller falls back to the classic A* + JPS+ path.
-	Path *tryFlowFieldPath(const Object *obj, const LocomotorSet& locomotorSet,
-										const Coord3D *from, const Coord3D *to);
-
 	Int checkPathCost(Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 		const Coord3D *to);
 
@@ -966,12 +958,6 @@ private:
 	// Map-load JPS+ / zone-distance accelerator. Built at the end of newMap();
 	// released in reset(). Query via isReady(cls) before consuming tables.
 	PathfindPrecomputed m_precomputed;
-
-	// Shared-goal flow-field cache. Turns per-unit pathfinding into O(1) per
-	// lookup for commands that share a destination (the common case in RTS).
-	// Allocated alongside m_precomputed in newMap(); invalidated at every
-	// cell-mutation site so cached fields never reflect stale terrain.
-	PathfindFlowFieldCache m_flowCache;
 
 	PathfindLayer m_layers[LAYER_LAST+1];
 

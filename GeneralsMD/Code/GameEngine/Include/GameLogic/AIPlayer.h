@@ -28,7 +28,7 @@
 
 #pragma once
 
-#include <unordered_map>
+#include <map>
 
 #include "Common/GameMemory.h"
 #include "Common/Snapshot.h"
@@ -142,6 +142,10 @@ public:
 
 };
 
+
+// DETERMINISM: every persistent member added here MUST be added to xfer()
+// below. Perf-caches can be cleared inside xfer() instead. Missing xfer
+// coverage = invisible MP desync.
 
 /**
  * The computer-controlled opponent.
@@ -301,9 +305,9 @@ protected:
 		UnsignedInt	frame;	///< logic frame of last rescan
 	};
 	// Key: supply-center ObjectID. Value: last-found SUPPLY_SOURCE near it.
-	std::unordered_map<ObjectID, ClosestObjectCacheEntry> m_supplySourceCache;
+	std::map<ObjectID, ClosestObjectCacheEntry> m_supplySourceCache;
 	// Key: supply-source ObjectID. Value: last-found owned CASH_GENERATOR near it.
-	std::unordered_map<ObjectID, ClosestObjectCacheEntry> m_ownCashGenNearSourceCache;
+	std::map<ObjectID, ClosestObjectCacheEntry> m_ownCashGenNearSourceCache;
 
 	// isLocationSafe memo: key = hash(quantizedPosX, quantizedPosY, templatePtr). Stores Bool+frame.
 	struct LocationSafeCacheEntry
@@ -311,5 +315,5 @@ protected:
 		Bool			result;
 		UnsignedInt		frame;
 	};
-	std::unordered_map<UnsignedInt64, LocationSafeCacheEntry> m_locationSafeCache;
+	std::map<UnsignedInt64, LocationSafeCacheEntry> m_locationSafeCache;
 };
