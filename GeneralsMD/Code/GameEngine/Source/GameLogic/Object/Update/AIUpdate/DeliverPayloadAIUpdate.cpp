@@ -397,6 +397,9 @@ void DeliverPayloadAIUpdate::crc( Xfer *xfer )
 {
  // extend base class
 	AIUpdateInterface::crc(xfer);
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -631,6 +634,9 @@ StateReturnType ApproachState::update()
 // ------------------------------------------------------------------------------------------------
 void DeliveringState::crc( Xfer *xfer )
 {
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -921,6 +927,9 @@ void DeliveringState::onExit( StateExitType ) // Close the doors
 // ------------------------------------------------------------------------------------------------
 void ConsiderNewApproachState::crc( Xfer *xfer )
 {
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1033,6 +1042,9 @@ void ConsiderNewApproachState::onExit( StateExitType status )
 // ------------------------------------------------------------------------------------------------
 void RecoverFromOffMapState::crc( Xfer *xfer )
 {
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------

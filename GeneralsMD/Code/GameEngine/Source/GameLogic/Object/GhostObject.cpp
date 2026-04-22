@@ -62,6 +62,9 @@ GhostObject::~GhostObject()
 // ------------------------------------------------------------------------------------------------
 void GhostObject::crc( Xfer *xfer )
 {
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -182,6 +185,9 @@ void GhostObjectManager::restorePartitionData()
 // ------------------------------------------------------------------------------------------------
 void GhostObjectManager::crc( Xfer *xfer )
 {
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------

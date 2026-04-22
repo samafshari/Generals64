@@ -268,6 +268,9 @@ void FireWeaponWhenDamagedBehavior::crc( Xfer *xfer )
 	// extend upgrade mux
 	UpgradeMux::upgradeMuxCRC( xfer );
 
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------

@@ -206,6 +206,9 @@ void HackInternetAIUpdate::crc( Xfer *xfer )
 {
 	// extend base class
 	AIUpdateInterface::crc(xfer);
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -263,6 +266,9 @@ HackInternetStateMachine::~HackInternetStateMachine()
 // ------------------------------------------------------------------------------------------------
 void UnpackingState::crc( Xfer *xfer )
 {
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -352,6 +358,9 @@ void UnpackingState::onExit( StateExitType status )
 // ------------------------------------------------------------------------------------------------
 void PackingState::crc( Xfer *xfer )
 {
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -428,6 +437,9 @@ void PackingState::onExit( StateExitType status )
 // ------------------------------------------------------------------------------------------------
 void HackInternetState::crc( Xfer *xfer )
 {
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------

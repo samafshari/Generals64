@@ -741,6 +741,9 @@ Locomotor::~Locomotor()
 void Locomotor::crc( Xfer *xfer )
 {
 
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -2662,6 +2665,9 @@ LocomotorSet::~LocomotorSet()
 void LocomotorSet::crc( Xfer *xfer )
 {
 
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------

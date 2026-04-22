@@ -154,6 +154,24 @@ private:
 	// so a fresh game starts fresh.
 	PerPlayerScore m_lastSent;
 
+	// ── Per-minute FPS bucketing ──────────────────────────────────
+	//
+	// Each onLogicFrame samples TheDisplay->getCurrentFPS() and rolls
+	// the value into the in-flight bucket (sum / min / max / count).
+	// When the minute index (frame since match start / logic Hz / 60)
+	// advances, the previous bucket is packed + shipped through the
+	// relay's RELAY_TYPE_FPS_BUCKET channel and the accumulator
+	// resets. Feeds the per-map playability benchmarking query.
+	//
+	// Fixed-point FPS × 100 on the wire keeps the packet integer
+	// while preserving two decimals (58.73 fps → 5873).
+	void shipAndResetFpsBucket();
+	Int  m_fpsMinuteIndex;   ///< 0-based minute currently being aggregated
+	Int  m_fpsSampleCount;   ///< samples folded into the in-flight bucket
+	Int  m_fpsSumX100;       ///< running sum of FPS×100 across the minute
+	Int  m_fpsMinX100;       ///< running min across the minute
+	Int  m_fpsMaxX100;       ///< running max across the minute
+
 	// Sender-thread state. m_outboxQueue is owned by the mutex; the
 	// CV is notified on every enqueue and on shutdown. The atomic
 	// flag is checked from the worker loop so shutdown can wake the
