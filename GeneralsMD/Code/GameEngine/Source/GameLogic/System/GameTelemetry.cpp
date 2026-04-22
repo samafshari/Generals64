@@ -195,6 +195,7 @@ void GameTelemetry::init()
 {
 	m_active = FALSE;
 	m_sessionId.clear();
+	m_pendingAssignId.clear();
 	m_gameStartFrame = 0;
 	m_resultSent = FALSE;
 	m_lastSnapshotFrame = 0;
@@ -207,6 +208,7 @@ void GameTelemetry::reset()
 {
 	m_active = FALSE;
 	m_sessionId.clear();
+	m_pendingAssignId.clear();
 	m_gameStartFrame = 0;
 	m_resultSent = FALSE;
 	m_lastSnapshotFrame = 0;
@@ -304,7 +306,22 @@ void GameTelemetry::onGameStart()
 	// — which means the first ~logic frames after start are silent
 	// even if the normal SCORE_EVENTS cadence triggers. That gap is
 	// bounded by the arm-timeout in onLogicFrame.
-	m_sessionId.clear();
+	//
+	// Race on the host: MSG_GAME_START is sent from lobby code and
+	// the ASSIGN broadcast can round-trip back while the engine is
+	// still finishing its lobby→game transition — arriving BEFORE
+	// we get here. onRelayAssignSession catches that case by stashing
+	// into m_pendingAssignId, and we adopt it below.
+	if (!m_pendingAssignId.isEmpty())
+	{
+		m_sessionId = m_pendingAssignId;
+		m_pendingAssignId.clear();
+		telemetryTrace("  adopted pre-arrival ASSIGN sid=%s", m_sessionId.str());
+	}
+	else
+	{
+		m_sessionId.clear();
+	}
 	m_active = TRUE;
 	m_resultSent = FALSE;
 	m_gameStartFrame = TheGameLogic ? (Int)TheGameLogic->getFrame() : 0;
@@ -347,11 +364,22 @@ void GameTelemetry::onRelayAssignSession(const UnsignedByte bytes[16])
 	}
 	sid[32] = '\0';
 
-	// Idempotent for the same ID; a duplicate ASSIGN (reconnect, relay
-	// retry) just no-ops. A different ID arriving while we already
-	// have one means the relay moved us to a new match without a
-	// clean onGameStart — log + adopt; better to ship under the new
-	// ID than to silently keep talking about the old one.
+	// Pre-arrival case: ASSIGN beat onGameStart (see the note in
+	// onGameStart for the host-side race). Stash in the pending
+	// buffer and return — onGameStart will adopt.
+	if (!m_active)
+	{
+		m_pendingAssignId.set(sid);
+		telemetryTrace("onRelayAssignSession: pre-arrival; buffered sid=%s (m_active=0)", sid);
+		return;
+	}
+
+	// Already armed. Idempotent for the same ID; a duplicate ASSIGN
+	// (reconnect, relay retry) just no-ops. A different ID arriving
+	// while we already have one means the relay moved us to a new
+	// match without a clean onGameStart — log + adopt; better to
+	// ship under the new ID than to silently keep talking about the
+	// old one.
 	if (!m_sessionId.isEmpty())
 	{
 		if (m_sessionId.compare(sid) == 0)
@@ -365,7 +393,7 @@ void GameTelemetry::onRelayAssignSession(const UnsignedByte bytes[16])
 		memset(&m_lastSent, 0, sizeof(m_lastSent));
 	}
 	m_sessionId.set(sid);
-	telemetryTrace("onRelayAssignSession: sid=%s m_active=%d", sid, (int)m_active);
+	telemetryTrace("onRelayAssignSession: sid=%s m_active=1", sid);
 }
 
 // Note: PerPlayerScore lives in GameTelemetry.h so the watermark

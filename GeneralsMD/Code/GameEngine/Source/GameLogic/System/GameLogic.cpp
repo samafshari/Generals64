@@ -187,6 +187,8 @@ extern "C" int SafeCanCallUpdate(const void* modulePtr)
 #include "GameLogic/Locomotor.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/AIUpdate.h"
+#include "GameLogic/Module/PhysicsUpdate.h"    // PhysicsBehavior::getVelocity for desync manifest
+#include "GameLogic/Module/BehaviorModule.h"   // iterate m_behaviors for per-module desync CRCs
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/CreateModule.h"
 #include "GameLogic/Module/DestroyModule.h"
@@ -4626,6 +4628,20 @@ void GameLogic::writeDesyncObjectManifest(FILE* f)
 	           "OBJ or SUB line with a different crc is the diverging state.\n\n");
 
 	// Per-object CRCs. Same iteration order as getCRC() uses.
+	// We emit two kinds of lines for every Object:
+	//
+	//   OBJ  ...headline... crc=0x........
+	//       Single summary line. Printed pos/hp/orient/vel as %a hex floats
+	//       (IEEE-754 exact, no decimal rounding) so the diff shows even
+	//       single-ULP drift. crc is the full-object XferCRC as before.
+	//
+	//   MOD  id=... idx=N class=TypeName crc=0x........
+	//       One line per BehaviorModule attached to the Object, each with
+	//       its own fresh XferCRC. When the diff shows the OBJ line differs
+	//       between peers, the following MOD lines pinpoint WHICH module's
+	//       state drifted (AIUpdate / PhysicsBehavior / ActiveBody / WeaponSet
+	//       etc) — which narrows the investigation to one file instead of
+	//       one unit.
 	unsigned objCount = 0;
 	for (Object* obj = m_objList; obj; obj = obj->getNextObject())
 	{
@@ -4636,14 +4652,48 @@ void GameLogic::writeDesyncObjectManifest(FILE* f)
 		const UnsignedInt c = xfer.getCRC();
 
 		const char* tmplName = obj->getTemplate() ? obj->getTemplate()->getName().str() : "<null>";
-		const Coord3D* p = obj->getPosition();
-		const Player* pl = obj->getControllingPlayer();
-		const Int owner = pl ? pl->getPlayerIndex() : -1;
-		fprintf(f, "OBJ  id=%-6u template=%-40s owner=%-2d pos=(%.2f,%.2f,%.2f) hp=%.1f crc=0x%08X\n",
+		const Coord3D* p     = obj->getPosition();
+		const Player*  pl    = obj->getControllingPlayer();
+		const Int      owner = pl ? pl->getPlayerIndex() : -1;
+		const Real     hp    = obj->getBodyModule() ? obj->getBodyModule()->getHealth() : 0.0f;
+		const Real     orient= obj->getOrientation();
+		const PhysicsBehavior* phys = obj->getPhysics();
+		const Coord3D* vel   = phys ? phys->getVelocity() : nullptr;
+
+		// Position and velocity printed as %a (IEEE-754 hex float) so bit-
+		// level drift shows up. A %.2f drift of 0.7 units is obvious but a
+		// sub-ULP drift would round away under decimal formatting.
+		fprintf(f,
+			"OBJ  id=%-6u template=%-40s owner=%-2d "
+			"pos=(%a,%a,%a) hp=%a orient=%a vel=(%a,%a,%a) crc=0x%08X\n",
 			(unsigned)obj->getID(), tmplName, owner,
 			p ? p->x : 0.0f, p ? p->y : 0.0f, p ? p->z : 0.0f,
-			obj->getBodyModule() ? obj->getBodyModule()->getHealth() : 0.0f,
+			hp, orient,
+			vel ? vel->x : 0.0f, vel ? vel->y : 0.0f, vel ? vel->z : 0.0f,
 			c);
+
+		// Per-module CRCs. The behavior array is null-terminated.
+		unsigned modIdx = 0;
+		if (BehaviorModule** mods = obj->getBehaviorModules())
+		{
+			for (BehaviorModule** m = mods; *m; ++m, ++modIdx)
+			{
+				XferCRC mxfer;
+				mxfer.open(AsciiString("modCRC"));
+				mxfer.xferSnapshot(*m);
+				mxfer.close();
+
+				// typeid gives "class FooBehavior"; skip past the "class "
+				// prefix MSVC prepends so the output is the bare class name
+				// and line length stays tight for diffing.
+				const char* cls = typeid(**m).name();
+				if (cls && strncmp(cls, "class ", 6) == 0) cls += 6;
+
+				fprintf(f, "MOD  id=%-6u idx=%-2u class=%-48s crc=0x%08X\n",
+					(unsigned)obj->getID(), modIdx,
+					cls ? cls : "<null>", mxfer.getCRC());
+			}
+		}
 		++objCount;
 	}
 	fprintf(f, "OBJ  total=%u\n", objCount);

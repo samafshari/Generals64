@@ -132,6 +132,18 @@ private:
 
 	Bool         m_active;
 	AsciiString  m_sessionId;       ///< stamped at game start — becomes Game.ExternalKey
+
+	// Pre-arrival buffer for RELAY_TYPE_SESSION_ASSIGN. On the host,
+	// MSG_GAME_START is sent from lobby code and the relay's ASSIGN
+	// broadcast can round-trip back through LANAPI::update's 200 ms
+	// poll while the engine is still finishing its lobby→game
+	// transition — before GameLogic::startNewGame calls onGameStart.
+	// If we wrote straight into m_sessionId on receipt, onGameStart's
+	// clear() would then discard the very ID we just stashed.
+	// Instead, onRelayAssignSession deposits the hex form here (and
+	// into m_sessionId if we're already mid-game); onGameStart adopts
+	// from here and clears the pending buffer.
+	AsciiString  m_pendingAssignId;
 	Int          m_gameStartFrame;
 	Bool         m_resultSent;      ///< guards against double-send (win + exit in the same frame)
 	Int          m_lastSnapshotFrame; ///< frame of most recent onLogicFrame snapshot send; 0 = none yet
