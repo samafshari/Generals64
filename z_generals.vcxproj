@@ -221,6 +221,10 @@ xcopy /Y /D "$(SolutionDir)extern\sdl3\bin\*.dll" "$(OutDir)"</Command>
       <IgnoreSpecificDefaultLibraries>libci.lib;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <SubSystem>Windows</SubSystem>
       <ProgramDataBaseFile>$(OutDir)$(TargetName).pdb</ProgramDataBaseFile>
+      <!-- Main-thread stack kept at Windows default (1 MB). Bumping it would
+           mask the recursion bug we're still hunting. StackOverflowHandler
+           (installed via AddVectoredExceptionHandler) uses _resetstkoflw to
+           recover enough stack to write crash.log before the process dies. -->
     </Link>
     <PostBuildEvent>
       <Command>xcopy /Y /D "$(SolutionDir)extern\ffmpeg\bin\*.dll" "$(OutDir)"
@@ -932,7 +936,6 @@ xcopy /Y /D "$(SolutionDir)extern\sdl3\bin\*.dll" "$(OutDir)"</Command>
     <ClCompile Include="GeneralsMD\Code\GameEngine\Source\GameLogic\AI\AIGuard.cpp" />
     <ClCompile Include="GeneralsMD\Code\GameEngine\Source\GameLogic\AI\AIGuardRetaliate.cpp" />
     <ClCompile Include="GeneralsMD\Code\GameEngine\Source\GameLogic\AI\AIPathfind.cpp" />
-    <ClCompile Include="GeneralsMD\Code\GameEngine\Source\GameLogic\AI\AIPathfindPrecomputed.cpp" />
     <ClCompile Include="GeneralsMD\Code\GameEngine\Source\GameLogic\AI\AIPlayer.cpp" />
     <ClCompile Include="GeneralsMD\Code\GameEngine\Source\GameLogic\AI\AISkirmishPlayer.cpp" />
     <ClCompile Include="GeneralsMD\Code\GameEngine\Source\GameLogic\AI\AIStates.cpp" />
@@ -1986,7 +1989,6 @@ xcopy /Y /D "$(SolutionDir)extern\sdl3\bin\*.dll" "$(OutDir)"</Command>
     <ClInclude Include="GeneralsMD\Code\GameEngine\Include\GameLogic\AIGuard.h" />
     <ClInclude Include="GeneralsMD\Code\GameEngine\Include\GameLogic\AIGuardRetaliate.h" />
     <ClInclude Include="GeneralsMD\Code\GameEngine\Include\GameLogic\AIPathfind.h" />
-    <ClInclude Include="GeneralsMD\Code\GameEngine\Include\GameLogic\AIPathfindPrecomputed.h" />
     <ClInclude Include="GeneralsMD\Code\GameEngine\Include\GameLogic\AIPlayer.h" />
     <ClInclude Include="GeneralsMD\Code\GameEngine\Include\GameLogic\AISkirmishPlayer.h" />
     <ClInclude Include="GeneralsMD\Code\GameEngine\Include\GameLogic\AIStateMachine.h" />

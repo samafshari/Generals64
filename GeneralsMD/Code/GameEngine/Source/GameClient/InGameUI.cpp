@@ -1176,6 +1176,7 @@ InGameUI::InGameUI()
 	m_lastRenderFps = ~0u;
 	m_lastRenderFpsLimit = ~0u;
 	m_lastRenderFpsUpdateMs = 0u;
+	m_lastLoFiMode = FALSE;
 
 	m_systemTimeString = nullptr;
 	m_systemTimeFont = "Tahoma";
@@ -6224,12 +6225,22 @@ WindowMsgHandledType IdleWorkerSystem( GameWindow *window, UnsignedInt msg,
 void InGameUI::updateRenderFpsString()
 {
 	const UnsignedInt renderFps = (UnsignedInt)(TheDisplay->getAverageFPS() + 0.5f);
-	if (renderFps != m_lastRenderFps)
+	// F8 lo-fi mode prefixes the FPS readout with a "LO-FI MODE" badge so
+	// the user can tell at a glance which rendering path produced the
+	// number they're reading. Re-query each tick so flipping F8 while the
+	// FPS is steady still refreshes the label.
+	extern bool IsLoFiMode();
+	const bool loFi = IsLoFiMode();
+	if (renderFps != m_lastRenderFps || loFi != m_lastLoFiMode)
 	{
 		UnicodeString fpsStr;
-		fpsStr.format(L"%u", renderFps);
+		if (loFi)
+			fpsStr.format(L"LO-FI MODE %u", renderFps);
+		else
+			fpsStr.format(L"%u", renderFps);
 		m_renderFpsString->setText(fpsStr);
 		m_lastRenderFps = renderFps;
+		m_lastLoFiMode = loFi;
 	}
 }
 

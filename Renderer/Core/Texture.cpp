@@ -388,7 +388,21 @@ bool Texture::CreateRenderTarget(Device& device, uint32_t width, uint32_t height
         return false;
 
     hr = device.GetDevice()->CreateRenderTargetView(m_texture.Get(), nullptr, m_rtv.GetAddressOf());
-    return SUCCEEDED(hr);
+    if (FAILED(hr))
+        return false;
+
+    // D3D11 CreateTexture2D(nullptr) leaves the texture contents undefined,
+    // which on some drivers is 0xFFFFFFFF (solid white). If any downstream
+    // pass samples this RT before fully writing it — e.g. the scene is
+    // rendered into a viewport smaller than the RT, or a CopyResource into
+    // it silently no-ops because of a size mismatch with its source — the
+    // undefined region surfaces as a visible white rectangle in the final
+    // frame (RenderDoc confirmed this via a "white everywhere the scene
+    // didn't overwrite" pattern in the post-FX sceneTexture input). Clear
+    // to transparent black here so first-use-before-write is benign.
+    const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    device.GetContext()->ClearRenderTargetView(m_rtv.Get(), zero);
+    return true;
 }
 
 bool Texture::CreateDepthTarget(Device& device, uint32_t width, uint32_t height)
@@ -429,7 +443,15 @@ bool Texture::CreateDepthTarget(Device& device, uint32_t width, uint32_t height)
     srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
     srvDesc.Texture2D.MipLevels = 1;
     hr = device.GetDevice()->CreateShaderResourceView(m_texture.Get(), &srvDesc, m_srv.GetAddressOf());
-    return SUCCEEDED(hr);
+    if (FAILED(hr))
+        return false;
+
+    // Clear depth to the far plane (1.0) immediately so any sampler reading
+    // this target before it's written sees "nothing in front" rather than
+    // undefined driver memory — same class of fix as the colour RT above.
+    device.GetContext()->ClearDepthStencilView(
+        m_dsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+    return true;
 }
 
 bool Texture::IsValid() const { return m_srv.Get() != nullptr; }

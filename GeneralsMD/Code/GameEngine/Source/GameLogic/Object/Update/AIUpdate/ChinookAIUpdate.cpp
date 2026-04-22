@@ -344,14 +344,22 @@ private:
 
 	struct RopeInfo
 	{
-		Drawable*								ropeDrawable;
-		DrawableID							ropeID;	// used only during save-load process
-		Matrix3D								dropStartMtx;
-		Real										ropeSpeed;
-		Real										ropeLen;
-		Real										ropeLenMax;
-		UnsignedInt							nextDropTime;
-		std::list<ObjectID>			rappellerIDs;
+		// In-class defaults so the sim never reads uninitialised floats.
+		// The onEnter() path below only assigns these inside an `if
+		// (info.ropeDrawable)` guard — when the rope drawable fails to
+		// create (ropeTmpl null, or TheThingFactory->newDrawable returns
+		// null), the next frame's update() would otherwise read heap
+		// garbage through `it->ropeLen < it->ropeLenMax` and then add
+		// fabs(gravity) into a garbage accumulator. Heap garbage is
+		// process-specific, so two peers disagree: lockstep desync.
+		Drawable*								ropeDrawable   = nullptr;
+		DrawableID							ropeID         = INVALID_DRAWABLE_ID;
+		Matrix3D								dropStartMtx;    // written by convertBonePosToWorldPos before any read, so the uninit Matrix3D ctor is fine here
+		Real										ropeSpeed      = 0.0f;
+		Real										ropeLen        = 0.0f;
+		Real										ropeLenMax     = 0.0f;
+		UnsignedInt							nextDropTime   = 0u;
+		std::list<ObjectID>			rappellerIDs;    // std::list default-inits empty
 	};
 	std::vector<RopeInfo>			m_ropes;
 

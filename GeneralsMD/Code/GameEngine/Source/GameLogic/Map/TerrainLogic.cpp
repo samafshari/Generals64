@@ -60,6 +60,7 @@
 #include "WWMath/tri.h"
 
 
+#include "Common/LivePerf.h"
 // GLOBALS ////////////////////////////////////////////////////////////////////////////////////////
 TerrainLogic *TheTerrainLogic = nullptr;
 
@@ -1018,6 +1019,7 @@ void TerrainLogic::reset()
 //-------------------------------------------------------------------------------------------------
 void TerrainLogic::update()
 {
+	LIVE_PERF_SCOPE("TerrainLogic::update");
 
 	// bridge damage states have not changed this frame now
 	m_bridgeDamageStatesChanged = false;

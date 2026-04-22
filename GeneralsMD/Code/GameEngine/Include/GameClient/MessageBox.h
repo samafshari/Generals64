@@ -44,3 +44,19 @@ GameWindow *MessageBoxOk(UnicodeString titleString,UnicodeString bodyString,Game
 
 
 GameWindow *MessageBoxCancel(UnicodeString titleString,UnicodeString bodyString,GameWinMsgBoxFunc cancelCallback);///< convenience function for displaying a Message box with Cancel button
+
+// Safe in-game error dialog for unrecoverable conditions. Wraps MessageBoxOk
+// with defensive checks so it can be called from anywhere — including
+// subsystem-shutdown paths where TheWindowManager / TheGameText might be
+// unavailable. If the dialog can't be shown (pre-init, post-shutdown, or
+// headless), the error is routed through DEBUG_LOG instead.
+//
+// Use for "there is nothing the engine can do to recover from this" —
+// dropped network, missing asset, out-of-memory during save, graphics
+// device removed, etc. Do NOT use for benign / expected failures the
+// calling code already handles (spammy dialogs degrade UX).
+//
+// The title argument is optional — pass UnicodeString::TheEmptyString and
+// the helper fills in the localized "GUI:Error" string when available.
+// Returns the modal GameWindow* on success, nullptr if we fell back to log.
+GameWindow *ShowInGameErrorDialog(UnicodeString titleString, UnicodeString bodyString);

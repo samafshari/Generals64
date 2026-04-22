@@ -131,7 +131,7 @@ bool g_debugDisableHeatDistortion = false;    // Heat distortion FX — ON by de
 // restore the un-augmented look. Threshold still wants tuning: a single
 // tank-shell impact buddy-light currently clears the bar.
 bool g_debugDisableShockwave = false;         // Shockwave distortion rings — ON by default
-bool g_debugDisableGodRays = false;           // Volumetric light shafts — ON by default
+bool g_debugDisableGodRays = true;            // Volumetric light shafts — OFF by default (produced a white-rect overlay when the composite ran with a 1×1 scene placeholder; re-enable from Inspector → Visual FX once the underlying RT bind path is fixed)
 // "Cinematic" post-processing was previously ON by default and produced
 // the classic teal-shadow / orange-highlight Hollywood blockbuster look.
 // Generals 2003 had no such grading, and the warm highlight tint pushed
@@ -173,6 +173,123 @@ bool g_useEnhancedParticles = true;  // Enhanced particles (4-way blend mode pre
 bool g_useEnhancedSmudges = true;    // Enhanced smudges (heat-haze refraction on explosions)
 bool g_useDepthBasedFoam = false;            // Implied by g_useEnhancedWater
 
+
+// ── Lo-Fi mode (F8) ───────────────────────────────────────────────────
+// Toggle that stomps all the modern rendering toggles OFF at once so
+// perf regressions can be bisected against the DX8-era pipeline. Saves
+// the original values of every flag it touches and restores them on
+// toggle-off, so users who've hand-tuned their Inspector settings don't
+// lose their state after a round-trip through lo-fi.
+static bool s_loFiMode = false;
+namespace {
+struct LoFiBackup {
+	bool projShadows, sunShadow, volumetric, volTrails, godRays, bloom,
+	     particleGlow, heatDistortion, shockwave, chromaAberration,
+	     colorGrade, sharpen, laserGlow, tracerStreak, colorAwareFX,
+	     lensFlare, reflection, distanceFog, modernAOE, smoothParticleFade;
+	Bool useShadowVolumes, useShadowDecals, useLightMap, useCloudMap;
+	Int maxParticleCount;
+};
+LoFiBackup s_loFiBackup{};
+}
+
+bool IsLoFiMode() { return s_loFiMode; }
+
+void ToggleLoFiMode()
+{
+	s_loFiMode = !s_loFiMode;
+	if (s_loFiMode)
+	{
+		s_loFiBackup.projShadows         = g_debugDisableProjectedShadows;
+		s_loFiBackup.sunShadow           = g_debugDisableSunShadowMap;
+		s_loFiBackup.volumetric          = g_debugDisableVolumetric;
+		s_loFiBackup.volTrails           = g_debugDisableVolumetricTrails;
+		s_loFiBackup.godRays             = g_debugDisableGodRays;
+		s_loFiBackup.bloom               = g_debugDisableBloom;
+		s_loFiBackup.particleGlow        = g_debugDisableParticleGlow;
+		s_loFiBackup.heatDistortion      = g_debugDisableHeatDistortion;
+		s_loFiBackup.shockwave           = g_debugDisableShockwave;
+		s_loFiBackup.chromaAberration    = g_debugDisableChromaAberration;
+		s_loFiBackup.colorGrade          = g_debugDisableColorGrade;
+		s_loFiBackup.sharpen             = g_debugDisableSharpen;
+		s_loFiBackup.laserGlow           = g_debugDisableLaserGlow;
+		s_loFiBackup.tracerStreak        = g_debugDisableTracerStreak;
+		s_loFiBackup.colorAwareFX        = g_debugDisableColorAwareFX;
+		s_loFiBackup.lensFlare           = g_debugDisableLensFlare;
+		s_loFiBackup.reflection          = g_debugDisableReflection;
+		s_loFiBackup.distanceFog         = g_debugDisableDistanceFog;
+		s_loFiBackup.modernAOE           = g_debugDisableModernAOE;
+		s_loFiBackup.smoothParticleFade  = g_debugDisableSmoothParticleFade;
+
+		g_debugDisableProjectedShadows   = true;
+		g_debugDisableSunShadowMap       = true;
+		g_debugDisableVolumetric         = true;
+		g_debugDisableVolumetricTrails   = true;
+		g_debugDisableGodRays            = true;
+		g_debugDisableBloom              = true;
+		g_debugDisableParticleGlow       = true;
+		g_debugDisableHeatDistortion     = true;
+		g_debugDisableShockwave          = true;
+		g_debugDisableChromaAberration   = true;
+		g_debugDisableColorGrade         = true;
+		g_debugDisableSharpen            = true;
+		g_debugDisableLaserGlow          = true;
+		g_debugDisableTracerStreak       = true;
+		g_debugDisableColorAwareFX       = true;
+		g_debugDisableLensFlare          = true;
+		g_debugDisableReflection         = true;
+		g_debugDisableDistanceFog        = true;
+		g_debugDisableModernAOE          = true;
+		g_debugDisableSmoothParticleFade = true;
+
+		if (TheGlobalData)
+		{
+			s_loFiBackup.useShadowVolumes = TheGlobalData->m_useShadowVolumes;
+			s_loFiBackup.useShadowDecals  = TheGlobalData->m_useShadowDecals;
+			s_loFiBackup.useLightMap      = TheGlobalData->m_useLightMap;
+			s_loFiBackup.useCloudMap      = TheGlobalData->m_useCloudMap;
+			s_loFiBackup.maxParticleCount = TheGlobalData->m_maxParticleCount;
+
+			TheWritableGlobalData->m_useShadowVolumes = FALSE;
+			TheWritableGlobalData->m_useShadowDecals  = FALSE;
+			TheWritableGlobalData->m_useLightMap      = FALSE;
+			TheWritableGlobalData->m_useCloudMap      = FALSE;
+			TheWritableGlobalData->m_maxParticleCount = 1000;
+		}
+	}
+	else
+	{
+		g_debugDisableProjectedShadows   = s_loFiBackup.projShadows;
+		g_debugDisableSunShadowMap       = s_loFiBackup.sunShadow;
+		g_debugDisableVolumetric         = s_loFiBackup.volumetric;
+		g_debugDisableVolumetricTrails   = s_loFiBackup.volTrails;
+		g_debugDisableGodRays            = s_loFiBackup.godRays;
+		g_debugDisableBloom              = s_loFiBackup.bloom;
+		g_debugDisableParticleGlow       = s_loFiBackup.particleGlow;
+		g_debugDisableHeatDistortion     = s_loFiBackup.heatDistortion;
+		g_debugDisableShockwave          = s_loFiBackup.shockwave;
+		g_debugDisableChromaAberration   = s_loFiBackup.chromaAberration;
+		g_debugDisableColorGrade         = s_loFiBackup.colorGrade;
+		g_debugDisableSharpen            = s_loFiBackup.sharpen;
+		g_debugDisableLaserGlow          = s_loFiBackup.laserGlow;
+		g_debugDisableTracerStreak       = s_loFiBackup.tracerStreak;
+		g_debugDisableColorAwareFX       = s_loFiBackup.colorAwareFX;
+		g_debugDisableLensFlare          = s_loFiBackup.lensFlare;
+		g_debugDisableReflection         = s_loFiBackup.reflection;
+		g_debugDisableDistanceFog        = s_loFiBackup.distanceFog;
+		g_debugDisableModernAOE          = s_loFiBackup.modernAOE;
+		g_debugDisableSmoothParticleFade = s_loFiBackup.smoothParticleFade;
+
+		if (TheGlobalData)
+		{
+			TheWritableGlobalData->m_useShadowVolumes = s_loFiBackup.useShadowVolumes;
+			TheWritableGlobalData->m_useShadowDecals  = s_loFiBackup.useShadowDecals;
+			TheWritableGlobalData->m_useLightMap      = s_loFiBackup.useLightMap;
+			TheWritableGlobalData->m_useCloudMap      = s_loFiBackup.useCloudMap;
+			TheWritableGlobalData->m_maxParticleCount = s_loFiBackup.maxParticleCount;
+		}
+	}
+}
 
 // Autotest mode (defined in CommandLine.cpp)
 extern Int g_autotestFrames;
@@ -540,7 +657,7 @@ void W3DDisplay::step()
 // smaller = sharper but shadows pop at camera movement. The Inspector's
 // Shadows panel edits these live, so they're mutable globals (not constexpr).
 // Defaults tuned visually in-game (2026-04-19).
-float g_shadowFootprint  = 1500.0f;
+float g_shadowFootprint  = 8000.0f;
 float g_sunEyeDistance   = 6500.0f;
 float g_sunNear          = 0.1f;
 float g_sunFar           = 45000.0f;

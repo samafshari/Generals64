@@ -29,6 +29,8 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+#include "Common/LivePerf.h"
+#include <typeinfo>
 // Last-module tracker globals — defined in WinMain.cpp, read by the crash
 // filter. GameLogic::update stamps these before each sleepy UpdateModule
 // update() call so a crash in u->update() names its module in crash.log.
@@ -37,6 +39,25 @@ extern "C" {
 	extern unsigned g_lastUpdateObjectId;
 	extern char g_lastUpdateObjectTemplate[128];
 	extern unsigned g_lastUpdateFrame;
+	// Pointer-only stamps. Filled per-dispatch in the hot sleepy loop instead
+	// of the (very expensive) keyToName+strncpy pair. The crash filter in
+	// WinMain resolves names from these pointers at crash time under SEH.
+	extern const void* g_lastUpdateModulePtr;
+	extern const void* g_lastUpdateObjectPtr;
+	// typeid(*u).name() for the module being dispatched. Static storage
+	// (compiler type_info table), so storing the pointer is always safe.
+	extern const char* g_lastUpdateModuleClass;
+	// Dispatch ring buffer — see WinMain.cpp for layout.
+	struct DispatchRingEntry {
+		const void* modulePtr;
+		const void* objectPtr;
+		unsigned    objectId;
+		unsigned    frame;
+		const char* className;
+	};
+	enum { DISPATCH_RING_SIZE = 32 };
+	extern DispatchRingEntry g_dispatchRing[DISPATCH_RING_SIZE];
+	extern unsigned g_dispatchRingHead;
 }
 
 // Probe the vtable of an UpdateModule and validate that its low slots look
@@ -137,6 +158,10 @@ extern "C" int SafeCanCallUpdate(const void* modulePtr)
 #include "Common/XferDeepCRC.h"
 #include "Common/GameSpyMiscPreferences.h"
 
+#if !defined(_M_IX86)
+#include <xmmintrin.h>   // _mm_setcsr for setFPMode on x64
+#endif
+
 #include "GameClient/ControlBar.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/GameClient.h"
@@ -158,6 +183,7 @@ extern "C" int SafeCanCallUpdate(const void* modulePtr)
 #include "GameLogic/CrateSystem.h"
 #include "GameLogic/FPUControl.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/GameTelemetry.h"
 #include "GameLogic/Locomotor.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/AIUpdate.h"
@@ -303,7 +329,26 @@ void setFPMode()
 	newVal = (newVal & ~_MCW_PC) | (_PC_24   & _MCW_PC);
 	_controlfp(newVal, _MCW_PC | _MCW_RC);
 #else
-	// x64: SSE2 always uses fixed precision — nothing to configure
+	// x64: the sim uses SSE2, so the x87 control word is irrelevant — but
+	// SSE2 has its own control register (MXCSR) that determines rounding
+	// mode, flush-to-zero, denormals-are-zero, and exception masks. MXCSR
+	// is NOT automatically uniform between processes: DirectX drivers,
+	// audio/input DLLs, and other libraries routinely flip FTZ/DAZ to win
+	// perf on their own math paths, and whatever state they leave behind
+	// is what the sim thread inherits. Two clients that loaded slightly
+	// different driver stacks can therefore compute bit-differing results
+	// from identical inputs — exactly the signature of a single-unit
+	// sub-voxel position drift observed in lockstep CRC mismatches.
+	//
+	// Pin MXCSR to a known state every setFPMode() call so the sim runs
+	// in the same FP environment across peers regardless of what other
+	// code ran first. Matches the *intent* of the x87 block above.
+	//   - rounding:           round-to-nearest-even (_MM_ROUND_NEAREST)
+	//   - flush-to-zero:      OFF  (denormals preserved, matches x87 semantics)
+	//   - denormals-as-zero:  OFF  (same)
+	//   - all exception masks ON   (no SIGFPE from denormal/underflow/etc.)
+	unsigned int mxcsr = 0x1F80u;   // default MXCSR: masks on, FTZ/DAZ off, round-nearest
+	_mm_setcsr(mxcsr);
 #endif
 }
 
@@ -1284,6 +1329,19 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	}
 
 	m_rankLevelLimit = 1000;	// this is reset every game.
+
+	// Flip the telemetry collector on so the periodic onLogicFrame hook
+	// starts shipping SCORE_EVENTS + the engine can emit a terminal
+	// GAMERESULT when the match ends. No-op in sandbox/campaign runs
+	// (onGameStart bails when g_authGameToken is empty). Placed AFTER
+	// the load-screen/early-return path above so it only fires on the
+	// "real" init pass; the first pass returns early before any game
+	// state is ready and there's nothing useful for the collector to
+	// do there. Without this call, m_active stays FALSE and the entire
+	// engine→relay telemetry stream is silently suppressed — exactly
+	// the bug that left the dashboard at zero across every sim-only stat.
+	if (TheGameTelemetry)
+		TheGameTelemetry->onGameStart();
 
 	//
 	// only reset the next object ID allocator counter when we're not loading a save game.
@@ -2690,6 +2748,7 @@ void GameLogic::loadMapINI( AsciiString mapName )
 //DECLARE_PERF_TIMER(processDestroyList)
 void GameLogic::processDestroyList()
 {
+	LIVE_PERF_SCOPE("GameLogic::processDestroyList");
 	//USE_PERF_TIMER(processDestroyList)
 
 	/*
@@ -3814,6 +3873,7 @@ extern __int64 Total_Load_3D_Assets;
 // ------------------------------------------------------------------------------------------------
 void GameLogic::update()
 {
+	LIVE_PERF_SCOPE("GameLogic::update");
 	USE_PERF_TIMER(GameLogic_update)
 
 	LatchRestore<Bool> inUpdateLatch(m_isInUpdate, TRUE);
@@ -3889,6 +3949,7 @@ void GameLogic::update()
 
 	if (generateForSolo || generateForMP)
 	{
+		LIVE_PERF_SCOPE("GameLogic::update/CRC");
 		m_CRC = getCRC( CRC_RECALC );
 		bool isPlayback = (TheRecorder && TheRecorder->isPlaybackMode());
 
@@ -3920,6 +3981,7 @@ void GameLogic::update()
 
 	// process client commands
 	{
+		LIVE_PERF_SCOPE("GameLogic::update/processCommandList");
 		processCommandList( TheCommandList );
 	}
 
@@ -3957,7 +4019,25 @@ void GameLogic::update()
 	// drop garbage in place (swap-and-pop), re-stamp indices so the heap's
 	// reverse lookup is consistent, then sift every node from mid→0 to
 	// restore the min-heap invariant.
+	// Enclosing block wraps scrub + main loop + validate so one LIVE_PERF_SCOPE
+	// captures the total time the sleepy update system costs per frame.
+	{
+	LIVE_PERF_SCOPE("GameLogic::update/sleepyUpdates");
+
+	// Scrub phase: O(N) over the whole sleepy vector, probing each entry's
+	// vtable via SafeCanCallUpdate. On a big map this is the linear-with-unit-
+	// count tax the fork added. Garbage vtables only appear when a unit is
+	// destroyed mid-frame, which is rare — running the probe every frame was
+	// ~1.4 s/min at 500+ units. Throttling to once every SCRUB_FRAME_INTERVAL
+	// frames (~1 second at 30 Hz) catches garbage before it can crash the heap
+	// rebalancer on the NEXT sleepy dispatch, while amortizing the scan cost.
+	constexpr UnsignedInt SCRUB_FRAME_INTERVAL = 30;
+	const bool runScrub = (now % SCRUB_FRAME_INTERVAL) == 0;
+	{
+	LIVE_PERF_SCOPE("GameLogic::update/sleepyScrub");
 	bool scrubbed = false;
+	if (runScrub)
+	{
 	for (int k = (int)m_sleepyUpdates.size() - 1; k >= 0; --k)
 	{
 		UpdateModulePtr u = m_sleepyUpdates[k];
@@ -3984,10 +4064,13 @@ void GameLogic::update()
 		for (int k = (int)m_sleepyUpdates.size() / 2 - 1; k >= 0; --k)
 			rebalanceChildSleepyUpdate(k);
 	}
+	} // end if (runScrub)
+	} // end sleepyScrub
 
 	int sleepyUpdateCount = 0;
 	int sleepySkipCount = 0;
 	{
+		LIVE_PERF_SCOPE("GameLogic::update/sleepyMainLoop");
 		while (!m_sleepyUpdates.empty())
 		{
 			UpdateModulePtr u = peekSleepyUpdate();
@@ -4009,6 +4092,27 @@ void GameLogic::update()
 
 			UpdateSleepTime sleepLen = UPDATE_SLEEP_NONE;	// default, if it is disabled.
 
+			// Validate the module's vtable FIRST, before any friend_getObject() /
+			// isDestroyed() deref. If u points to freed memory its m_object field
+			// is garbage and touching it crashes (observed after 15 min of play at
+			// frame 25674, access READ at 0xA8 on a freed module's internal field).
+			// SafeCanCallUpdate uses an SEH __try to probe the vtable safely.
+			// The scrub pass catches long-lived garbage periodically, but the
+			// 30-frame throttle leaves a window where per-dispatch validation is
+			// essential. Cost: one pointer-bounds check + 8 vtable slot checks
+			// per dispatch, ~200 ns — negligible next to the fork's prior
+			// keyToName+strncpy crash stamp (which was the real hot-path cost,
+			// still removed).
+			if (!SafeCanCallUpdate(u)) {
+				g_lastUpdateModulePtr   = u;
+				g_lastUpdateObjectPtr   = nullptr;
+				g_lastUpdateObjectId    = 0u;
+				g_lastUpdateFrame       = (unsigned)now;
+				g_lastUpdateModuleClass = "<corrupt-vtable>";
+				popSleepyUpdate();
+				continue;
+			}
+
 			const Object* modObj = u->friend_getObject();
 			if (!modObj) {
 				popSleepyUpdate();
@@ -4024,20 +4128,6 @@ void GameLogic::update()
 				popSleepyUpdate();
 				continue;
 			}
-			// Probe the module's vtable via SEH. If it's obviously corrupt
-			// (slots don't point inside .text), pop the module out of the
-			// sleepy heap so it doesn't come back and crash the game. We avoid
-			// writing to the module itself since the memory may already belong
-			// to another live allocation.
-			if (!SafeCanCallUpdate(u)) {
-				strncpy(g_lastUpdateModuleName, "<corrupt-vtable>", sizeof(g_lastUpdateModuleName) - 1);
-				g_lastUpdateModuleName[sizeof(g_lastUpdateModuleName) - 1] = '\0';
-				g_lastUpdateObjectTemplate[0] = '\0';
-				g_lastUpdateObjectId = 0u;
-				g_lastUpdateFrame    = (unsigned)now;
-				popSleepyUpdate();
-				continue;
-			}
 			DisabledMaskType dis = modObj->getDisabledFlags();
 			if (!dis.any() || dis.anyIntersectionWith(u->getDisabledTypesToProcess()))
 			{
@@ -4046,31 +4136,42 @@ void GameLogic::update()
 				//DEBUG_LOG(("calling update %08lx (%d %d)...",update,update->friend_getNextCallFrame(),update->friend_getNextCallPhase()));
 				m_curUpdateModule = u;
 
-				// Last-module stamp for the crash handler. Dumps into crash.log
-				// from WinMain.cpp's CrashFilter when u->update() faults, so
-				// we can name the faulty module without per-frame file logging.
+				// Last-module stamp for the crash handler. Pointer-only —
+				// name resolution happens lazily in WinMain::CrashFilter under
+				// SEH. The prior version called TheNameKeyGenerator->keyToName()
+				// + two strncpy per dispatch; at 500 dispatches × 70Hz that was
+				// the dominant cost in the sleepy main loop (~50 ms/frame).
+				// typeid(*u).name() is a static-storage pointer, free to stash.
+				const char* modClassName = typeid(*u).name();
+				g_lastUpdateModulePtr   = u;
+				g_lastUpdateObjectPtr   = modObj;
+				g_lastUpdateObjectId    = modObj ? (unsigned)modObj->getID() : 0u;
+				g_lastUpdateFrame       = (unsigned)now;
+				g_lastUpdateModuleClass = modClassName;
+
+				// Dispatch ring: keeps the last 32 modules executed so a crash
+				// log can show the context leading up to the fault, even if the
+				// fault itself is inside u->update(). Single-writer from the
+				// logic thread — no synchronization needed.
 				{
-					const Object* obj = modObj;
-					AsciiString modName = TheNameKeyGenerator->keyToName(u->getModuleNameKey());
-					const char* tmplName = obj && obj->getTemplate()
-						? obj->getTemplate()->getName().str() : "";
-					strncpy(g_lastUpdateModuleName, modName.str(), sizeof(g_lastUpdateModuleName) - 1);
-					g_lastUpdateModuleName[sizeof(g_lastUpdateModuleName) - 1] = '\0';
-					strncpy(g_lastUpdateObjectTemplate, tmplName, sizeof(g_lastUpdateObjectTemplate) - 1);
-					g_lastUpdateObjectTemplate[sizeof(g_lastUpdateObjectTemplate) - 1] = '\0';
-					g_lastUpdateObjectId = obj ? (unsigned)obj->getID() : 0u;
-					g_lastUpdateFrame    = (unsigned)now;
+					const unsigned idx = g_dispatchRingHead & (DISPATCH_RING_SIZE - 1);
+					g_dispatchRing[idx].modulePtr = u;
+					g_dispatchRing[idx].objectPtr = modObj;
+					g_dispatchRing[idx].objectId  = g_lastUpdateObjectId;
+					g_dispatchRing[idx].frame     = (unsigned)now;
+					g_dispatchRing[idx].className = modClassName;
+					++g_dispatchRingHead;
 				}
 
 				{
-				LARGE_INTEGER muStart, muEnd, muFreq;
-				QueryPerformanceCounter(&muStart);
-				sleepLen = u->update();
-				QueryPerformanceCounter(&muEnd);
-				QueryPerformanceFrequency(&muFreq);
-				double muMs = (double)(muEnd.QuadPart - muStart.QuadPart) * 1000.0 / (double)muFreq.QuadPart;
-				(void)muMs; // Performance timing kept, log writing removed
-			}
+					// Per-module-class timing. typeid().name() returns a pointer
+					// with program-lifetime storage (the compiler's type_info
+					// table), safe to feed to LivePerf which caches name pointers.
+					// MSVC prefixes with "class " — slot labels will read
+					// "class AIUpdateInterface" / "class ProductionUpdate" etc.
+					LIVE_PERF_SCOPE_DYNAMIC(typeid(*u).name());
+					sleepLen = u->update();
+				}
 				DEBUG_ASSERTCRASH(sleepLen > 0, ("you may not return 0 from update"));
 				if (sleepLen < 1)
 					sleepLen = UPDATE_SLEEP_NONE;
@@ -4085,7 +4186,11 @@ void GameLogic::update()
 		}
 	}
 
-	validateSleepyUpdate();
+	{
+		LIVE_PERF_SCOPE("GameLogic::update/sleepyValidate");
+		validateSleepyUpdate();
+	}
+	} // end of sleepyUpdates scope
 
 
 
@@ -4097,6 +4202,7 @@ void GameLogic::update()
 
 	// production updates
 	{
+		LIVE_PERF_SCOPE("GameLogic::update/BuildAssistant");
 		TheBuildAssistant->update();
 	}
 
@@ -4116,11 +4222,15 @@ void GameLogic::update()
 	// reset the command list, destroying all messages
 	TheCommandList->reset();
 
-	TheWeaponStore->update();
-	TheLocomotorStore->update();
-	TheVictoryConditions->update();
+	{
+		LIVE_PERF_SCOPE("GameLogic::update/storesAndVictory");
+		TheWeaponStore->update();
+		TheLocomotorStore->update();
+		TheVictoryConditions->update();
+	}
 
 	{
+		LIVE_PERF_SCOPE("GameLogic::update/disabledSweep");
 		//Handle disabled statii (and re-enable objects once frame matches)
 		for( Object *obj = m_objList; obj; obj = obj->getNextObject() )
 		{
@@ -4137,6 +4247,17 @@ void GameLogic::update()
 
 
 
+
+	// Periodic GameTelemetry score events batch. Fires once every
+	// SCORE_EVENTS_EVERY_FRAMES (~3s @ 30Hz); no-ops between sends
+	// and for sandbox / non-authed sessions. Cheap to call every frame —
+	// the guard is a couple of pointer + int checks before any work.
+	// Network I/O for the batch happens on GameTelemetry's sender
+	// thread; this call returns as soon as the bytes are queued.
+	if (TheGameTelemetry)
+	{
+		TheGameTelemetry->onLogicFrame();
+	}
 
 	// increment world time
 	if (!m_startNewGame)
@@ -4476,6 +4597,83 @@ UnsignedInt GameLogic::getCRC( Int mode, AsciiString deepCRCFileName )
 		CRCGEN_LOG(("CRC for frame %d is 0x%8.8X", m_frame, theCRC));
 	}
 	return theCRC;
+}
+
+// ------------------------------------------------------------------------------------------------
+// Post-mortem desync manifest. Mirrors the walk done by getCRC(CRC_RECALC)
+// but writes a per-entry CRC into <f> instead of accumulating a single
+// world CRC. Designed to be diffed byte-for-byte against the same file
+// from the other peer: the first entry whose CRC differs is the first
+// diverging piece of state.
+//
+// Entry lines:
+//   OBJ  id=XXXX template=NAME owner=P pos=(x,y,z) hp=H crc=0x........
+//   SUB  PartitionManager                              crc=0x........
+//   SUB  ThePlayerList                                 crc=0x........
+//   SUB  TheAI                                         crc=0x........
+//
+// Each fresh XferCRC is opened with a deterministic identifier so the
+// object's reported CRC is independent of others. That makes the diff
+// robust even if the set of alive objects differs between clients (the
+// classic symptom of "unit destroyed on one peer but not the other").
+void GameLogic::writeDesyncObjectManifest(FILE* f)
+{
+	if (!f) return;
+	setFPMode();
+
+	fprintf(f, "\n--- Desync object manifest (frame %u) ---\n", (unsigned)m_frame);
+	fprintf(f, "Diff this section against the peer's desync.log; the first\n"
+	           "OBJ or SUB line with a different crc is the diverging state.\n\n");
+
+	// Per-object CRCs. Same iteration order as getCRC() uses.
+	unsigned objCount = 0;
+	for (Object* obj = m_objList; obj; obj = obj->getNextObject())
+	{
+		XferCRC xfer;
+		xfer.open(AsciiString("objCRC"));
+		xfer.xferSnapshot(obj);
+		xfer.close();
+		const UnsignedInt c = xfer.getCRC();
+
+		const char* tmplName = obj->getTemplate() ? obj->getTemplate()->getName().str() : "<null>";
+		const Coord3D* p = obj->getPosition();
+		const Player* pl = obj->getControllingPlayer();
+		const Int owner = pl ? pl->getPlayerIndex() : -1;
+		fprintf(f, "OBJ  id=%-6u template=%-40s owner=%-2d pos=(%.2f,%.2f,%.2f) hp=%.1f crc=0x%08X\n",
+			(unsigned)obj->getID(), tmplName, owner,
+			p ? p->x : 0.0f, p ? p->y : 0.0f, p ? p->z : 0.0f,
+			obj->getBodyModule() ? obj->getBodyModule()->getHealth() : 0.0f,
+			c);
+		++objCount;
+	}
+	fprintf(f, "OBJ  total=%u\n", objCount);
+
+	// Per-subsystem CRCs. These match what getCRC() folds in after the
+	// object walk; splitting them out tells us whether the divergence is
+	// in partition state, player state, or AI group state when OBJ lines
+	// all match.
+	{
+		XferCRC xfer; xfer.open(AsciiString("partCRC"));
+		if (ThePartitionManager) xfer.xferSnapshot(ThePartitionManager);
+		xfer.close();
+		fprintf(f, "SUB  PartitionManager  crc=0x%08X\n", xfer.getCRC());
+	}
+	{
+		XferCRC xfer; xfer.open(AsciiString("playersCRC"));
+		if (ThePlayerList) xfer.xferSnapshot(ThePlayerList);
+		xfer.close();
+		fprintf(f, "SUB  ThePlayerList     crc=0x%08X\n", xfer.getCRC());
+	}
+	{
+		XferCRC xfer; xfer.open(AsciiString("aiCRC"));
+		if (TheAI) xfer.xferSnapshot(TheAI);
+		xfer.close();
+		fprintf(f, "SUB  TheAI             crc=0x%08X\n", xfer.getCRC());
+	}
+
+	// Random seed — sim-visible, part of the real CRC input.
+	fprintf(f, "SUB  RandomSeedCRC      crc=0x%08X\n", GetGameLogicRandomSeedCRC());
+	fflush(f);
 }
 
 // ------------------------------------------------------------------------------------------------

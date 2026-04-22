@@ -29,6 +29,7 @@
 #pragma once
 
 #include <mutex>
+#include <vector>
 
 #include "GameNetwork/Transport.h"
 #include "GameNetwork/NetworkInterface.h"
@@ -423,6 +424,22 @@ protected:
 	// anyone's profile changes via the REST API. Clients cache the payload
 	// in CosmeticsCache, keyed by authenticated user id.
 	static const char RELAY_TYPE_COSMETICS   = 8;
+	// Periodic in-game score events. Built by GameTelemetry from the
+	// local player's ScoreKeeper and shipped through the relay so the
+	// server can credit per-field deltas onto the User rollup while the
+	// match is still being played. Binary payload (see
+	// packScoreEventPacket) — no JSON overhead on the hot path. Type
+	// byte stays at 9 for wire compatibility; the semantics changed
+	// from "totals snapshot" to "deltas-since-last-event".
+	static const char RELAY_TYPE_SCORE_EVENTS = 9;
+	// Server → client assignment of the match's canonical session GUID.
+	// Relay mints one GUID per MSG_GAME_START and broadcasts it to every
+	// authenticated peer on the host's filter code (host included); the
+	// engine stores the 16 raw bytes as m_sessionId and uses them
+	// verbatim on every outgoing SCORE_EVENTS / GAMERESULT for the
+	// match. See RelayServer.cs::BuildSessionAssignPacket +
+	// GameTelemetry::onRelayAssignSession.
+	static const char RELAY_TYPE_SESSION_ASSIGN = 10;
 
 public:
 	Bool relayConnect();
@@ -433,6 +450,23 @@ public:
 	// RELAY_TYPE_GAMERESULT channel. Called by GameTelemetry on
 	// onGameWon/Lost/Surrendered/Exited.
 	Bool relaySendGameResult(const char *json, int len);
+	// Ship a periodic in-game score events batch through the relay's
+	// RELAY_TYPE_SCORE_EVENTS channel. <buf> is the pre-built binary
+	// payload (sessionId/slot/frame/utcMillis + ten Int32 delta fields
+	// — see packScoreEventPacket for the layout). Fire-and-forget;
+	// mirrors relaySendGameResult's send pattern.
+	Bool relaySendScoreEvents(const UnsignedByte *buf, Int len);
+
+	// Pack helpers used by the GameTelemetry sender thread. They
+	// construct the framed [4:size][4:sessionID][1:type][payload]
+	// bytes for the two telemetry packet types so the sim thread can
+	// hand a ready-to-write buffer to the worker queue and the worker
+	// thread can call relaySendAll without touching any sim state.
+	// Pack is split from send so relaySendAll is only ever invoked
+	// from the telemetry thread (the existing wrappers above retain
+	// the pack+send shape for any non-telemetry caller).
+	void packGameResultPacket(const char *json, int len, std::vector<UnsignedByte> &out);
+	void packScoreEventPacket(const UnsignedByte *payload, Int len, std::vector<UnsignedByte> &out);
 
 protected:
 	void sendMessage(LANMessage *msg, UnsignedInt ip = 0); // Convenience function

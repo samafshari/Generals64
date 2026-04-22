@@ -3444,7 +3444,13 @@ int RenderShadowCastersDX11(CameraClass* camera)
 		Drawable* draw = TheGameClient->getDrawableList();
 		while (draw)
 		{
-			if (!draw->isDrawableEffectivelyHidden())
+			// Shroud gate mirrors w3dview_renderDrawable: a unit hidden under
+			// fog of war must NOT contribute to the shadow map, otherwise its
+			// silhouette projects onto visible terrain and reveals a position
+			// the player isn't supposed to see. getFullyObscuredByShroud()
+			// reads the cached flag set by GameClient::update() so the
+			// 2-second "last known position" grace period is respected too.
+			if (!draw->isDrawableEffectivelyHidden() && !draw->getFullyObscuredByShroud())
 			{
 				for (DrawModule** dm = draw->getDrawModules(); *dm; ++dm)
 				{
@@ -6567,6 +6573,13 @@ void W3DView::draw()
 				modelRenderer.ClearPendingParticleBuffers();
 			}
 
+			// Flush deferred laser beams — queued by W3DLaserDraw during per-
+			// drawable iteration and drawn here so they composite on top of
+			// every opaque mesh rendered above (particle cannon uplink beam,
+			// unit laser weapons, tracers, ropes). Runs before Restore3DState
+			// so the beam can set its own state without fighting the default.
+			Render::Renderer::Instance().FlushLateBeams();
+
 			// Reset D3D11 state after scene iteration — some objects may have
 			// called old DX8Wrapper methods that corrupt pipeline state
 			Render::Renderer::Instance().Restore3DState();
@@ -6950,17 +6963,210 @@ Int W3DView::iterateDrawablesInRegion( IRegion2D *screenRegion,
 	return count;
 }
 
+// Return the game-logic Object behind a render object (nullptr for
+// terrain / decals / effect render objs that don't back a game Object).
+// Used by the click-pick fallback below to reach the authored GeometryInfo.
+static Object* GetPickableObjectFromRenderObj(RenderObjClass* robj)
+{
+	if (!robj)
+		return nullptr;
+	DrawableInfo* drawInfo = (DrawableInfo*)robj->Get_User_Data();
+	if (!drawInfo || !drawInfo->m_drawable)
+		return nullptr;
+	return drawInfo->m_drawable->getObject();
+}
+
+// Ray-vs-authored-GeometryInfo intersection in world space. Returns a
+// fraction in [0, 1] along `seg` (P0 -> P1) of the closest intersection,
+// or -1 for no hit. `extraRadius` fattens the shape by that world-unit
+// amount — used to grow the infantry click target.
+//
+// The mesh-based Cast_Ray above is per-triangle, so it leaks rays
+// through scaffolding gaps, hollow factories, and any building with
+// windowless frames the ray happens to thread through; the click then
+// falls onto the terrain behind. The authored SPHERE / CYLINDER / BOX
+// already used by partition and pathing fills the whole footprint, so
+// testing against it matches the original game's "if the cursor is
+// over the silhouette, it selects" behavior.
+static Real RayVsGeometryInfo(const LineSegClass& seg, const Object* obj, Real extraRadius)
+{
+	const GeometryInfo& geom = obj->getGeometryInfo();
+	const Coord3D* pos = obj->getPosition();
+	const Real angle = obj->getOrientation();
+
+	const Vector3& p0 = seg.Get_P0();
+	const Vector3& p1 = seg.Get_P1();
+	Vector3 d(p1.X - p0.X, p1.Y - p0.Y, p1.Z - p0.Z);
+	Real segLen = d.Length();
+	if (segLen <= 1e-4f)
+		return -1.0f;
+	d /= segLen;
+
+	switch (geom.getGeomType())
+	{
+		case GEOMETRY_SPHERE:
+		{
+			// Standard ray-sphere (t in world units along d, ∈ [0, segLen]).
+			Real r = geom.getMajorRadius() + extraRadius;
+			Vector3 m(p0.X - pos->x, p0.Y - pos->y,
+			          p0.Z - (pos->z + geom.getZDeltaToCenterPosition()));
+			Real b = m.X*d.X + m.Y*d.Y + m.Z*d.Z;
+			Real c = (m.X*m.X + m.Y*m.Y + m.Z*m.Z) - r*r;
+			Real disc = b*b - c;
+			if (disc < 0.0f)
+				return -1.0f;
+			Real sq = sqrtf(disc);
+			Real t = -b - sq;
+			if (t < 0.0f)
+				t = -b + sq;
+			if (t < 0.0f || t > segLen)
+				return -1.0f;
+			return t / segLen;
+		}
+
+		case GEOMETRY_CYLINDER:
+		{
+			// Z-axis vertical cylinder, base at pos.z, height = m_height.
+			// Slab against XY-circle AND Z-extent, intersect the two
+			// t-ranges, take tMin as the entry point.
+			Real r = geom.getMajorRadius() + extraRadius;
+			Real zLo = pos->z - extraRadius;
+			Real zHi = pos->z + geom.getMaxHeightAbovePosition() + extraRadius;
+
+			Real sx = p0.X - pos->x;
+			Real sy = p0.Y - pos->y;
+			Real ax = d.X*d.X + d.Y*d.Y;
+			Real bxy = sx*d.X + sy*d.Y;
+			Real cxy = sx*sx + sy*sy - r*r;
+
+			Real tMin = 0.0f;
+			Real tMax = segLen;
+			if (ax > 1e-6f)
+			{
+				Real disc = bxy*bxy - ax*cxy;
+				if (disc < 0.0f)
+					return -1.0f;
+				Real sq = sqrtf(disc);
+				Real t1 = (-bxy - sq) / ax;
+				Real t2 = (-bxy + sq) / ax;
+				if (t1 > t2) { Real tmp = t1; t1 = t2; t2 = tmp; }
+				if (t1 > tMin) tMin = t1;
+				if (t2 < tMax) tMax = t2;
+				if (tMin > tMax)
+					return -1.0f;
+			}
+			else
+			{
+				// Purely vertical ray — XY containment is enough.
+				if (cxy > 0.0f)
+					return -1.0f;
+			}
+			if (fabsf(d.Z) > 1e-6f)
+			{
+				Real tz1 = (zLo - p0.Z) / d.Z;
+				Real tz2 = (zHi - p0.Z) / d.Z;
+				if (tz1 > tz2) { Real tmp = tz1; tz1 = tz2; tz2 = tmp; }
+				if (tz1 > tMin) tMin = tz1;
+				if (tz2 < tMax) tMax = tz2;
+				if (tMin > tMax)
+					return -1.0f;
+			}
+			else
+			{
+				if (p0.Z < zLo || p0.Z > zHi)
+					return -1.0f;
+			}
+			if (tMin < 0.0f)
+				tMin = 0.0f;
+			if (tMin > segLen)
+				return -1.0f;
+			return tMin / segLen;
+		}
+
+		case GEOMETRY_BOX:
+		{
+			// Oriented box: hx = forward half-len, hy = side half-len,
+			// hz = height extending up from pos.z. Undo the object's yaw,
+			// then slab-test against the axis-aligned box in local space.
+			Real hx = geom.getMajorRadius() + extraRadius;
+			Real hy = geom.getMinorRadius() + extraRadius;
+			Real zLo = -extraRadius;
+			Real zHi = geom.getMaxHeightAbovePosition() + extraRadius;
+
+			Real cs = cosf(-angle);
+			Real sn = sinf(-angle);
+
+			Real lsx = (p0.X - pos->x) * cs - (p0.Y - pos->y) * sn;
+			Real lsy = (p0.X - pos->x) * sn + (p0.Y - pos->y) * cs;
+			Real lsz = p0.Z - pos->z;
+			Real ldx = d.X * cs - d.Y * sn;
+			Real ldy = d.X * sn + d.Y * cs;
+			Real ldz = d.Z;
+
+			Real boxMin[3] = { -hx, -hy, zLo };
+			Real boxMax[3] = {  hx,  hy, zHi };
+			Real ls[3] = { lsx, lsy, lsz };
+			Real ld[3] = { ldx, ldy, ldz };
+
+			Real tMin = 0.0f;
+			Real tMax = segLen;
+			for (int i = 0; i < 3; ++i)
+			{
+				if (fabsf(ld[i]) < 1e-6f)
+				{
+					if (ls[i] < boxMin[i] || ls[i] > boxMax[i])
+						return -1.0f;
+				}
+				else
+				{
+					Real t1 = (boxMin[i] - ls[i]) / ld[i];
+					Real t2 = (boxMax[i] - ls[i]) / ld[i];
+					if (t1 > t2) { Real tmp = t1; t1 = t2; t2 = tmp; }
+					if (t1 > tMin) tMin = t1;
+					if (t2 < tMax) tMax = t2;
+					if (tMin > tMax)
+						return -1.0f;
+				}
+			}
+			if (tMin < 0.0f)
+				tMin = 0.0f;
+			if (tMin > segLen)
+				return -1.0f;
+			return tMin / segLen;
+		}
+
+		default:
+			return -1.0f;
+	}
+}
+
 // RTS3DScene::castRay — ported from W3DScene.cpp (which can't compile due to D3D8 deps).
 //
-// Picking semantics (matches original ZH):
+// Picking semantics (matches original ZH, with two click-quality fixes layered
+// on top):
 //   1. Cull cheaply with bounding-sphere ray-test (NO inflation — we want the
 //      visible mesh footprint, not a fattened hitbox).
-//   2. For objects that pass, run precise per-triangle Cast_Ray.
-//   3. Only fall back to sphere hit for *small* render objects whose mesh is
-//      thin/sparse (helicopter rotors, tracers, etc.). Buildings have huge
-//      bounding spheres that wrap their INI BOX geometry and must NOT use the
-//      sphere fallback — that's what made the clickable hotspot extend well
-//      outside the visible building mesh.
+//   2. Run precise per-triangle Cast_Ray for every object that passes.
+//   3. INFANTRY: also test the authored cylinder with a small radius expansion
+//      so soldiers are easier to click. This competes with mesh hits — the
+//      closer of (mesh, expanded cylinder) wins — which is exactly the goal:
+//      be more clickable than the raw mesh footprint.
+//   4. STRUCTURE: record the authored SPHERE / CYLINDER / BOX as a
+//      FALLBACK-ONLY hit, never as a competing hit. This is the critical
+//      difference from infantry: a building's authored BOX often *contains*
+//      the volume that vehicles park in (planes on an airfield, units parked
+//      inside a war factory, garrison positions inside a civilian structure).
+//      If the box was a competing hit, its top-face entry t would beat the
+//      plane's mesh t on the same ray — the airfield would steal the click
+//      from every plane parked on it. As a fallback, the structure geometry
+//      only fills in when NO mesh (and no infantry cylinder) was hit at all,
+//      i.e. the click threaded through a scaffolding gap / hollow frame and
+//      would otherwise fall onto the terrain.
+//   5. Sphere fallback for *small* render objects whose mesh is thin/sparse
+//      (helicopter rotors, tracers, etc.). Buildings have huge bounding
+//      spheres that wrap their INI BOX geometry and must NOT use the sphere
+//      fallback — that's what made the clickable hotspot extend well outside
+//      the visible building mesh.
 Bool RTS3DScene::castRay(RayCollisionTestClass & raytest, Bool testAll, Int collisionType)
 {
 	CastResultStruct result;
@@ -6973,8 +7179,19 @@ Bool RTS3DScene::castRay(RayCollisionTestClass & raytest, Bool testAll, Int coll
 	// 15 cleanly separates "thin-mesh vehicles" from "structures".
 	const Real SPHERE_FALLBACK_MAX_RADIUS = 15.0f;
 
+	// World-unit fatten applied to infantry GeometryInfo when picking.
+	// Infantry cylinders are typically ~5 radius; +3 roughly doubles click
+	// area without making selection feel sloppy. Visual size unchanged.
+	const Real INFANTRY_PICK_EXPANSION = 3.0f;
+
 	RenderObjClass* closestSphereObj = nullptr;
 	Real closestSphereDist = 1e30f;
+
+	// Fallback-only structure hit. Tracked as a fraction along the ORIGINAL
+	// unshortened ray so plane-on-airfield cases don't let the airfield
+	// box steal the click from the plane's mesh.
+	RenderObjClass* fallbackStructureObj = nullptr;
+	Real fallbackStructureFrac = 2.0f; // >1 means "none yet"
 
 	tempRayTest.CollisionType = COLL_TYPE_ALL;
 	tempRayTest.CheckTranslucent = true;
@@ -7016,12 +7233,61 @@ Bool RTS3DScene::castRay(RayCollisionTestClass & raytest, Bool testAll, Int coll
 				tempRayTest.Ray.Set(raytest.Ray.Get_P0(), newEndPoint);
 				tempRayTest.Result->Fraction = 1.0f;
 			}
+
+			Object* pickObj = GetPickableObjectFromRenderObj(robj);
+			if (!pickObj)
+				continue;
+
+			if (pickObj->isKindOf(KINDOF_INFANTRY))
+			{
+				// Competing hit: expanded cylinder in the current (possibly
+				// shortened) ray. Lets the soldier beat a wall or rubble that
+				// the mesh test might otherwise claim when the user clicks
+				// just off the soldier sprite.
+				Real frac = RayVsGeometryInfo(tempRayTest.Ray, pickObj, INFANTRY_PICK_EXPANSION);
+				if (frac >= 0.0f && frac < 1.0f)
+				{
+					raytest.CollidedRenderObj = robj;
+					hit = TRUE;
+					tempRayTest.Ray.Compute_Point(frac, &newEndPoint);
+					tempRayTest.Ray.Set(raytest.Ray.Get_P0(), newEndPoint);
+					tempRayTest.Result->Fraction = 1.0f;
+				}
+			}
+			else if (pickObj->isKindOf(KINDOF_STRUCTURE))
+			{
+				// Fallback-only: record against the ORIGINAL ray (raytest.Ray)
+				// so iteration order / other-object hits can't poison the
+				// measurement. Only applied after the loop if nothing else
+				// hit. This is what preserves "click on a plane parked on an
+				// airfield selects the plane" while still making scaffolding /
+				// hollow buildings clickable.
+				Real frac = RayVsGeometryInfo(raytest.Ray, pickObj, 0.0f);
+				if (frac >= 0.0f && frac < fallbackStructureFrac)
+				{
+					fallbackStructureFrac = frac;
+					fallbackStructureObj = robj;
+				}
+			}
 		}
 	}
 
-	// Small-object fallback: helicopters/rotors/thin meshes whose tri data
-	// doesn't cover their visual silhouette. NEVER used for structures — their
-	// sphere radius exceeds SPHERE_FALLBACK_MAX_RADIUS.
+	// Fallback pass A: structure-geometry fill-in for the scaffolding /
+	// hollow-building case. Runs only when no real hit was registered, so
+	// vehicles (planes, tanks) parked inside a structure's authored volume
+	// always take priority via their mesh hit in the loop above.
+	if (!hit && fallbackStructureObj)
+	{
+		raytest.CollidedRenderObj = fallbackStructureObj;
+		hit = TRUE;
+		raytest.Ray.Compute_Point(fallbackStructureFrac, &newEndPoint);
+		tempRayTest.Ray.Set(raytest.Ray.Get_P0(), newEndPoint);
+	}
+
+	// Fallback pass B: small-object sphere fallback for helicopters /
+	// rotors / thin meshes whose tri data doesn't cover their visual
+	// silhouette. NEVER used for structures — their sphere radius exceeds
+	// SPHERE_FALLBACK_MAX_RADIUS.
 	if (!hit && closestSphereObj)
 	{
 		raytest.CollidedRenderObj = closestSphereObj;

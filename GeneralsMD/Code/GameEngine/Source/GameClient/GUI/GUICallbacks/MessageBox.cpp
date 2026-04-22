@@ -55,6 +55,7 @@
 #include "GameClient/Shell.h"
 #include "GameClient/KeyDefs.h"
 #include "GameClient/GameWindowManager.h"
+#include "GameClient/GameText.h"
 #include "GameClient/MessageBox.h"
 
 
@@ -88,6 +89,38 @@ GameWindow *MessageBoxOk(UnicodeString titleString,UnicodeString bodyString,Game
 GameWindow *MessageBoxCancel(UnicodeString titleString,UnicodeString bodyString,GameWinMsgBoxFunc cancelCallback)///< convenience function for displaying a Message box with Cancel button
 {
 	return TheWindowManager->gogoMessageBox(-1,-1,-1,-1, MSG_BOX_CANCEL, titleString, bodyString, nullptr, nullptr, nullptr, cancelCallback);
+}
+
+GameWindow *ShowInGameErrorDialog(UnicodeString titleString, UnicodeString bodyString)
+{
+	// Always produce a log trail regardless of whether the dialog can
+	// actually be shown — postmortems from support bundles are the only
+	// signal we get when the GUI layer isn't available.
+	DEBUG_LOG(("ShowInGameErrorDialog: %ls / %ls",
+		titleString.isEmpty() ? L"(default title)" : titleString.str(),
+		bodyString.str()));
+
+	// If TheWindowManager isn't available (pre-init, post-shutdown, or
+	// a headless test harness) there's nowhere to render — bail to log.
+	// We can't call MessageBoxOk in that state since it unconditionally
+	// dereferences TheWindowManager.
+	if (!TheWindowManager)
+		return nullptr;
+
+	// Default the title to the localized "GUI:Error" string when the
+	// caller didn't specify one. Fall through to a hard-coded English
+	// literal if TheGameText is also gone — better to show "Error" than
+	// an empty window title.
+	UnicodeString title = titleString;
+	if (title.isEmpty())
+	{
+		if (TheGameText)
+			title = TheGameText->fetch("GUI:Error");
+		if (title.isEmpty())
+			title.set(L"Error");
+	}
+
+	return MessageBoxOk(title, bodyString, nullptr);
 }
 
 

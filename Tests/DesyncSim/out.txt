@@ -1,0 +1,125 @@
+
+=== Pre-fix shape: stack garbage bleeds into uninitialised floats ===
+  trial 0: ropeSpeed=0x004DA280 ropeLen=0x00007FF7 ropeLenMax=0x00000000 (garbage observed)
+  ok    sawGarbage
+
+=== Post-fix shape: in-class defaults always zero-init the floats ===
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+  ok    bits(info.ropeSpeed) == 0u
+  ok    bits(info.ropeLen) == 0u
+  ok    bits(info.ropeLenMax) == 0u
+
+=== Post-fix shape: pointer and integer fields are also deterministic ===
+  ok    info.ropeDrawable == nullptr
+  ok    info.nextDropTime == 0u
+  ok    info.ropeDrawable == nullptr
+  ok    info.nextDropTime == 0u
+  ok    info.ropeDrawable == nullptr
+  ok    info.nextDropTime == 0u
+  ok    info.ropeDrawable == nullptr
+  ok    info.nextDropTime == 0u
+  ok    info.ropeDrawable == nullptr
+  ok    info.nextDropTime == 0u
+  ok    info.ropeDrawable == nullptr
+  ok    info.nextDropTime == 0u
+  ok    info.ropeDrawable == nullptr
+  ok    info.nextDropTime == 0u
+  ok    info.ropeDrawable == nullptr
+  ok    info.nextDropTime == 0u
+
+====================
+  113 / 113  passed
+  all passed
+====================

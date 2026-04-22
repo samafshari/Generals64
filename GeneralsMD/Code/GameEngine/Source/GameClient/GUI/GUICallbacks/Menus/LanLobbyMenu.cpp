@@ -686,7 +686,16 @@ void LanLobbyMenuShutdown( WindowLayout *layout, void *userData )
 	// hide menu
 	//layout->hide( TRUE );
 
-	TheLAN->RequestLobbyLeave( true );
+	// TheLAN can be null here: when the user hits Back from the lobby,
+	// the code at lines ~963-968 deletes TheLAN *after* queueing the
+	// shell pop, then flips the engine quit flag. If the game exits
+	// before the queued pop completes, Shell::deconstruct later runs
+	// popImmediate() on the still-stacked lobby layout, and this
+	// shutdown callback fires with TheLAN already gone — read-AV on
+	// the vtable dereference. LanGameOptionsMenuShutdown guards the
+	// same way (see LanGameOptionsMenu.cpp ~line 1396).
+	if (TheLAN)
+		TheLAN->RequestLobbyLeave( true );
 
 	// Reset the LAN singleton
 	//TheLAN->reset();

@@ -90,6 +90,92 @@ namespace
     int         s_tooltipX = 0;
     int         s_tooltipY = 0;
     bool        s_tooltipPending = false;
+
+    // Render `text` as a tooltip body, emitting the character immediately
+    // after each `&` hotkey marker in a highlight color so the shortcut
+    // letter stands out. `&&` is treated as a literal `&`. The text may
+    // contain embedded '\n' for multi-line tooltips.
+    //
+    // Implemented as a sequence of TextUnformatted calls concatenated via
+    // SameLine(0, 0). ImGui's text wrapping still works per-segment so
+    // long tooltips wrap at the caller's PushTextWrapPos; we only split on
+    // '&' markers, which are at most a couple per line in practice.
+    void RenderTooltipTextWithHotkeys(const char* text)
+    {
+        if (!text || !*text) return;
+        const ImU32 kHotkeyCol = IM_COL32(255, 212, 64, 255); // warm gold
+
+        const char* p = text;
+        bool sameLine = false;
+
+        auto emitNormal = [&](const char* start, const char* end) {
+            if (start >= end) return;
+            if (sameLine) ImGui::SameLine(0, 0);
+            ImGui::TextUnformatted(start, end);
+            sameLine = true;
+        };
+        auto emitHotkey = [&](const char* c) {
+            if (sameLine) ImGui::SameLine(0, 0);
+            ImGui::PushStyleColor(ImGuiCol_Text, kHotkeyCol);
+            ImGui::TextUnformatted(c, c + 1);
+            ImGui::PopStyleColor();
+            sameLine = true;
+        };
+
+        while (*p)
+        {
+            // Scan a single line; '\n' separates lines and resets the
+            // same-line chain so the next segment lands on a new row.
+            const char* lineStart = p;
+            while (*p && *p != '\n') ++p;
+            const char* lineEnd = p;
+
+            if (lineStart == lineEnd)
+            {
+                // Blank line between paragraphs.
+                ImGui::NewLine();
+                sameLine = false;
+            }
+            else
+            {
+                sameLine = false;
+                const char* run = lineStart;
+                for (const char* q = lineStart; q < lineEnd; )
+                {
+                    if (*q == '&' && q + 1 < lineEnd)
+                    {
+                        if (q[1] == '&')
+                        {
+                            // Escaped ampersand: emit through the first '&',
+                            // skip the second. The engine uses this to show
+                            // a literal '&' in labels.
+                            emitNormal(run, q + 1);
+                            q += 2;
+                            run = q;
+                        }
+                        else if ((unsigned char)q[1] > ' ')
+                        {
+                            emitNormal(run, q);
+                            emitHotkey(q + 1);
+                            q += 2;
+                            run = q;
+                        }
+                        else
+                        {
+                            ++q;
+                        }
+                    }
+                    else
+                    {
+                        ++q;
+                    }
+                }
+                emitNormal(run, lineEnd);
+            }
+
+            if (*p == '\n') ++p;
+        }
+    }
 }
 
 bool Init(SDL_Window* window, ID3D11Device* device, ID3D11DeviceContext* context)
@@ -352,8 +438,23 @@ bool ProcessEvent(const SDL_Event* event)
         return io.WantCaptureMouse;
     }
 
-    case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP:
+        // KEY_UP events must ALWAYS reach the engine — even when
+        // ImGui is consuming the press stream — so the engine's
+        // `Keyboard::m_keyStatus` gets the release and stops
+        // synthesising autorepeat events for that key. Without this
+        // asymmetric carve-out, the sequence "user presses backspace
+        // while game has focus → user focuses an ImGui text field →
+        // user releases backspace" swallows the UP event and leaves
+        // `m_keyStatus[KEY_BACKSPACE].state` stuck in KEY_STATE_DOWN
+        // forever. `Keyboard::checkKeyRepeat()` then fires one
+        // synthetic MSG_RAW_KEY_DOWN + KEY_STATE_AUTOREPEAT per
+        // frame, manifesting as "textboxes erase text as if
+        // someone's holding backspace" — which was exactly the bug
+        // this fix addresses.
+        return false;
+
+    case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_TEXT_INPUT:
     case SDL_EVENT_TEXT_EDITING:
         // Route ALL keys to the engine by default — including ESC
@@ -595,8 +696,21 @@ void BeginFrame()
     if (s_showToolbar)
     {
         const ImGuiViewport* vp = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + 16, vp->WorkPos.y + 16),
-            ImGuiCond_FirstUseEver);
+        // Anchor the floating toolbar at the bottom-right corner of
+        // the viewport. The (1,1) pivot means the window's own
+        // bottom-right corner lands on the given point — no need to
+        // know the toolbar's auto-resized dimensions in advance.
+        // Uses Always when a layout reset is pending (so Reset Layout
+        // snaps the toolbar back) and FirstUseEver otherwise (so the
+        // user's drag-positioned toolbar sticks across frames).
+        const ImGuiCond toolbarPosCond = Panels::IsLayoutResetPending()
+            ? ImGuiCond_Always
+            : ImGuiCond_FirstUseEver;
+        ImGui::SetNextWindowPos(
+            ImVec2(vp->WorkPos.x + vp->WorkSize.x - 16,
+                   vp->WorkPos.y + vp->WorkSize.y - 16),
+            toolbarPosCond,
+            ImVec2(1.0f, 1.0f));
         ImGui::SetNextWindowBgAlpha(0.85f);
 
         ImGuiWindowFlags toolbarFlags =
@@ -919,7 +1033,7 @@ void Render()
             // wraps onto another line instead of being clipped.
             const float wrap = vp->Size.x * 0.35f;
             ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrap);
-            ImGui::TextUnformatted(s_tooltipText.c_str());
+            RenderTooltipTextWithHotkeys(s_tooltipText.c_str());
             ImGui::PopTextWrapPos();
 
             // After the window measures itself, nudge it back on-screen

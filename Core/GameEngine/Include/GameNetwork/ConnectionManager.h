@@ -210,6 +210,7 @@ private:
 	UnsignedInt m_smallestPacketArrivalCushion;
 	Bool m_didSelfSlug;
 	Bool m_clientServerMode;
+	Bool m_disconnectingLocal;
 
 	// -----------------------------------------------------------------------------
 	FileCommandMap s_fileCommandMap;

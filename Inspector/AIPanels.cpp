@@ -297,8 +297,6 @@ void DrawPathfinder()
         ++nodeCount;
 
     ImGui::Text("Path nodes: %d", nodeCount);
-    ImGui::Text("Optimized length: %.1f",
-        const_cast<Path*>(path)->getOptimizedTotalLength());
     ImGui::Text("Path age: %u frames", (unsigned)ai->getPathAge());
     ImGui::Separator();
 

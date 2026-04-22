@@ -561,7 +561,6 @@ set(GAME_SOURCES
     GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AIGuard.cpp
     GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AIGuardRetaliate.cpp
     GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AIPathfind.cpp
-    GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AIPathfindPrecomputed.cpp
     GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AIPlayer.cpp
     GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AISkirmishPlayer.cpp
     GeneralsMD/Code/GameEngine/Source/GameLogic/AI/AIStates.cpp

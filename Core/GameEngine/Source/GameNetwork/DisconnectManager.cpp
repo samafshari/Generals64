@@ -691,8 +691,17 @@ Bool DisconnectManager::allOnSameFrame(ConnectionManager *conMgr) {
 
 Bool DisconnectManager::isLocalPlayerNextPacketRouter(ConnectionManager *conMgr) {
 	if (m_clientServerMode) {
-		// In C/S mode there is no router promotion — server is always the router
-		return FALSE;
+		// In C/S mode there is no router promotion — the server is always
+		// the packet router. But the caller in updateDisconnectStatus uses
+		// this answer to decide which peer emits NETCOMMANDTYPE_DISCONNECTPLAYER
+		// once a player has been voted out. Returning FALSE unconditionally
+		// means nobody ever does that, so disconnectPlayer() is never called,
+		// m_frameData[votedOut] is never cleared, allCommandsReady never
+		// fires, and the disconnect menu stays up forever with the game
+		// frozen. The server — which is the packet router — is the right
+		// peer to emit the command; every client then processes it and hides
+		// the screen.
+		return conMgr->getLocalPlayerID() == conMgr->getPacketRouterSlot();
 	}
 	UnsignedInt localSlot = conMgr->getLocalPlayerID();
 	UnsignedInt packetRouterSlot = conMgr->getPacketRouterSlot();

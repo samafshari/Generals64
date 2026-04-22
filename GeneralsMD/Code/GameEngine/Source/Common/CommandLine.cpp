@@ -329,12 +329,15 @@ Int parseLogObjectCRCs(char *args[], int argc)
 //=============================================================================
 Int parseNetCRCInterval(char *args[], int argc)
 {
-#ifdef DEBUG_CRC
+	// Available in every build, not just DEBUG_CRC — NET_CRC_INTERVAL is
+	// a linked-in global and the CRC compute path is live in ReleasePublic
+	// (that's what desync detection relies on). Gating the parser behind
+	// DEBUG_CRC meant ReleasePublic players could not narrow the bisection
+	// window when a desync fired in the field.
 	if (argc > 1)
 	{
 		NET_CRC_INTERVAL = atoi(args[1]);
 	}
-#endif
 	return 2;
 }
 

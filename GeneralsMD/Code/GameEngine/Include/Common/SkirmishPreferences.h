@@ -55,8 +55,14 @@ public:
 	AsciiString getPreferredMap();	// convenience function
 	Bool usesSystemMapDir();		// convenience function
 
-  Bool getSuperweaponRestricted() const;
-  void setSuperweaponRestricted( Bool superweaponRestricted);
+  // Historically a Bool (Yes/No checkbox). The skirmish menu now exposes a
+  // 0-50 dropdown like the LAN lobby, so we need to round-trip the full
+  // numeric value through preferences rather than collapsing to 0/1 —
+  // otherwise picking "3" in the combo box is clamped to 1 on the next
+  // menu open and nobody can build more than one superweapon. Reads
+  // tolerate the legacy "Yes"/"No" values written by earlier builds.
+  UnsignedShort getSuperweaponRestricted() const;
+  void setSuperweaponRestricted( UnsignedShort superweaponLimit );
 
   Money getStartingCash() const;
   void setStartingCash( const Money &startingCash );

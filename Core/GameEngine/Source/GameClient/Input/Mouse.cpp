@@ -1166,6 +1166,11 @@ Bool Mouse::getActiveTooltipForOverlay(char* outUtf8, int bufSize, int* outX, in
 	if (!wide || wide[0] == L'\0')
 		return FALSE;
 
+	// Pass the `&` hotkey markers through untouched. The Inspector's ImGui
+	// overlay parses them and renders the marked character in the engine's
+	// hotkey color so the shortcut letter pops visually (previously we
+	// stripped them here because ImGui::TextUnformatted couldn't underline
+	// a single char — the new overlay does per-glyph color instead).
 	const int written = ::WideCharToMultiByte(
 		CP_UTF8, 0, wide, -1,
 		outUtf8, bufSize - 1,
@@ -1370,6 +1375,10 @@ void INI::parseMouseDefinition( INI* ini )
 	{
 		// parse the ini weapon definition
 		ini->initFromINI( TheMouse, TheMouseFieldParseTable );
+		// Override the retail INI's slow hover delay — tooltips should snap
+		// in quickly. Per-widget setCursorTooltip(text, delay) overrides
+		// still win because those feed m_tooltipDelay, not this baseline.
+		TheMouse->m_tooltipDelayTime = 50;
 	}
 }
 

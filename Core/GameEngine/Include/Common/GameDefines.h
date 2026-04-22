@@ -33,6 +33,16 @@
 #define RETAIL_COMPATIBLE_PATHFINDING_ALLOCATION (1)
 #endif
 
+// JPS+ additive jump-point successors in Pathfinder::examineNeighboringCells.
+// When 1, appendJumpPointSuccessors runs alongside the classic 8-neighbor
+// expand, pushing long-range jump targets onto the open heap. This can be a
+// net perf win on open maps but a loss on cluttered ones — every popped A*
+// cell pays 8 jump-table lookups + up to 8 ray-walks. Classic A* is
+// unchanged either way. Set to 0 to A/B-test pathfind cost on your maps.
+#ifndef ENABLE_JPS_SUCCESSORS
+#define ENABLE_JPS_SUCCESSORS (0)
+#endif
+
 #ifndef RETAIL_COMPATIBLE_CIRCLE_FILL_ALGORITHM
 #define RETAIL_COMPATIBLE_CIRCLE_FILL_ALGORITHM (1) // Use the original circle fill algorithm, which is more efficient but less accurate
 #endif

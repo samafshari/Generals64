@@ -249,57 +249,6 @@ Real W3DLaserDraw::getLaserTemplateWidth() const
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
-// Helper: build a camera-facing quad from two world-space points
-static uint32_t BuildLaserQuad(
-	const Render::Float3& cameraPos,
-	const Vector3& p0, const Vector3& p1,
-	float width, float r, float g, float b, float a,
-	float tileFactor, float uvOffset,
-	Render::Vertex3D* outVerts)
-{
-	float halfW = width * 0.5f;
-	Vector3 segDir(p1.X - p0.X, p1.Y - p0.Y, p1.Z - p0.Z);
-	float segLen = segDir.Length();
-	if (segLen < 0.001f) return 0;
-	segDir *= (1.0f / segLen);
-
-	Vector3 mid((p0.X + p1.X) * 0.5f, (p0.Y + p1.Y) * 0.5f, (p0.Z + p1.Z) * 0.5f);
-	Vector3 viewDir(mid.X - cameraPos.x, mid.Y - cameraPos.y, mid.Z - cameraPos.z);
-	float vLen = viewDir.Length();
-	if (vLen < 0.001f) return 0;
-	viewDir *= (1.0f / vLen);
-
-	Vector3 right;
-	Vector3::Cross_Product(segDir, viewDir, &right);
-	float rLen = right.Length();
-	if (rLen < 0.0001f) return 0;
-	right *= (halfW / rLen);
-
-	uint8_t cr = (uint8_t)(r * 255.0f > 255.0f ? 255 : r * 255.0f);
-	uint8_t cg = (uint8_t)(g * 255.0f > 255.0f ? 255 : g * 255.0f);
-	uint8_t cb = (uint8_t)(b * 255.0f > 255.0f ? 255 : b * 255.0f);
-	uint8_t ca = (uint8_t)(a * 255.0f > 255.0f ? 255 : a * 255.0f);
-	uint32_t color = (ca << 24) | (cb << 16) | (cg << 8) | cr;
-
-	float v0 = uvOffset;
-	float v1 = uvOffset + tileFactor;
-
-	// Two triangles forming a quad
-	auto setVert = [&](int idx, const Vector3& base, const Vector3& off, float u, float v) {
-		outVerts[idx].position = { base.X + off.X, base.Y + off.Y, base.Z + off.Z };
-		outVerts[idx].normal = { viewDir.X, viewDir.Y, viewDir.Z };
-		outVerts[idx].texcoord = { u, v };
-		outVerts[idx].color = color;
-	};
-	setVert(0, p0, right, 0, v0);
-	setVert(1, p0, Vector3(-right.X, -right.Y, -right.Z), 1, v0);
-	setVert(2, p1, right, 0, v1);
-	setVert(3, p1, right, 0, v1);
-	setVert(4, p0, Vector3(-right.X, -right.Y, -right.Z), 1, v0);
-	setVert(5, p1, Vector3(-right.X, -right.Y, -right.Z), 1, v1);
-	return 6;
-}
-
 void W3DLaserDraw::doDrawModule(const Matrix3D* transformMtx)
 {
 	const W3DLaserDrawModuleData *data = getW3DLaserDrawModuleData();
@@ -324,18 +273,6 @@ void W3DLaserDraw::doDrawModule(const Matrix3D* transformMtx)
 	float beamLen = sqrtf(dx*dx + dy*dy + dz*dz);
 	if (beamLen <= 0.001f) return;
 
-	auto& renderer = Render::Renderer::Instance();
-	const auto& frameData = renderer.GetFrameData();
-	Render::Float3 camPos = { frameData.cameraPos.x, frameData.cameraPos.y, frameData.cameraPos.z };
-
-	// White fallback texture
-	static Render::Texture s_whiteTex;
-	static bool s_whiteTexReady = false;
-	if (!s_whiteTexReady) {
-		const uint32_t white = 0xFFFFFFFF;
-		s_whiteTex.CreateFromRGBA(renderer.GetDevice(), &white, 1, 1, false);
-		s_whiteTexReady = true;
-	}
 	Real innerRed, innerGreen, innerBlue, innerAlpha;
 	GameGetColorComponentsReal( data->m_innerColor, &innerRed, &innerGreen, &innerBlue, &innerAlpha );
 
@@ -347,29 +284,26 @@ void W3DLaserDraw::doDrawModule(const Matrix3D* transformMtx)
 	}
 	if (innerAlpha < 0.5f) innerAlpha = 0.5f;
 
-	Render::Float4x4 identity = {
-		1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1
-	};
-
-	Vector3 p0(startPos->x, startPos->y, startPos->z);
-	Vector3 p1(endPos->x, endPos->y, endPos->z);
-
-	renderer.SetLaserGlow3DState();
-
 	float glowWidth = data->m_outerBeamWidth * update->getWidthScale() * 1.5f;
 	if (glowWidth < 0.75f) glowWidth = 0.75f;
 
-	Render::Vertex3D verts[6];
-	uint32_t vertCount = BuildLaserQuad(camPos, p0, p1,
-		glowWidth, innerRed, innerGreen, innerBlue, innerAlpha,
-		1.0f, 0.0f, verts);
-
-	if (vertCount > 0)
-	{
-		Render::VertexBuffer vb;
-		vb.Create(renderer.GetDevice(), verts, vertCount, sizeof(Render::Vertex3D));
-		renderer.Draw3DNoIndex(vb, vertCount, &s_whiteTex, identity, {1,1,1,1});
-	}
+	// Defer the submission to the Renderer's late-beam queue so the beam
+	// draws AFTER every opaque mesh. Drawing immediately here runs during
+	// per-drawable iteration, and a building iterated after the beam would
+	// otherwise cover it — its LessEqual depth test still passes against
+	// the z-buffer left by the terrain, even though the beam itself uses
+	// depth-disabled additive blending.
+	Render::Renderer::LateBeam beam;
+	beam.p0 = { startPos->x, startPos->y, startPos->z };
+	beam.p1 = { endPos->x,   endPos->y,   endPos->z   };
+	beam.width = glowWidth;
+	beam.r = innerRed;
+	beam.g = innerGreen;
+	beam.b = innerBlue;
+	beam.a = innerAlpha;
+	beam.tileFactor = 1.0f;
+	beam.uvOffset   = 0.0f;
+	Render::Renderer::Instance().QueueLateBeam(beam);
 }
 
 // ------------------------------------------------------------------------------------------------

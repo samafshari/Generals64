@@ -160,6 +160,7 @@ static const LookupListRec GameMessageMetaTypeNames[] =
 	{ "TOGGLE_CONTROL_BAR",												GameMessage::MSG_META_TOGGLE_CONTROL_BAR },
 	{ "TOGGLE_PLAYER_OBSERVER",										GameMessage::MSG_META_TOGGLE_PLAYER_OBSERVER },
 	{ "TOGGLE_PERF_METRICS",											GameMessage::MSG_META_TOGGLE_PERF_METRICS },
+	{ "TOGGLE_LOFI_MODE",													GameMessage::MSG_META_TOGGLE_LOFI_MODE },
 	{ "BEGIN_PATH_BUILD",													GameMessage::MSG_META_BEGIN_PATH_BUILD },
 	{ "END_PATH_BUILD",														GameMessage::MSG_META_END_PATH_BUILD },
 	{ "BEGIN_FORCEATTACK",												GameMessage::MSG_META_BEGIN_FORCEATTACK },
@@ -792,6 +793,19 @@ MetaMapRec *MetaMap::getMetaMapRec(GameMessage::Type t)
 		if (map->m_key == MK_NONE)
 		{
 			map->m_key = MK_F11;
+			map->m_transition = DOWN;
+			map->m_modState = NONE;
+			map->m_usableIn = COMMANDUSABLE_GAME;
+		}
+	}
+	{
+		// F8 toggles a lo-fi render mode: shadows, post-FX, volumetric
+		// particles, bloom, god-rays etc. are all forced off so we can
+		// bisect perf cliffs against the modern rendering stack.
+		MetaMapRec *map = TheMetaMap->getMetaMapRec(GameMessage::MSG_META_TOGGLE_LOFI_MODE);
+		if (map->m_key == MK_NONE)
+		{
+			map->m_key = MK_F8;
 			map->m_transition = DOWN;
 			map->m_modState = NONE;
 			map->m_usableIn = COMMANDUSABLE_GAME;

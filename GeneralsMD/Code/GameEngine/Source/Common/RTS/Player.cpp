@@ -2878,19 +2878,17 @@ static void countExisting( Object *obj, void *userData )
 }
 
 //=============================================================================
-// Make sure that building another of this unit/structure/object won't exceed MaxSimultaneousOfType().
-//
-// For templates whose cap is the per-game superweapon restriction (the LAN
-// options dropdown), the cap is enforced PER TEAM — i.e. all allied players
-// share one budget. The original ZH behavior was per-player, which made the
-// "limit superweapons" option much weaker on multi-player teams (a 4v4 with
-// limit=1 still gave each side 4 superweapons). For templates whose cap is
-// fixed in the INI (m_maxSimultaneousOfType set explicitly), behavior is
-// unchanged — that's where unit caps for things like Generals' Powers come
-// from and they're meant to be per-player.
+// Make sure that building another of this unit/structure/object won't exceed
+// MaxSimultaneousOfType(). Counted PER PLAYER, matching vanilla ZH semantics:
+// "superweapon limit 3" means each player may own up to 3, regardless of team
+// composition. A previous revision tried to tighten this to a per-team budget
+// (self + every ally share the cap), which surprised users who were teamed
+// with an AI — their ally's silo quietly ate into their own allowance and
+// turned "limit 3" into "limit 2 for me, 1 for my ally". The simplest answer,
+// and the one everyone who played the original expects, is to keep the count
+// scoped to `this` player only.
 Bool Player::canBuildMoreOfType( const ThingTemplate *whatToBuild ) const
 {
-  // make sure we're not maxed out for this type of unit.
   const UnsignedInt maxSimultaneousOfType = whatToBuild->getMaxSimultaneousOfType();
   if (maxSimultaneousOfType == 0)
   {
@@ -2915,32 +2913,7 @@ Bool Player::canBuildMoreOfType( const ThingTemplate *whatToBuild ) const
   // Remember: To ASSUME makes an ASS out of U and ME.
   typeCountData.checkProductionInterface = !whatToBuild->isKindOf( KINDOF_STRUCTURE );
 
-  if (whatToBuild->isMaxSimultaneousFromSuperweaponRestriction() && ThePlayerList)
-  {
-    // Per-team total: count this player + every ally. The team's combined
-    // owned-of-type must stay strictly below the configured cap. We treat
-    // self as included in "team", so we always cover at least the original
-    // per-player count even if the player is not on a team with anyone.
-    const Int playerCount = ThePlayerList->getPlayerCount();
-    for (Int i = 0; i < playerCount; ++i)
-    {
-      Player *other = ThePlayerList->getNthPlayer(i);
-      if (!other)
-        continue;
-      const Bool isSelf = (other == this);
-      const Bool isAlly = !isSelf
-        && other->getDefaultTeam() != nullptr
-        && getRelationship(other->getDefaultTeam()) == ALLIES;
-      if (!isSelf && !isAlly)
-        continue;
-      other->iterateObjects( countExisting, &typeCountData );
-    }
-  }
-  else
-  {
-    // Original per-player behavior for INI-fixed caps.
-    iterateObjects( countExisting, &typeCountData );
-  }
+  iterateObjects( countExisting, &typeCountData );
 
   if (typeCountData.count >= maxSimultaneousOfType)
     return false;

@@ -57,11 +57,13 @@
 #include "GameClient/MessageBox.h"
 
 
-#if defined(DEBUG_CRC)
+// Every-frame CRC broadcast. Was 100 in ReleasePublic, which gave a ~1.4 s
+// window between CRC samples and made desync bisection effectively impossible
+// (culprit could be any of ~100 frames of sim work). At 1, the desync.log
+// captures state within one frame of first divergence. Cost is one XferCRC
+// walk per frame — measured ~1-2 ms on a 500-unit match, acceptable until
+// the lockstep bug is identified. Override at runtime with -NetCRCInterval N.
 Int NET_CRC_INTERVAL = 1;
-#else
-Int NET_CRC_INTERVAL = 100;
-#endif
 
 // DEFINES ////////////////////////////////////////////////////////////////////
 
@@ -398,6 +400,69 @@ void Network::setSawCRCMismatch()
 	TheScriptEngine->startEndGameTimer();
 
 	TheRecorder->logCRCMismatch();
+
+	// -----------------------------------------------------------------
+	// Desync post-mortem — writes a self-contained file that survives
+	// ReleasePublic (the existing DEBUG_LOG stream is stripped). Captures
+	// frame, runahead, local slot, and every cached CRC so the user has
+	// something actionable without needing to query the relay DB.
+	// Unbuffered + fflush so nothing is lost if the dialog path later
+	// quits/aborts the process before buffers flush.
+	// -----------------------------------------------------------------
+	{
+		FILE* df = fopen("desync.log", "a");
+		if (df) {
+			setvbuf(df, nullptr, _IONBF, 0);
+			SYSTEMTIME st; GetLocalTime(&st);
+			fprintf(df, "\n=== DESYNC DETECTED %04u-%02u-%02u %02u:%02u:%02u ===\n",
+				st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+			const UnsignedInt curFrame = TheGameLogic ? TheGameLogic->getFrame() : 0u;
+			fprintf(df, "GameLogic frame   : %u\n", curFrame);
+			fprintf(df, "Runahead          : %d\n", m_runAhead);
+			fprintf(df, "Mismatched at     : frame %u (curFrame - runahead - 1)\n",
+				(curFrame > (UnsignedInt)(m_runAhead + 1)) ? (curFrame - m_runAhead - 1) : 0u);
+			fprintf(df, "FrameRate (netFps): %d\n", m_frameRate);
+			fprintf(df, "Local player ID   : %u\n", (unsigned)getLocalPlayerID());
+			fprintf(df, "Random seed CRC   : 0x%08X\n", GetGameLogicRandomSeedCRC());
+
+			// Dump every cached CRC (one per player slot that reported this frame)
+			// plus the list of connected players so slot → name is readable.
+			if (TheGameLogic) {
+				const std::map<Int, UnsignedInt>& cached = TheGameLogic->debug_getCachedCRCs();
+				fprintf(df, "\nPer-player CRCs at frame %u (count=%u):\n",
+					curFrame, (unsigned)cached.size());
+				for (std::map<Int, UnsignedInt>::const_iterator it = cached.begin();
+					 it != cached.end(); ++it) {
+					Player* pl = ThePlayerList ? ThePlayerList->getNthPlayer(it->first) : nullptr;
+					UnicodeString dispName;
+					if (pl) { dispName = pl->getPlayerDisplayName(); }
+					fprintf(df, "  slot %-2d  CRC=0x%08X  player=%ls\n",
+						it->first, it->second,
+						pl ? dispName.str() : L"<none>");
+				}
+			}
+
+			fprintf(df, "\nConnected network slots:\n");
+			for (Int i = 0; i < MAX_SLOTS; ++i) {
+				if (!isPlayerConnected(i)) continue;
+				UnicodeString name = getPlayerName(i);
+				fprintf(df, "  slot %-2d  name=%ls\n", i, name.str());
+			}
+
+			fprintf(df, "\nHint: query the relay DB with DesyncAnalyzer for frame-by-frame\n"
+			            "CRC history and the command stream leading up to this frame.\n");
+
+			// Per-object + per-subsystem CRC manifest. When the two peers'
+			// desync.log files are diffed, the first OBJ or SUB line whose crc
+			// differs is the exact state that first diverged — so the bug
+			// localizes to that Object's modules or to that subsystem.
+			if (TheGameLogic)
+				TheGameLogic->writeDesyncObjectManifest(df);
+
+			fflush(df);
+			fclose(df);
+		}
+	}
 
 	// dump GameLogic random seed
 	DEBUG_LOG(("Latest frame for mismatch = %d GameLogic frame = %d",

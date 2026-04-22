@@ -33,6 +33,7 @@
 #include "Common/Registry.h"
 #include "GameNetwork/LANAPI.h"
 #include "Common/CosmeticsCache.h"
+#include "GameLogic/GameTelemetry.h"
 #include "GameNetwork/networkutil.h"
 #include "Common/GlobalData.h"
 #include "Common/RandomValue.h"
@@ -379,23 +380,59 @@ Bool LANAPI::relaySendGamePacket(const UnsignedByte *data, Int len, UnsignedInt 
 	return relaySendAll(packet, packetSize);
 }
 
+// Pack the framed GAMERESULT bytes into <out>. Layout:
+//   [4:size][4:sessionID][1:type=5][json payload]
+// Pack vs send is split (vs. the older inline build-and-send) so the
+// GameTelemetry sender thread can build off the sim thread and then
+// hand the ready buffer to relaySendAll on its own thread.
+void LANAPI::packGameResultPacket(const char *json, int len, std::vector<UnsignedByte> &out)
+{
+	int packetSize = 4 + 4 + 1 + len;
+	out.resize((size_t)packetSize);
+	memcpy(out.data(),     &packetSize, 4);
+	memcpy(out.data() + 4, &m_sessionId, 4);
+	out[8] = (UnsignedByte)RELAY_TYPE_GAMERESULT;
+	if (len > 0)
+		memcpy(out.data() + 9, json, len);
+}
+
+// Pack the framed SCORE_EVENTS bytes into <out>. Same header shape as
+// packGameResultPacket; the caller owns the payload bytes verbatim.
+void LANAPI::packScoreEventPacket(const UnsignedByte *payload, Int len, std::vector<UnsignedByte> &out)
+{
+	int packetSize = 4 + 4 + 1 + len;
+	out.resize((size_t)packetSize);
+	memcpy(out.data(),     &packetSize, 4);
+	memcpy(out.data() + 4, &m_sessionId, 4);
+	out[8] = (UnsignedByte)RELAY_TYPE_SCORE_EVENTS;
+	if (len > 0)
+		memcpy(out.data() + 9, payload, len);
+}
+
 Bool LANAPI::relaySendGameResult(const char *json, int len)
 {
 	if (!m_relayConnected)
 		return FALSE;
 
-	// Packet: [4:size][4:sessionID][1:type=5][json payload]
-	int packetSize = 4 + 4 + 1 + len;
-	char packet[2048];
-	if (packetSize > (int)sizeof(packet))
+	// Wrapper kept for non-telemetry callers — packs + ships in one
+	// call. GameTelemetry bypasses this and calls packGameResultPacket
+	// + enqueues onto the sender thread instead.
+	std::vector<UnsignedByte> packet;
+	packGameResultPacket(json, len, packet);
+	return relaySendAll((const char *)packet.data(), (int)packet.size());
+}
+
+Bool LANAPI::relaySendScoreEvents(const UnsignedByte *buf, Int len)
+{
+	if (!m_relayConnected)
 		return FALSE;
 
-	memcpy(packet, &packetSize, 4);
-	memcpy(packet + 4, &m_sessionId, 4);
-	packet[8] = RELAY_TYPE_GAMERESULT;
-	memcpy(packet + 9, json, len);
-
-	return relaySendAll(packet, packetSize);
+	// Wrapper kept for any non-telemetry caller. GameTelemetry uses
+	// packScoreEventPacket + the sender-thread queue directly so
+	// relaySendAll is only ever invoked off the sim thread.
+	std::vector<UnsignedByte> packet;
+	packScoreEventPacket(buf, len, packet);
+	return relaySendAll((const char *)packet.data(), (int)packet.size());
 }
 
 Bool LANAPI::relayRecv()
@@ -561,6 +598,21 @@ Bool LANAPI::relayRecv()
 					c.shaderId    = shaderId;
 					CosmeticsCache::Instance().Set(userId, c);
 				}
+			}
+		}
+		else if (type == RELAY_TYPE_SESSION_ASSIGN)
+		{
+			// Fixed-width payload: 16 raw GUID bytes (no .NET
+			// little-endian reshuffle — byte order matches the
+			// textual "N" hex form). Hand straight to GameTelemetry
+			// which hex-encodes into m_sessionId and unblocks the
+			// SCORE_EVENTS / GAMERESULT sender paths. Silently drop
+			// malformed / short payloads; a bogus ASSIGN isn't worth
+			// tearing the connection down for.
+			if (payloadSize == 16 && TheGameTelemetry)
+			{
+				TheGameTelemetry->onRelayAssignSession(
+					(const UnsignedByte*)(m_relayRecvBuf + 9));
 			}
 		}
 

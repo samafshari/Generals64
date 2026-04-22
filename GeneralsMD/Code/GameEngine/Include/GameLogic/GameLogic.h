@@ -268,6 +268,23 @@ protected:
 	virtual void xfer( Xfer *xfer );
 	virtual void loadPostProcess();
 
+	// Diagnostic accessor — read-only view of the per-slot CRC table the
+	// GameLogic caches each frame. Used by Network::setSawCRCMismatch() to
+	// write a desync.log for ReleasePublic builds (where DEBUG_LOG is stripped).
+	// Public rather than protected so Network.cpp can read it without friendship.
+public:
+	const std::map<Int, UnsignedInt>& debug_getCachedCRCs() const { return m_cachedCRCs; }
+
+	// Walks every Object + each CRC'd subsystem (PartitionManager, PlayerList, TheAI)
+	// with a fresh XferCRC per entry and writes one line per entry to <f>. Called from
+	// Network::setSawCRCMismatch to produce a side-by-side diffable manifest so the
+	// first line that differs between two clients' desync.log files points directly
+	// at the diverging Object (or subsystem). Runs in whatever FP mode the caller is
+	// in; callers should setFPMode() first if they expect deterministic output, but
+	// since this is a post-divergence diagnostic that's not required.
+	void writeDesyncObjectManifest(FILE* f);
+protected:
+
 private:
 
 	void updateDisplayBusyState();
