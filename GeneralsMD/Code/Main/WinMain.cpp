@@ -1005,6 +1005,27 @@ static void CrashLogUnbuffered(FILE* f) {
 	if (f) setvbuf(f, nullptr, _IONBF, 0);
 }
 
+// Minimal init-stage tracer: when -headless is active, append one line per
+// init step to headless_trace.log in the cwd. Temporary diagnostic — after
+// the headless-init crash is identified and fixed this should be removed.
+// Thread-unsafe and deliberately so: a real lock here would obscure the
+// crash stage we're trying to localise.
+void HeadlessTrace(const char* stage) {
+	// Side-note: this needs no headless guard at the call site because the
+	// overhead is one fopen+fprintf+fclose per stage (~20 stages total). The
+	// function itself checks and bails early for non-headless runs.
+	extern bool g_headlessTraceEnabled;
+	if (!g_headlessTraceEnabled) return;
+	FILE* f = fopen("headless_trace.log", "a");
+	if (!f) return;
+	setvbuf(f, nullptr, _IONBF, 0);
+	SYSTEMTIME st; GetLocalTime(&st);
+	fprintf(f, "%02u:%02u:%02u.%03u  %s\n",
+		st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, stage);
+	fclose(f);
+}
+bool g_headlessTraceEnabled = false;
+
 // Forward declarations — the stack-overflow handler runs first in the
 // vectored chain but refers to globals and helpers defined later in the file.
 extern "C" {
@@ -1680,6 +1701,14 @@ static Int GameStartup()
 
 		CommandLine::parseCommandLineForStartup();
 
+		// Enable the headless-init tracer as soon as we know the flag.
+		if (TheGlobalData && TheGlobalData->m_headless) {
+			// Wipe any prior trace so each run starts fresh.
+			remove("headless_trace.log");
+			g_headlessTraceEnabled = true;
+			HeadlessTrace("after parseCommandLineForStartup");
+		}
+
 
 #ifdef RTS_ENABLE_CRASHDUMP
 		// Initialize minidump facilities - requires TheGlobalData so performed after parseCommandLineForStartup
@@ -1737,6 +1766,7 @@ static Int GameStartup()
 			}
 		}
 
+		HeadlessTrace("before VideoEnhancer check");
 #ifdef _WIN32
 		// First-run AI video enhancement (optional, requires Real-ESRGAN tools)
 		if (!TheGlobalData->m_headless)
@@ -1745,6 +1775,7 @@ static Int GameStartup()
 			VideoEnhancer_TryEnhance(ApplicationHInstance);
 		}
 #endif
+		HeadlessTrace("before initializeAppWindowsSDL");
 
 		// Create the application window
 #ifdef USE_SDL
@@ -1766,11 +1797,13 @@ static Int GameStartup()
 		}
 #endif
 
+		HeadlessTrace("before TheVersion new");
 		// Set up version info
 		TheVersion = NEW Version;
 		TheVersion->setVersion(VERSION_MAJOR, VERSION_MINOR, VERSION_BUILDNUM, VERSION_LOCALBUILDNUM,
 			AsciiString(VERSION_BUILDUSER), AsciiString(VERSION_BUILDLOC),
 			AsciiString(__TIME__), AsciiString(__DATE__));
+		HeadlessTrace("before ClientInstance::initialize");
 
 		if (!rts::ClientInstance::initialize())
 		{
@@ -1792,8 +1825,10 @@ static Int GameStartup()
 
 		DEBUG_LOG(("CRC message is %d", GameMessage::MSG_LOGIC_CRC));
 
+		HeadlessTrace("before GameMain()");
 		// run the game main loop
 		exitcode = GameMain();
+		HeadlessTrace("after GameMain() returned");
 
 		delete TheVersion;
 		TheVersion = nullptr;

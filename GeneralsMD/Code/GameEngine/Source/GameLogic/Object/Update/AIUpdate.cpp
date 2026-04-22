@@ -5022,7 +5022,18 @@ void AIUpdateInterface::crc( Xfer *x )
 void AIUpdateInterface::xfer( Xfer *xfer )
 {
   // version
-  const XferVersion currentVersion = 4;
+  // v5 folds the previously-commented-out "transient" fields into the xfer.
+  // Those fields — m_pathTimestamp, m_blockedFrames, m_curMaxBlockedSpeed,
+  // m_isBlocked, m_isBlockedAndStuck, m_isInUpdate, m_fixLocoInPostProcess —
+  // were left out "because paths get recomputed on load" (per the original
+  // jba comment). That logic is fine for save/load but WRONG for CRC: the
+  // fields steer live simulation (speed caps when blocked, re-path gating
+  // at `m_pathTimestamp > frame - 3`), mutate independently on each peer
+  // from local collision history, and were therefore a silent-state
+  // desync vector. Observed manifestation: owner-controlled and
+  // AI-controlled units drifting apart by one frame of velocity over
+  // ~100 frames, with AIUpdateInterface being the first CRC to diverge.
+  const XferVersion currentVersion = 5;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
  
@@ -5102,21 +5113,74 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 	xfer->xferCoord3D(&m_requestedDestination);
 	xfer->xferCoord3D(&m_requestedDestination2);
 
-	// Not needed - we will recompute paths on load.
-	//xfer->xferUnsignedInt(&m_pathTimestamp);		
-	
 	xfer->xferObjectID(&m_ignoreObstacleID);
 	xfer->xferReal(&m_pathExtraDistance);
 	xfer->xferICoord2D(&m_pathfindGoalCell);
 	xfer->xferICoord2D(&m_pathfindCurCell);
 
-	// Not needed - jba.
-	//Int					m_blockedFrames;						///< Number of frames we've been blocked.
-	//Real				m_curMaxBlockedSpeed;				///< Max speed we can have and not run into blocking things.
-	//Bool				m_isBlocked;
-	//Bool				m_isBlockedAndStuck;				///< True if we are stuck & need to recompute path.
-	//Bool				m_isInUpdate;
-	//Bool				m_fixLocoInPostProcess;
+	// v5: the fields below steer simulation — m_pathTimestamp gates
+	// repath attempts, m_blockedFrames + m_curMaxBlockedSpeed + m_isBlocked
+	// cap unit speed during collision-avoidance, and m_isInUpdate /
+	// m_fixLocoInPostProcess sequence the locomotor post-process step.
+	// They were previously excluded from xfer so save-game didn't carry
+	// them (paths recompute on load), but that exclusion ALSO removed
+	// them from the XferCRC walk. Two peers therefore maintained these
+	// fields independently from their own local collision-avoidance
+	// history, mutated speed/path decisions at slightly different times,
+	// and drifted the observable position of AI-controlled units. Classic
+	// silent-state lockstep desync; including them in the CRC closes the
+	// gap. m_isBlockedAndStuck is a derived bool (recomputed each frame)
+	// so we don't bother xfering it — but if it's ever latched, add it.
+	if (version >= 5)
+	{
+		// Transient path/collision state — drives speed caps, repath gating,
+		// and locomotor post-process sequencing every frame.
+		xfer->xferUnsignedInt(&m_pathTimestamp);
+		xfer->xferInt(&m_blockedFrames);
+		xfer->xferReal(&m_curMaxBlockedSpeed);
+		xfer->xferBool(&m_isBlocked);
+		xfer->xferBool(&m_isBlockedAndStuck);
+		xfer->xferBool(&m_isInUpdate);
+		xfer->xferBool(&m_fixLocoInPostProcess);
+
+		// Additional mutable state that was silently absent from the CRC
+		// walk. Each of these is written from the sim every frame or in
+		// response to commands/combat, so leaving them out lets the two
+		// peers drift independently. Confirmed mutation sites noted.
+		xfer->xferUser(&m_guardMode, sizeof(m_guardMode));   // set in setGuardMode (4062/4082/4107/4134)
+		xfer->xferReal(&m_bumpSpeedLimit);                    // set by collision avoidance (2227/2237)
+		xfer->xferInt(&m_nextGoalPathIndex);                  // path progression index
+		xfer->xferCoord3D(&m_locomotorGoalData);              // set when path changes (2336)
+		xfer->xferUser(&m_turretSyncFlag, sizeof(m_turretSyncFlag)); // multi-turret coordination
+		xfer->xferUnsignedInt(&m_nextMoodCheckTime);          // scan-mood cadence (4461/4472/4479/4574/4578)
+#ifdef ALLOW_DEMORALIZE
+		xfer->xferUnsignedInt(&m_demoralizedFramesLeft);      // demoralize weapon timer (4805)
+#endif
+#ifdef ALLOW_SURRENDER
+		xfer->xferUnsignedInt(&m_surrenderedFramesLeft);      // surrender timer (323/350)
+		xfer->xferInt(&m_surrenderedPlayerIndex);             // surrender target player
+#endif
+		xfer->xferObjectID(&m_crateCreated);                  // crate drop bookkeeping (271/905)
+		xfer->xferBool(&m_isMoving);                          // move-state bool (2047/2059)
+
+		// TurretAI state per slot. m_turretAI[i] holds angle/pitch/target/
+		// enabled/didFire for each turret — sim-visible state that drives
+		// weapon aim and fire timing. Previously not xfer'd at all, which
+		// coupled with TurretAI::crc() being empty meant turrets were
+		// completely invisible to the CRC. For turreted vehicles (combat
+		// bikes, gatling tanks, most armoured units) that was a primary
+		// silent-state desync. Slots are allocated at ctor based on module
+		// data, so both peers agree on presence — we still xfer a present-
+		// bool per slot so the layout is robust to future module-data
+		// changes that could make a slot conditionally null.
+		for (Int t = 0; t < MAX_TURRETS; ++t)
+		{
+			Bool hasTurret = (m_turretAI[t] != NULL);
+			xfer->xferBool(&hasTurret);
+			if (hasTurret && m_turretAI[t])
+				xfer->xferSnapshot(m_turretAI[t]);
+		}
+	}
 
 	xfer->xferUnsignedInt(&m_ignoreCollisionsUntil);
 	xfer->xferUnsignedInt(&m_queueForPathFrame);

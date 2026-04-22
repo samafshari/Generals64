@@ -4017,6 +4017,13 @@ void RenderWaypointsDX11(CameraClass* camera)
 	// and the buffer is refilled before every use.
 	static const int MAX_WAYPOINT_POINTS_TESS = MAX_WAYPOINT_POINTS * 8;
 	static Vector3 tessPoints[MAX_WAYPOINT_POINTS_TESS];
+	// Per-segment quad-strip verts. Using alloca here inside the
+	// per-selected-drawable loop below accumulates stack across iterations
+	// (alloca only frees on function return) — selecting many units with
+	// long paths blows the guard page via __chkstk. Hoist to a static
+	// worst-case buffer (same single-threaded render path as tessPoints).
+	static const uint32_t MAX_WAYPOINT_VERTS = (MAX_WAYPOINT_POINTS_TESS - 1) * 6;
+	static Render::Vertex3D waypointVerts[MAX_WAYPOINT_VERTS];
 
 	if (TheInGameUI->isInWaypointMode())
 	{
@@ -4054,8 +4061,7 @@ void RenderWaypointsDX11(CameraClass* camera)
 						unsigned int tessCount = TessellateWaypointsOverTerrain(
 							points, numPoints, tessPoints, MAX_WAYPOINT_POINTS_TESS);
 						// Build and render the line strip
-						const uint32_t maxVerts = (tessCount - 1) * 6;
-						Render::Vertex3D* verts = (Render::Vertex3D*)alloca(maxVerts * sizeof(Render::Vertex3D));
+						Render::Vertex3D* verts = waypointVerts;
 						uint32_t vertCount = BuildCameraFacingQuadStrip(
 							cameraPos, tessPoints, tessCount, 1.5f,
 							0.25f, 0.5f, 1.0f, 1.0f,  // blue color matching original
@@ -4147,8 +4153,7 @@ void RenderWaypointsDX11(CameraClass* camera)
 								{
 									unsigned int tessCount = TessellateWaypointsOverTerrain(
 										points, numPoints, tessPoints, MAX_WAYPOINT_POINTS_TESS);
-									const uint32_t maxVerts = (tessCount - 1) * 6;
-									Render::Vertex3D* verts = (Render::Vertex3D*)alloca(maxVerts * sizeof(Render::Vertex3D));
+									Render::Vertex3D* verts = waypointVerts;
 									uint32_t vertCount = BuildCameraFacingQuadStrip(
 										cameraPos, tessPoints, tessCount, 3.0f,
 										0.95f, 0.5f, 0.0f, 1.0f,  // orange color for enemy paths
@@ -4210,8 +4215,7 @@ void RenderWaypointsDX11(CameraClass* camera)
 			{
 				unsigned int tessCount = TessellateWaypointsOverTerrain(
 					points, numPoints, tessPoints, MAX_WAYPOINT_POINTS_TESS);
-				const uint32_t maxVerts = (tessCount - 1) * 6;
-				Render::Vertex3D* verts = (Render::Vertex3D*)alloca(maxVerts * sizeof(Render::Vertex3D));
+				Render::Vertex3D* verts = waypointVerts;
 				uint32_t vertCount = BuildCameraFacingQuadStrip(
 					cameraPos, tessPoints, tessCount, 1.5f,
 					0.25f, 0.5f, 1.0f, 1.0f,  // blue color matching original waypoint style

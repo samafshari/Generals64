@@ -120,6 +120,9 @@ DozerActionPickActionPosState::DozerActionPickActionPosState( StateMachine *mach
 // ------------------------------------------------------------------------------------------------
 void DozerActionPickActionPosState::crc( Xfer *xfer )
 {
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -263,6 +266,9 @@ EMPTY_DTOR(DozerActionMoveToActionPosState)
 // ------------------------------------------------------------------------------------------------
 void DozerActionMoveToActionPosState::crc( Xfer *xfer )
 {
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -409,6 +415,9 @@ EMPTY_DTOR(DozerActionDoActionState)
 // ------------------------------------------------------------------------------------------------
 void DozerActionDoActionState::crc( Xfer *xfer )
 {
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -829,6 +838,9 @@ DozerActionStateMachine::DozerActionStateMachine( Object *owner, DozerTask task 
 // ------------------------------------------------------------------------------------------------
 void DozerActionStateMachine::crc( Xfer *xfer )
 {
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -995,6 +1007,9 @@ EMPTY_DTOR(DozerPrimaryIdleState)
 // ------------------------------------------------------------------------------------------------
 void DozerPrimaryIdleState::crc( Xfer *xfer )
 {
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1183,6 +1198,9 @@ inline DozerActionState::~DozerActionState() { deleteInstance(m_actionMachine); 
 // ------------------------------------------------------------------------------------------------
 void DozerActionState::crc( Xfer *xfer )
 {
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -2462,6 +2480,9 @@ void DozerAIUpdate::crc( Xfer *xfer )
 {
 	// extend base class
 	AIUpdateInterface::crc(xfer);
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------

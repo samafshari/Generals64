@@ -132,6 +132,18 @@ private:
 
 	Bool         m_active;
 	AsciiString  m_sessionId;       ///< stamped at game start — becomes Game.ExternalKey
+
+	// Pre-arrival buffer for RELAY_TYPE_SESSION_ASSIGN. On the host,
+	// MSG_GAME_START is sent from lobby code and the relay's ASSIGN
+	// broadcast can round-trip back through LANAPI::update's 200 ms
+	// poll while the engine is still finishing its lobby→game
+	// transition — before GameLogic::startNewGame calls onGameStart.
+	// If we wrote straight into m_sessionId on receipt, onGameStart's
+	// clear() would then discard the very ID we just stashed.
+	// Instead, onRelayAssignSession deposits the hex form here (and
+	// into m_sessionId if we're already mid-game); onGameStart adopts
+	// from here and clears the pending buffer.
+	AsciiString  m_pendingAssignId;
 	Int          m_gameStartFrame;
 	Bool         m_resultSent;      ///< guards against double-send (win + exit in the same frame)
 	Int          m_lastSnapshotFrame; ///< frame of most recent onLogicFrame snapshot send; 0 = none yet
@@ -141,6 +153,24 @@ private:
 	// current into m_lastSent. Reset to zero in init/onGameStart/reset
 	// so a fresh game starts fresh.
 	PerPlayerScore m_lastSent;
+
+	// ── Per-minute FPS bucketing ──────────────────────────────────
+	//
+	// Each onLogicFrame samples TheDisplay->getCurrentFPS() and rolls
+	// the value into the in-flight bucket (sum / min / max / count).
+	// When the minute index (frame since match start / logic Hz / 60)
+	// advances, the previous bucket is packed + shipped through the
+	// relay's RELAY_TYPE_FPS_BUCKET channel and the accumulator
+	// resets. Feeds the per-map playability benchmarking query.
+	//
+	// Fixed-point FPS × 100 on the wire keeps the packet integer
+	// while preserving two decimals (58.73 fps → 5873).
+	void shipAndResetFpsBucket();
+	Int  m_fpsMinuteIndex;   ///< 0-based minute currently being aggregated
+	Int  m_fpsSampleCount;   ///< samples folded into the in-flight bucket
+	Int  m_fpsSumX100;       ///< running sum of FPS×100 across the minute
+	Int  m_fpsMinX100;       ///< running min across the minute
+	Int  m_fpsMaxX100;       ///< running max across the minute
 
 	// Sender-thread state. m_outboxQueue is owned by the mutex; the
 	// CV is notified on every enqueue and on shutdown. The atomic

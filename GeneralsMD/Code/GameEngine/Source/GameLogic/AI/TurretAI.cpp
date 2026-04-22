@@ -335,6 +335,17 @@ TurretAI::~TurretAI()
 // ------------------------------------------------------------------------------------------------
 void TurretAI::crc( Xfer *xfer )
 {
+	// Turret state (angle, pitch, target, enabled, didFire, etc.) IS sim-
+	// visible — it drives which direction the unit aims, who it shoots,
+	// and when it fires — yet the crc was empty. Turret state therefore
+	// mutated independently on each peer and produced the attack-move
+	// desync pattern repeatedly observed (AI-controlled units picking
+	// slightly different targets, unit orientation drifting, then
+	// positions drifting as the locomotor chases the diverging aim).
+	// Route crc through xfer so the CRC walk picks up every field the
+	// save-game code already serialises. Matches the pattern used by
+	// AIUpdateInterface::crc and most other UpdateModule crc overrides.
+	this->xfer(xfer);
 }  // end crc
 
 // ------------------------------------------------------------------------------------------------

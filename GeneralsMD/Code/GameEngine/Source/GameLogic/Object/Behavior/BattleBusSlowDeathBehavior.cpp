@@ -281,6 +281,9 @@ void BattleBusSlowDeathBehavior::crc( Xfer *xfer )
 	// extend base class
 	SlowDeathBehavior::crc( xfer );
 
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------

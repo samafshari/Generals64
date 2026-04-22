@@ -41,6 +41,9 @@ void BodyModule::crc( Xfer *xfer )
 	// call base class
 	BehaviorModule::crc( xfer );
 
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------

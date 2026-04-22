@@ -440,6 +440,9 @@ protected:
 	// match. See RelayServer.cs::BuildSessionAssignPacket +
 	// GameTelemetry::onRelayAssignSession.
 	static const char RELAY_TYPE_SESSION_ASSIGN = 10;
+	// Per-minute FPS aggregate shipped by GameTelemetry at every
+	// minute roll. Fixed 37-byte payload; see packFpsBucketPacket.
+	static const char RELAY_TYPE_FPS_BUCKET = 11;
 
 public:
 	Bool relayConnect();
@@ -467,6 +470,7 @@ public:
 	// the pack+send shape for any non-telemetry caller).
 	void packGameResultPacket(const char *json, int len, std::vector<UnsignedByte> &out);
 	void packScoreEventPacket(const UnsignedByte *payload, Int len, std::vector<UnsignedByte> &out);
+	void packFpsBucketPacket (const UnsignedByte *payload, Int len, std::vector<UnsignedByte> &out);
 
 protected:
 	void sendMessage(LANMessage *msg, UnsignedInt ip = 0); // Convenience function

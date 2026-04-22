@@ -365,8 +365,12 @@ Bool GameEngine::isGameHalted()
 /** -----------------------------------------------------------------------------------------------
  * Initialize the game engine by initializing the GameLogic and GameClient.
  */
+// Temp diagnostic — stage tracer for headless init crash hunt.
+extern void HeadlessTrace(const char* stage);
+
 void GameEngine::init()
 {
+	HeadlessTrace("GameEngine::init entered");
 	try {
 		//create an INI object to use for loading stuff
 		INI ini;
@@ -574,9 +578,13 @@ void GameEngine::init()
 	#endif/////////////////////////////////////////////////////////////////////////////////////////////
 
 
+		HeadlessTrace("before TheFunctionLexicon");
 		initSubsystem(TheFunctionLexicon,"TheFunctionLexicon", createFunctionLexicon(), nullptr);
+		HeadlessTrace("before TheModuleFactory");
 		initSubsystem(TheModuleFactory,"TheModuleFactory", createModuleFactory(), nullptr);
+		HeadlessTrace("before TheMessageStream");
 		initSubsystem(TheMessageStream,"TheMessageStream", createMessageStream(), nullptr);
+		HeadlessTrace("after TheMessageStream");
 		initSubsystem(TheSidesList,"TheSidesList", MSGNEW("GameEngineSubsystem") SidesList(), nullptr);
 		initSubsystem(TheCaveSystem,"TheCaveSystem", MSGNEW("GameEngineSubsystem") CaveSystem(), nullptr);
 		initSubsystem(TheRankInfoStore,"TheRankInfoStore", MSGNEW("GameEngineSubsystem") RankInfoStore(), &xferCRC, nullptr, "Data\\INI\\Rank");
@@ -610,7 +618,9 @@ void GameEngine::init()
 
 
 
+		HeadlessTrace("before TheThingFactory");
 		initSubsystem(TheThingFactory,"TheThingFactory", createThingFactory(), &xferCRC, "Data\\INI\\Default\\Object", "Data\\INI\\Object");
+		HeadlessTrace("after TheThingFactory");
 
 	#ifdef DUMP_PERF_STATS///////////////////////////////////////////////////////////////////////////
 	GetPrecisionTimer(&endTime64);//////////////////////////////////////////////////////////////////
@@ -620,8 +630,11 @@ void GameEngine::init()
 	#endif/////////////////////////////////////////////////////////////////////////////////////////////
 
 
+		HeadlessTrace("before TheUpgradeCenter");
 		initSubsystem(TheUpgradeCenter,"TheUpgradeCenter", MSGNEW("GameEngineSubsystem") UpgradeCenter, &xferCRC, "Data\\INI\\Default\\Upgrade", "Data\\INI\\Upgrade");
+		HeadlessTrace("before TheGameClient (createGameClient + init)");
 		initSubsystem(TheGameClient,"TheGameClient", createGameClient(), nullptr);
+		HeadlessTrace("after TheGameClient");
 
 
 	#ifdef DUMP_PERF_STATS///////////////////////////////////////////////////////////////////////////
@@ -632,18 +645,27 @@ void GameEngine::init()
 	#endif/////////////////////////////////////////////////////////////////////////////////////////////
 
 
+		HeadlessTrace("before TheAI");
 		initSubsystem(TheAI,"TheAI", MSGNEW("GameEngineSubsystem") AI(), &xferCRC,  "Data\\INI\\Default\\AIData", "Data\\INI\\AIData");
+		HeadlessTrace("before TheGameLogic");
 		initSubsystem(TheGameLogic,"TheGameLogic", createGameLogic(), nullptr);
+		HeadlessTrace("before TheTeamFactory");
 		initSubsystem(TheTeamFactory,"TheTeamFactory", MSGNEW("GameEngineSubsystem") TeamFactory(), nullptr);
+		HeadlessTrace("before TheCrateSystem");
 		initSubsystem(TheCrateSystem,"TheCrateSystem", MSGNEW("GameEngineSubsystem") CrateSystem(), &xferCRC, "Data\\INI\\Default\\Crate", "Data\\INI\\Crate");
+		HeadlessTrace("before ThePlayerList");
 		initSubsystem(ThePlayerList,"ThePlayerList", MSGNEW("GameEngineSubsystem") PlayerList(), nullptr);
+		HeadlessTrace("before TheRecorder");
 		initSubsystem(TheRecorder,"TheRecorder", createRecorder(), nullptr);
+		HeadlessTrace("before TheRadar");
 		{
 			Radar* radar = createRadar();
 			if (!radar) radar = NEW RadarDummy;
 			initSubsystem(TheRadar,"TheRadar", radar, nullptr);
 		}
+		HeadlessTrace("before TheVictoryConditions");
 		initSubsystem(TheVictoryConditions,"TheVictoryConditions", createVictoryConditions(), nullptr);
+		HeadlessTrace("after TheVictoryConditions");
 
 
 

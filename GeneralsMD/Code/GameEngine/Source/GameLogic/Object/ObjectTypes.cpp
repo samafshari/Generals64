@@ -135,6 +135,12 @@ Bool ObjectTypes::canBuildAny(Player *player)
 void ObjectTypes::crc(Xfer *xfer)
 {
 
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this the module was invisible to lockstep.
+	// Explicit this-> needed because the parameter name `xfer` shadows
+	// the member function `xfer` and there is no base-class crc call above
+	// that would pin class-scope lookup for the compiler.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------

@@ -409,6 +409,19 @@ void LANAPI::packScoreEventPacket(const UnsignedByte *payload, Int len, std::vec
 		memcpy(out.data() + 9, payload, len);
 }
 
+// Pack the framed RELAY_TYPE_FPS_BUCKET bytes. Same header shape as
+// packScoreEventPacket; only the type byte and payload length differ.
+void LANAPI::packFpsBucketPacket(const UnsignedByte *payload, Int len, std::vector<UnsignedByte> &out)
+{
+	int packetSize = 4 + 4 + 1 + len;
+	out.resize((size_t)packetSize);
+	memcpy(out.data(),     &packetSize, 4);
+	memcpy(out.data() + 4, &m_sessionId, 4);
+	out[8] = (UnsignedByte)RELAY_TYPE_FPS_BUCKET;
+	if (len > 0)
+		memcpy(out.data() + 9, payload, len);
+}
+
 Bool LANAPI::relaySendGameResult(const char *json, int len)
 {
 	if (!m_relayConnected)

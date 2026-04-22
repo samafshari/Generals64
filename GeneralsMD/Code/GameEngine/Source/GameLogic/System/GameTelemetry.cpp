@@ -15,6 +15,7 @@
 #include "Common/ScoreKeeper.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
+#include "GameClient/Display.h"
 #include "GameLogic/GameLogic.h"
 #include "GameNetwork/GameInfo.h"
 #include "GameNetwork/LANAPI.h"
@@ -195,10 +196,16 @@ void GameTelemetry::init()
 {
 	m_active = FALSE;
 	m_sessionId.clear();
+	m_pendingAssignId.clear();
 	m_gameStartFrame = 0;
 	m_resultSent = FALSE;
 	m_lastSnapshotFrame = 0;
 	memset(&m_lastSent, 0, sizeof(m_lastSent));
+	m_fpsMinuteIndex = 0;
+	m_fpsSampleCount = 0;
+	m_fpsSumX100 = 0;
+	m_fpsMinX100 = 0;
+	m_fpsMaxX100 = 0;
 	// Note: sender thread is NOT started here — onGameStart owns that
 	// so a sandbox/campaign run with no auth token never spawns it.
 }
@@ -207,10 +214,16 @@ void GameTelemetry::reset()
 {
 	m_active = FALSE;
 	m_sessionId.clear();
+	m_pendingAssignId.clear();
 	m_gameStartFrame = 0;
 	m_resultSent = FALSE;
 	m_lastSnapshotFrame = 0;
 	memset(&m_lastSent, 0, sizeof(m_lastSent));
+	m_fpsMinuteIndex = 0;
+	m_fpsSampleCount = 0;
+	m_fpsSumX100 = 0;
+	m_fpsMinX100 = 0;
+	m_fpsMaxX100 = 0;
 
 	// Stop the sender thread cleanly. The worker loop drains any
 	// remaining queued packets (waiting on the CV under the same
@@ -304,12 +317,32 @@ void GameTelemetry::onGameStart()
 	// — which means the first ~logic frames after start are silent
 	// even if the normal SCORE_EVENTS cadence triggers. That gap is
 	// bounded by the arm-timeout in onLogicFrame.
-	m_sessionId.clear();
+	//
+	// Race on the host: MSG_GAME_START is sent from lobby code and
+	// the ASSIGN broadcast can round-trip back while the engine is
+	// still finishing its lobby→game transition — arriving BEFORE
+	// we get here. onRelayAssignSession catches that case by stashing
+	// into m_pendingAssignId, and we adopt it below.
+	if (!m_pendingAssignId.isEmpty())
+	{
+		m_sessionId = m_pendingAssignId;
+		m_pendingAssignId.clear();
+		telemetryTrace("  adopted pre-arrival ASSIGN sid=%s", m_sessionId.str());
+	}
+	else
+	{
+		m_sessionId.clear();
+	}
 	m_active = TRUE;
 	m_resultSent = FALSE;
 	m_gameStartFrame = TheGameLogic ? (Int)TheGameLogic->getFrame() : 0;
 	m_lastSnapshotFrame = 0;
 	memset(&m_lastSent, 0, sizeof(m_lastSent));
+	m_fpsMinuteIndex = 0;
+	m_fpsSampleCount = 0;
+	m_fpsSumX100 = 0;
+	m_fpsMinX100 = 0;
+	m_fpsMaxX100 = 0;
 
 	// Spin up the telemetry sender thread now that we're armed and
 	// need to ship packets the moment the relay hands us a session
@@ -347,11 +380,22 @@ void GameTelemetry::onRelayAssignSession(const UnsignedByte bytes[16])
 	}
 	sid[32] = '\0';
 
-	// Idempotent for the same ID; a duplicate ASSIGN (reconnect, relay
-	// retry) just no-ops. A different ID arriving while we already
-	// have one means the relay moved us to a new match without a
-	// clean onGameStart — log + adopt; better to ship under the new
-	// ID than to silently keep talking about the old one.
+	// Pre-arrival case: ASSIGN beat onGameStart (see the note in
+	// onGameStart for the host-side race). Stash in the pending
+	// buffer and return — onGameStart will adopt.
+	if (!m_active)
+	{
+		m_pendingAssignId.set(sid);
+		telemetryTrace("onRelayAssignSession: pre-arrival; buffered sid=%s (m_active=0)", sid);
+		return;
+	}
+
+	// Already armed. Idempotent for the same ID; a duplicate ASSIGN
+	// (reconnect, relay retry) just no-ops. A different ID arriving
+	// while we already have one means the relay moved us to a new
+	// match without a clean onGameStart — log + adopt; better to
+	// ship under the new ID than to silently keep talking about the
+	// old one.
 	if (!m_sessionId.isEmpty())
 	{
 		if (m_sessionId.compare(sid) == 0)
@@ -365,7 +409,7 @@ void GameTelemetry::onRelayAssignSession(const UnsignedByte bytes[16])
 		memset(&m_lastSent, 0, sizeof(m_lastSent));
 	}
 	m_sessionId.set(sid);
-	telemetryTrace("onRelayAssignSession: sid=%s m_active=%d", sid, (int)m_active);
+	telemetryTrace("onRelayAssignSession: sid=%s m_active=1", sid);
 }
 
 // Note: PerPlayerScore lives in GameTelemetry.h so the watermark
@@ -441,6 +485,13 @@ void GameTelemetry::sendGameResultToRelay(Int localResult)
 	// m_lastSent still covers exactly the unreported tail.
 	m_lastSnapshotFrame = 0;
 	onLogicFrame();
+
+	// Also flush the in-flight FPS bucket — same rationale as the
+	// SCORE_EVENTS terminal flush above. A game that ends inside its
+	// first minute otherwise loses its sole bucket entirely. The
+	// onLogicFrame call above already folded the final sample into
+	// m_fps*; this just packs + ships what's there.
+	shipAndResetFpsBucket();
 
 	AsciiString json;
 	json.concat("{\"ExternalKey\":\"");
@@ -611,7 +662,7 @@ void GameTelemetry::onGameExited()      { sendGameResultToRelay(RES_DISCONNECT);
 
 // ── Periodic score events ─────────────────────────────────────────
 //
-// Wire format (75-byte payload behind the standard
+// Wire format (69-byte payload behind the standard
 // [4:size][4:sessionID][1:type=9] relay header):
 //
 //    [16] session GUID, raw bytes (not hex) — derived from m_sessionId
@@ -628,6 +679,10 @@ void GameTelemetry::onGameExited()      { sendGameResultToRelay(RES_DISCONNECT);
 //    [ 4] buildingsKilledAI                           DELTA
 //    [ 4] moneyEarned                                 DELTA
 //    [ 4] moneySpent                                  DELTA
+//
+// Total: 16 + 1 + 4 + 8 + 10*4 = 69 bytes. Must match the
+// ScoreEventPayloadSize constant in RelayServer.cs — drift = every
+// packet dropped as "bad payload size".
 //
 // All ten score fields are DELTAS = current ScoreKeeper total minus the
 // totals we shipped on the previous send (m_lastSent). The server
@@ -749,10 +804,13 @@ void GameTelemetry::onLogicFrame()
 		std::chrono::duration_cast<std::chrono::milliseconds>(
 			std::chrono::system_clock::now().time_since_epoch()).count();
 
-	// Pack the 75-byte payload. Little-endian on x86/x64 — memcpy of
+	// Pack the 69-byte payload. Little-endian on x86/x64 — memcpy of
 	// a native Int32/Int64 matches what BitConverter.ToInt32 /
-	// BitConverter.ToInt64 read on the other end.
-	UnsignedByte buf[75];
+	// BitConverter.ToInt64 read on the other end. Size must match the
+	// ScoreEventPayloadSize constant on RelayServer.cs — a mismatch
+	// trips the "bad payload size" drop in RelayServer.cs and every
+	// batch is silently discarded.
+	UnsignedByte buf[69];
 	Int off = 0;
 	memcpy(buf + off, sidBytes, 16); off += 16;
 	buf[off++] = (UnsignedByte)(localPlayer->getPlayerIndex() & 0xFF);
@@ -803,4 +861,106 @@ void GameTelemetry::onLogicFrame()
 	// further changes will surface in the next batch's delta.
 	m_lastSent = current;
 	m_lastSnapshotFrame = currentFrame;
+
+	// ── Per-minute FPS bucketing ──────────────────────────────
+	//
+	// Sample once per score-event tick (~3s cadence). Enough
+	// density for a minute-level aggregate without paying the
+	// cost of a TheDisplay call every single logic frame. A
+	// 60s minute collects ~20 samples, more than enough for the
+	// avg/min/max triple to be meaningful.
+	if (TheDisplay)
+	{
+		const Real nowFps = TheDisplay->getCurrentFPS();
+		const Int  nowX100 = (Int)(nowFps * 100.0f + 0.5f);
+		// Minute index is game-time-based, not wall-clock — a
+		// paused game doesn't roll the bucket forward, which
+		// matches how every other per-match aggregate on this
+		// class is framed (SCORE_EVENTS carries the logic
+		// frame, not UTC ms, for the same reason).
+		const Int elapsedFrames = currentFrame - m_gameStartFrame;
+		const Int minuteIndex   = elapsedFrames / (30 * 60);
+
+		if (m_fpsSampleCount == 0)
+		{
+			// First sample of a fresh bucket.
+			m_fpsMinuteIndex = minuteIndex;
+			m_fpsMinX100 = nowX100;
+			m_fpsMaxX100 = nowX100;
+		}
+		else if (minuteIndex != m_fpsMinuteIndex)
+		{
+			// Minute rolled. Ship the closed bucket, then seed
+			// the new one with this tick's sample so the first
+			// 60s are never lost.
+			shipAndResetFpsBucket();
+			m_fpsMinuteIndex = minuteIndex;
+			m_fpsMinX100 = nowX100;
+			m_fpsMaxX100 = nowX100;
+		}
+
+		m_fpsSumX100    += nowX100;
+		m_fpsSampleCount++;
+		if (nowX100 < m_fpsMinX100) m_fpsMinX100 = nowX100;
+		if (nowX100 > m_fpsMaxX100) m_fpsMaxX100 = nowX100;
+	}
+}
+
+// Pack + ship the in-flight FPS bucket and zero the accumulator.
+// Called on every minute roll from onLogicFrame, and on the terminal
+// flush path from sendGameResultToRelay so a short game that ends
+// inside its first minute still credits a bucket.
+void GameTelemetry::shipAndResetFpsBucket()
+{
+	if (m_fpsSampleCount <= 0 || m_sessionId.isEmpty() || !TheLAN)
+	{
+		// Zero state — nothing to send; reset anyway.
+		m_fpsSampleCount = 0;
+		m_fpsSumX100 = 0;
+		m_fpsMinX100 = 0;
+		m_fpsMaxX100 = 0;
+		return;
+	}
+
+	UnsignedByte sidBytes[16];
+	if (!sessionIdToBytes(m_sessionId, sidBytes))
+	{
+		m_fpsSampleCount = 0;
+		m_fpsSumX100 = 0;
+		m_fpsMinX100 = 0;
+		m_fpsMaxX100 = 0;
+		return;
+	}
+
+	const Int avgX100 = m_fpsSumX100 / m_fpsSampleCount;
+
+	// Fixed 37-byte payload: matches RELAY_TYPE_FPS_BUCKET handler
+	// in RelayServer.cs (16 GUID + 1 slot + 4 minute + 4 count +
+	// 4 avg + 4 min + 4 max).
+	UnsignedByte buf[37];
+	Int off = 0;
+	memcpy(buf + off, sidBytes, 16); off += 16;
+	Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
+	buf[off++] = localPlayer ? (UnsignedByte)(localPlayer->getPlayerIndex() & 0xFF) : 0;
+	Int minute = m_fpsMinuteIndex;
+	memcpy(buf + off, &minute,          4); off += 4;
+	memcpy(buf + off, &m_fpsSampleCount,4); off += 4;
+	memcpy(buf + off, &avgX100,         4); off += 4;
+	memcpy(buf + off, &m_fpsMinX100,    4); off += 4;
+	memcpy(buf + off, &m_fpsMaxX100,    4); off += 4;
+
+	std::vector<UnsignedByte> packet;
+	TheLAN->packFpsBucketPacket(buf, (Int)sizeof(buf), packet);
+	if (!packet.empty())
+	{
+		enqueuePacket(packet.data(), (Int)packet.size());
+		telemetryTrace("enqueued FPS_BUCKET minute=%d n=%d avg=%d min=%d max=%d (x100)",
+		               m_fpsMinuteIndex, m_fpsSampleCount,
+		               avgX100, m_fpsMinX100, m_fpsMaxX100);
+	}
+
+	m_fpsSampleCount = 0;
+	m_fpsSumX100 = 0;
+	m_fpsMinX100 = 0;
+	m_fpsMaxX100 = 0;
 }

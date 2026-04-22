@@ -30,7 +30,11 @@
 
 #include "Common/FramePacer.h"
 #include "Common/GameEngine.h"
+#include "Common/GlobalData.h"
 #include "Common/ReplaySimulation.h"
+
+// Temp diagnostic: trace headless init stages.
+extern void HeadlessTrace(const char* stage);
 
 
 /**
@@ -38,21 +42,29 @@
  */
 Int GameMain()
 {
+	HeadlessTrace("GameMain entered");
 	int exitcode = 0;
 	// initialize the game engine using factory function
 	TheFramePacer = new FramePacer();
 	TheFramePacer->enableFramesPerSecondLimit(TRUE);
+	HeadlessTrace("before CreateGameEngine");
 	TheGameEngine = CreateGameEngine();
+	HeadlessTrace("before TheGameEngine->init");
 	TheGameEngine->init();
+	HeadlessTrace("after TheGameEngine->init");
 
 	if (!TheGlobalData->m_simulateReplays.empty())
 	{
+		HeadlessTrace("before simulateReplays");
 		exitcode = ReplaySimulation::simulateReplays(TheGlobalData->m_simulateReplays, TheGlobalData->m_simulateReplayJobs);
+		HeadlessTrace("after simulateReplays");
 	}
 	else
 	{
+		HeadlessTrace("before execute (non-replay)");
 		// run it
 		TheGameEngine->execute();
+		HeadlessTrace("after execute (non-replay)");
 	}
 
 	// since execute() returned, we are exiting the game

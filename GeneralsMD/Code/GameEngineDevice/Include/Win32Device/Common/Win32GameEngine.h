@@ -13,6 +13,7 @@
 #pragma once
 
 #include "Common/GameEngine.h"
+#include "Common/GlobalData.h"   // TheGlobalData for headless check in createRadar
 #include "GameLogic/GameLogic.h"
 #include "GameNetwork/NetworkInterface.h"
 #include "MilesAudioDevice/MilesAudioManager.h"
@@ -82,6 +83,17 @@ inline AudioManager *Win32GameEngine::createAudioManager() { return NEW SDLAudio
 inline AudioManager *Win32GameEngine::createAudioManager() { return NEW MilesAudioManager; }
 #endif
 
-inline Radar *Win32GameEngine::createRadar() { return CreateD3D11Radar(); }
+// Headless builds skip W3DDisplay's D3D11 renderer init (see W3DDisplay::init
+// — early returns when m_headless). Returning a D3D11Radar here would try to
+// GetDevice() on an uninitialised renderer and NULL-deref in the radar's
+// CreateDynamic texture call. Return nullptr so the GameEngine::init fallback
+// (`if (!radar) radar = NEW RadarDummy`) kicks in — the dummy is a no-op
+// implementation that's safe for headless replay verification.
+inline Radar *Win32GameEngine::createRadar()
+{
+	if (TheGlobalData && TheGlobalData->m_headless)
+		return nullptr;
+	return CreateD3D11Radar();
+}
 inline WebBrowser *Win32GameEngine::createWebBrowser() { return nullptr; }
 inline ParticleSystemManager* Win32GameEngine::createParticleSystemManager() { return NEW D3D11ParticleSystemManager; }
