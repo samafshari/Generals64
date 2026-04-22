@@ -5153,11 +5153,33 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 		xfer->xferCoord3D(&m_locomotorGoalData);              // set when path changes (2336)
 		xfer->xferUser(&m_turretSyncFlag, sizeof(m_turretSyncFlag)); // multi-turret coordination
 		xfer->xferUnsignedInt(&m_nextMoodCheckTime);          // scan-mood cadence (4461/4472/4479/4574/4578)
+#ifdef ALLOW_DEMORALIZE
 		xfer->xferUnsignedInt(&m_demoralizedFramesLeft);      // demoralize weapon timer (4805)
+#endif
+#ifdef ALLOW_SURRENDER
 		xfer->xferUnsignedInt(&m_surrenderedFramesLeft);      // surrender timer (323/350)
 		xfer->xferInt(&m_surrenderedPlayerIndex);             // surrender target player
+#endif
 		xfer->xferObjectID(&m_crateCreated);                  // crate drop bookkeeping (271/905)
 		xfer->xferBool(&m_isMoving);                          // move-state bool (2047/2059)
+
+		// TurretAI state per slot. m_turretAI[i] holds angle/pitch/target/
+		// enabled/didFire for each turret — sim-visible state that drives
+		// weapon aim and fire timing. Previously not xfer'd at all, which
+		// coupled with TurretAI::crc() being empty meant turrets were
+		// completely invisible to the CRC. For turreted vehicles (combat
+		// bikes, gatling tanks, most armoured units) that was a primary
+		// silent-state desync. Slots are allocated at ctor based on module
+		// data, so both peers agree on presence — we still xfer a present-
+		// bool per slot so the layout is robust to future module-data
+		// changes that could make a slot conditionally null.
+		for (Int t = 0; t < MAX_TURRETS; ++t)
+		{
+			Bool hasTurret = (m_turretAI[t] != NULL);
+			xfer->xferBool(&hasTurret);
+			if (hasTurret && m_turretAI[t])
+				xfer->xferSnapshot(m_turretAI[t]);
+		}
 	}
 
 	xfer->xferUnsignedInt(&m_ignoreCollisionsUntil);

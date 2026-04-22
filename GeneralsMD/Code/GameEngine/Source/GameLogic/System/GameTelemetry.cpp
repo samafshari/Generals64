@@ -639,7 +639,7 @@ void GameTelemetry::onGameExited()      { sendGameResultToRelay(RES_DISCONNECT);
 
 // ── Periodic score events ─────────────────────────────────────────
 //
-// Wire format (75-byte payload behind the standard
+// Wire format (69-byte payload behind the standard
 // [4:size][4:sessionID][1:type=9] relay header):
 //
 //    [16] session GUID, raw bytes (not hex) — derived from m_sessionId
@@ -656,6 +656,10 @@ void GameTelemetry::onGameExited()      { sendGameResultToRelay(RES_DISCONNECT);
 //    [ 4] buildingsKilledAI                           DELTA
 //    [ 4] moneyEarned                                 DELTA
 //    [ 4] moneySpent                                  DELTA
+//
+// Total: 16 + 1 + 4 + 8 + 10*4 = 69 bytes. Must match the
+// ScoreEventPayloadSize constant in RelayServer.cs — drift = every
+// packet dropped as "bad payload size".
 //
 // All ten score fields are DELTAS = current ScoreKeeper total minus the
 // totals we shipped on the previous send (m_lastSent). The server
@@ -777,10 +781,13 @@ void GameTelemetry::onLogicFrame()
 		std::chrono::duration_cast<std::chrono::milliseconds>(
 			std::chrono::system_clock::now().time_since_epoch()).count();
 
-	// Pack the 75-byte payload. Little-endian on x86/x64 — memcpy of
+	// Pack the 69-byte payload. Little-endian on x86/x64 — memcpy of
 	// a native Int32/Int64 matches what BitConverter.ToInt32 /
-	// BitConverter.ToInt64 read on the other end.
-	UnsignedByte buf[75];
+	// BitConverter.ToInt64 read on the other end. Size must match the
+	// ScoreEventPayloadSize constant on RelayServer.cs — a mismatch
+	// trips the "bad payload size" drop in RelayServer.cs and every
+	// batch is silently discarded.
+	UnsignedByte buf[69];
 	Int off = 0;
 	memcpy(buf + off, sidBytes, 16); off += 16;
 	buf[off++] = (UnsignedByte)(localPlayer->getPlayerIndex() & 0xFF);
