@@ -60,10 +60,23 @@ public:
 	virtual void reset() override;
 	virtual void update() override {}
 
-	/// Generates the session GUID used as Game.ExternalKey on the server
-	/// and flips the collector into the active state. Called from
-	/// GameLogic::startNewGame; no-op without an auth token.
+	/// Arms the collector and zeroes watermarks; the session GUID is
+	/// assigned separately by onRelayAssignSession when the relay's
+	/// RELAY_TYPE_SESSION_ASSIGN packet lands (usually within one TCP
+	/// round-trip of MSG_GAME_START). Until then m_sessionId is empty
+	/// and every sender path short-circuits — that's intentional: the
+	/// relay is the sole source of the match ID so every peer agrees.
+	/// Called from GameLogic::startNewGame; no-op without an auth token.
 	void onGameStart();
+
+	/// Handler for the relay's RELAY_TYPE_SESSION_ASSIGN packet. Takes
+	/// the 16 raw GUID bytes (same order GuidBytesMatchNFormat expects
+	/// on the way back), hex-encodes to the 32-char form used for
+	/// Game.ExternalKey, and stores on m_sessionId. Telemetry begins
+	/// firing on the next logic frame. Idempotent for the same GUID;
+	/// logs + ignores on mismatch in case of a late / duplicate assign
+	/// from a prior game.
+	void onRelayAssignSession(const UnsignedByte bytes[16]);
 
 	/// Terminal hooks — each builds and ships a full GAMERESULT through
 	/// the relay. Exited reports the local player as Disconnect; the

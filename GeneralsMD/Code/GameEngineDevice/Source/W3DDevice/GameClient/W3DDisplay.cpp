@@ -131,7 +131,7 @@ bool g_debugDisableHeatDistortion = false;    // Heat distortion FX — ON by de
 // restore the un-augmented look. Threshold still wants tuning: a single
 // tank-shell impact buddy-light currently clears the bar.
 bool g_debugDisableShockwave = false;         // Shockwave distortion rings — ON by default
-bool g_debugDisableGodRays = false;           // Volumetric light shafts — ON by default
+bool g_debugDisableGodRays = true;            // Volumetric light shafts — OFF by default (produced a white-rect overlay when the composite ran with a 1×1 scene placeholder; re-enable from Inspector → Visual FX once the underlying RT bind path is fixed)
 // "Cinematic" post-processing was previously ON by default and produced
 // the classic teal-shadow / orange-highlight Hollywood blockbuster look.
 // Generals 2003 had no such grading, and the warm highlight tint pushed

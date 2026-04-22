@@ -33,6 +33,7 @@
 #include "Common/Registry.h"
 #include "GameNetwork/LANAPI.h"
 #include "Common/CosmeticsCache.h"
+#include "GameLogic/GameTelemetry.h"
 #include "GameNetwork/networkutil.h"
 #include "Common/GlobalData.h"
 #include "Common/RandomValue.h"
@@ -597,6 +598,21 @@ Bool LANAPI::relayRecv()
 					c.shaderId    = shaderId;
 					CosmeticsCache::Instance().Set(userId, c);
 				}
+			}
+		}
+		else if (type == RELAY_TYPE_SESSION_ASSIGN)
+		{
+			// Fixed-width payload: 16 raw GUID bytes (no .NET
+			// little-endian reshuffle — byte order matches the
+			// textual "N" hex form). Hand straight to GameTelemetry
+			// which hex-encodes into m_sessionId and unblocks the
+			// SCORE_EVENTS / GAMERESULT sender paths. Silently drop
+			// malformed / short payloads; a bogus ASSIGN isn't worth
+			// tearing the connection down for.
+			if (payloadSize == 16 && TheGameTelemetry)
+			{
+				TheGameTelemetry->onRelayAssignSession(
+					(const UnsignedByte*)(m_relayRecvBuf + 9));
 			}
 		}
 

@@ -21,7 +21,6 @@
 #include "GameNetwork/LANAPICallbacks.h"  // TheLAN
 
 #include <chrono>
-#include <objbase.h>   // CoCreateGuid
 #include <shlobj.h>    // SHGetFolderPathA for %LOCALAPPDATA%
 #include <cstdio>
 #include <cstdarg>
@@ -297,40 +296,76 @@ void GameTelemetry::onGameStart()
 		return;
 	}
 
-	GUID guid{};
-	if (FAILED(CoCreateGuid(&guid)))
-	{
-		telemetryTrace("  bail: CoCreateGuid failed");
-		return;
-	}
-	char sid[33];
-	_snprintf(sid, sizeof(sid),
-	          "%08x%04x%04x%02x%02x%02x%02x%02x%02x%02x%02x",
-	          guid.Data1, guid.Data2, guid.Data3,
-	          guid.Data4[0], guid.Data4[1], guid.Data4[2], guid.Data4[3],
-	          guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
-	sid[32] = '\0';
-	m_sessionId.set(sid);
+	// Session ID is assigned by the relay, not minted locally. The
+	// relay broadcasts RELAY_TYPE_SESSION_ASSIGN to every peer on the
+	// filter code right after it handles MSG_GAME_START; that packet
+	// lands in onRelayAssignSession which sets m_sessionId. Until
+	// then, every sender path short-circuits on m_sessionId.isEmpty()
+	// — which means the first ~logic frames after start are silent
+	// even if the normal SCORE_EVENTS cadence triggers. That gap is
+	// bounded by the arm-timeout in onLogicFrame.
+	m_sessionId.clear();
 	m_active = TRUE;
 	m_resultSent = FALSE;
 	m_gameStartFrame = TheGameLogic ? (Int)TheGameLogic->getFrame() : 0;
 	m_lastSnapshotFrame = 0;
 	memset(&m_lastSent, 0, sizeof(m_lastSent));
 
-	// Spin up the telemetry sender thread now that we've actually
-	// minted a session and need to ship packets. Guard against a
-	// stale thread from a previous game leaking through (reset()
-	// should have torn it down, but be defensive).
+	// Spin up the telemetry sender thread now that we're armed and
+	// need to ship packets the moment the relay hands us a session
+	// ID. Guard against a stale thread from a previous game leaking
+	// through (reset() should have torn it down, but be defensive).
 	if (!m_senderThread.joinable())
 	{
 		m_senderShouldStop.store(false);
 		m_senderThread = std::thread(&GameTelemetry::senderThreadFn, this);
-		telemetryTrace("  armed: m_active=TRUE sid=%s sender thread spawned", sid);
+		telemetryTrace("  armed: m_active=TRUE awaiting RELAY_TYPE_SESSION_ASSIGN; sender thread spawned");
 	}
 	else
 	{
-		telemetryTrace("  armed: m_active=TRUE sid=%s (sender thread already running)", sid);
+		telemetryTrace("  armed: m_active=TRUE awaiting RELAY_TYPE_SESSION_ASSIGN (sender thread already running)");
 	}
+}
+
+void GameTelemetry::onRelayAssignSession(const UnsignedByte bytes[16])
+{
+	if (!bytes)
+		return;
+
+	// Hex-encode the 16 bytes in the same order GuidBytesMatchNFormat
+	// expects on the way back (textual "N" format — bytes serialised
+	// in order, no .NET little-endian reshuffle). The engine then
+	// embeds the raw bytes right back into every SCORE_EVENTS payload
+	// and the hex form into GAMERESULT's ExternalKey; a round trip
+	// through both hex + bytes must match what the relay sent.
+	char sid[33];
+	static const char kHex[] = "0123456789abcdef";
+	for (Int i = 0; i < 16; ++i)
+	{
+		sid[i * 2]     = kHex[(bytes[i] >> 4) & 0x0F];
+		sid[i * 2 + 1] = kHex[ bytes[i]       & 0x0F];
+	}
+	sid[32] = '\0';
+
+	// Idempotent for the same ID; a duplicate ASSIGN (reconnect, relay
+	// retry) just no-ops. A different ID arriving while we already
+	// have one means the relay moved us to a new match without a
+	// clean onGameStart — log + adopt; better to ship under the new
+	// ID than to silently keep talking about the old one.
+	if (!m_sessionId.isEmpty())
+	{
+		if (m_sessionId.compare(sid) == 0)
+		{
+			telemetryTrace("onRelayAssignSession: duplicate assign for %s ignored", sid);
+			return;
+		}
+		telemetryTrace("onRelayAssignSession: session changed %s -> %s; resetting watermark",
+		               m_sessionId.str(), sid);
+		m_lastSnapshotFrame = 0;
+		memset(&m_lastSent, 0, sizeof(m_lastSent));
+	}
+	m_sessionId.set(sid);
+	telemetryTrace("onRelayAssignSession: sid=%s m_active=%d", sid, (int)m_active);
 }
 
 // Note: PerPlayerScore lives in GameTelemetry.h so the watermark
@@ -419,8 +454,14 @@ void GameTelemetry::sendGameResultToRelay(Int localResult)
 		json.concat("\"");
 	}
 
-	char buf[128];
-	sprintf(buf, ",\"DurationSeconds\":%d,\"Players\":[", gameDurationSeconds());
+	// Sized to hold the longest sprintf below — the 11-field per-player
+	// score block is ~260 chars (184 literal + up to 11 × 11-char ints).
+	// Plus headroom for future fields. This buffer is reused inside the
+	// player loop; a 128-byte buffer corrupted the stack canary and crashed
+	// at function return with __report_gsfailure (observed Apr 2026).
+	char buf[512];
+	_snprintf(buf, sizeof(buf), ",\"DurationSeconds\":%d,\"Players\":[", gameDurationSeconds());
+	buf[sizeof(buf) - 1] = '\0';
 	json.concat(buf);
 
 	// Walk every real player in the match (skip civilian / creeps / observer
@@ -511,11 +552,12 @@ void GameTelemetry::sendGameResultToRelay(Int localResult)
 		}
 		if (teamNum >= 0)
 		{
-			sprintf(buf, ",\"Team\":%d", teamNum);
+			_snprintf(buf, sizeof(buf), ",\"Team\":%d", teamNum);
+			buf[sizeof(buf) - 1] = '\0';
 			json.concat(buf);
 		}
 
-		sprintf(buf,
+		_snprintf(buf, sizeof(buf),
 		        ",\"Result\":%d"
 		        ",\"UnitsBuilt\":%d,\"UnitsLost\":%d"
 		        ",\"UnitsKilledHuman\":%d,\"UnitsKilledAI\":%d"
@@ -528,6 +570,7 @@ void GameTelemetry::sendGameResultToRelay(Int localResult)
 		        s.buildingsBuilt, s.buildingsLost,
 		        s.buildingsKilledHuman, s.buildingsKilledAI,
 		        s.moneyEarned, s.moneySpent);
+		buf[sizeof(buf) - 1] = '\0';
 		json.concat(buf);
 	}
 
@@ -640,12 +683,33 @@ void GameTelemetry::onLogicFrame()
 		s_tracedOnce = TRUE;
 	}
 
-	if (!m_active || m_resultSent || m_sessionId.isEmpty())
+	if (!m_active || m_resultSent)
 		return;
 	if (!TheLAN || !TheGameLogic || !ThePlayerList)
 		return;
 
 	const Int currentFrame = (Int)TheGameLogic->getFrame();
+
+	// Arm-timeout: if we've been waiting for the relay's
+	// RELAY_TYPE_SESSION_ASSIGN for more than 10 seconds of logic
+	// frames, give up rather than sit armed-but-silent for the rest
+	// of the match. Happens when the relay is down or the ASSIGN
+	// broadcast was dropped at the TCP layer. Clearing m_active stops
+	// sendGameResultToRelay too — without a session ID there's
+	// nothing the server can do with a GAMERESULT anyway.
+	static const Int ASSIGN_TIMEOUT_FRAMES = 300; // ~10 s at 30 Hz
+	if (m_sessionId.isEmpty())
+	{
+		if ((currentFrame - m_gameStartFrame) > ASSIGN_TIMEOUT_FRAMES)
+		{
+			telemetryTrace("onLogicFrame: RELAY_TYPE_SESSION_ASSIGN never arrived "
+			               "(%d frames since start); disarming telemetry",
+			               currentFrame - m_gameStartFrame);
+			m_active = FALSE;
+		}
+		return;
+	}
+
 	if (m_lastSnapshotFrame != 0
 	    && (currentFrame - m_lastSnapshotFrame) < SCORE_EVENTS_EVERY_FRAMES)
 		return;

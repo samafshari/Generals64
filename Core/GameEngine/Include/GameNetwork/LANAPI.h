@@ -432,6 +432,14 @@ protected:
 	// byte stays at 9 for wire compatibility; the semantics changed
 	// from "totals snapshot" to "deltas-since-last-event".
 	static const char RELAY_TYPE_SCORE_EVENTS = 9;
+	// Server → client assignment of the match's canonical session GUID.
+	// Relay mints one GUID per MSG_GAME_START and broadcasts it to every
+	// authenticated peer on the host's filter code (host included); the
+	// engine stores the 16 raw bytes as m_sessionId and uses them
+	// verbatim on every outgoing SCORE_EVENTS / GAMERESULT for the
+	// match. See RelayServer.cs::BuildSessionAssignPacket +
+	// GameTelemetry::onRelayAssignSession.
+	static const char RELAY_TYPE_SESSION_ASSIGN = 10;
 
 public:
 	Bool relayConnect();

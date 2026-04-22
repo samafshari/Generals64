@@ -3444,7 +3444,13 @@ int RenderShadowCastersDX11(CameraClass* camera)
 		Drawable* draw = TheGameClient->getDrawableList();
 		while (draw)
 		{
-			if (!draw->isDrawableEffectivelyHidden())
+			// Shroud gate mirrors w3dview_renderDrawable: a unit hidden under
+			// fog of war must NOT contribute to the shadow map, otherwise its
+			// silhouette projects onto visible terrain and reveals a position
+			// the player isn't supposed to see. getFullyObscuredByShroud()
+			// reads the cached flag set by GameClient::update() so the
+			// 2-second "last known position" grace period is respected too.
+			if (!draw->isDrawableEffectivelyHidden() && !draw->getFullyObscuredByShroud())
 			{
 				for (DrawModule** dm = draw->getDrawModules(); *dm; ++dm)
 				{
