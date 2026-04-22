@@ -231,7 +231,21 @@ WindowMsgHandledType GadgetTextEntryInput( GameWindow *window, UnsignedInt msg,
 				// --------------------------------------------------------------------
 				case KEY_BACKSPACE:
 
-					if( BitIsSet( mData2, KEY_STATE_DOWN ) )
+					// Filter OS-generated autorepeat — delete exactly one
+					// character per physical key press, no more. Without
+					// this the SDL key-repeat stream (every ~33ms on
+					// default Windows settings) would fire one delete per
+					// repeat event while backspace is held, which read as
+					// "text is being erased from time to time" whenever
+					// key state got stuck mid-press or the first repeat
+					// clipped into a fast tap. The hotkey path in
+					// MetaEvent.cpp applies the same filter for the same
+					// reason. Holding backspace to rapid-delete is NOT
+					// supported by this fix; if users need that we can
+					// add a proper debounce timer later that gates
+					// autorepeats behind a 400ms hold interval.
+					if( BitIsSet( mData2, KEY_STATE_DOWN )
+					 && !BitIsSet( mData2, KEY_STATE_AUTOREPEAT ) )
 					{
 						// if conCharPos != 0 this will fall through to next case.
 						// it should be noted that conCharPos can only != 0 in Jap & Kor

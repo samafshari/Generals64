@@ -7,6 +7,7 @@
 #endif
 #include <cstring>
 #include <algorithm>
+#include <cmath>
 
 // Helper: compile shader from HLSL source (D3D11 runtime), or load
 // precompiled SPIR-V bytecode (Vulkan). Returns true if either succeeds.
@@ -834,6 +835,58 @@ void Renderer::FlushDebugDraw()
 void Renderer::Resize(int width, int height)
 {
     m_device.Resize(width, height);
+
+#ifdef BUILD_WITH_D3D11
+    // Every full-screen-sized off-screen RT must be released so the
+    // next frame re-creates it at the new backbuffer extent. If left
+    // at the previous size the HUD composite (and anything that blits
+    // through m_sceneRT / post-FX) renders into a canvas whose aspect
+    // no longer matches the swap chain — visible corruption around
+    // the radar, money panel, and command bar.
+    m_sceneRT.Destroy(m_device);
+    m_preParticleRT.Destroy(m_device);
+    m_fsrRT.Destroy(m_device);
+    m_pingRT.Destroy(m_device);
+    m_pongRT.Destroy(m_device);
+    m_bloomExtractRT.Destroy(m_device);
+    m_bloomBlurRT.Destroy(m_device);
+    m_particleExtractRT.Destroy(m_device);
+    m_particleBlurRT.Destroy(m_device);
+    m_volHalfRT.Destroy(m_device);
+    m_godRayExtractRT.Destroy(m_device);
+    m_godRayBlurRT.Destroy(m_device);
+
+    // Editor-mode game viewport target is sized to the backbuffer at
+    // creation time; drop it so EnableGameViewport lazily rebuilds it.
+    if (m_gameViewportRT.IsValid())
+    {
+        m_device.SetRedirectRTV(nullptr);
+        m_gameViewportRT.Destroy(m_device);
+        m_gameViewportEnabled = false;
+    }
+
+    // Renderer-side shadow state for the 2D batcher tracks bindings
+    // that Device::Resize just cleared; reset to match or the first
+    // post-resize Flush2DBatch will skip the texture bind thinking
+    // it's still current.
+    m_lastBoundTexture = nullptr;
+    m_current2DTexture = nullptr;
+    m_2DVertexCount = 0;
+    m_objectCBBound = false;
+    m_in2DMode = false;
+
+    // The post-FX stages gate RT re-creation on cached "last-used extent"
+    // fields rather than asking the Texture itself. After Destroy the
+    // texture is invalid but the cached extent still matches the new
+    // backbuffer (if the resize happens to map to the same width/height
+    // the stage saw last frame), so the gate would skip recreation and
+    // bind an empty texture. Clear the cached extents to force a rebuild.
+    m_fsrRTWidth = 0;
+    m_fsrRTHeight = 0;
+    m_particleFxWidth = 0;
+    m_particleFxHeight = 0;
+    m_particleFxReady = false;
+#endif
 }
 
 void Renderer::SetCamera(const Render::Float4x4& view, const Render::Float4x4& projection, const Render::Float3& cameraPos)
@@ -2155,8 +2208,114 @@ void Renderer::SetLaserGlow3DState()
     m_shader3DLaserGlow.Bind(m_device);
     m_rasterNoCullLaserBias.Bind(m_device);
     m_blendAdditive.Bind(m_device);
-    m_depthNoWrite.Bind(m_device);
+    // Laser beams (particle cannon, unit weapons, tracers, ropes,
+    // projectile streams) are additive glow effects that should
+    // composite on top of the scene rather than be sliced by every
+    // piece of geometry between the camera and the beam — e.g. the
+    // particle cannon's orbital beam passes through buildings by
+    // design, and LessEqual depth-testing against the scene z-buffer
+    // was clipping it away. Depth-disabled + additive is the standard
+    // "always-visible glow" pipeline state.
+    m_depthDisabled.Bind(m_device);
     m_samplerLinear.BindPS(m_device, 0);
+}
+
+void Renderer::QueueLateBeam(const LateBeam& beam)
+{
+    m_lateBeams.push_back(beam);
+}
+
+void Renderer::FlushLateBeams()
+{
+    if (m_lateBeams.empty())
+        return;
+
+    if (!m_lateBeamWhiteReady)
+    {
+        const uint32_t white = 0xFFFFFFFFu;
+        m_lateBeamWhiteTex.CreateFromRGBA(m_device, &white, 1, 1, false);
+        m_lateBeamWhiteReady = true;
+    }
+
+    SetLaserGlow3DState();
+
+    const Render::Float3 camPos = { m_frameData.cameraPos.x, m_frameData.cameraPos.y, m_frameData.cameraPos.z };
+    const Render::Float4x4 identity = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    };
+
+    for (const LateBeam& beam : m_lateBeams)
+    {
+        const float dx = beam.p1.x - beam.p0.x;
+        const float dy = beam.p1.y - beam.p0.y;
+        const float dz = beam.p1.z - beam.p0.z;
+        const float segLen = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (segLen < 0.001f) continue;
+        const float invSegLen = 1.0f / segLen;
+        const Render::Float3 segDir = { dx * invSegLen, dy * invSegLen, dz * invSegLen };
+
+        const Render::Float3 mid = {
+            (beam.p0.x + beam.p1.x) * 0.5f,
+            (beam.p0.y + beam.p1.y) * 0.5f,
+            (beam.p0.z + beam.p1.z) * 0.5f,
+        };
+        const Render::Float3 viewRaw = { mid.x - camPos.x, mid.y - camPos.y, mid.z - camPos.z };
+        const float vLen = std::sqrt(viewRaw.x * viewRaw.x + viewRaw.y * viewRaw.y + viewRaw.z * viewRaw.z);
+        if (vLen < 0.001f) continue;
+        const float invVLen = 1.0f / vLen;
+        const Render::Float3 viewDir = { viewRaw.x * invVLen, viewRaw.y * invVLen, viewRaw.z * invVLen };
+
+        // right = cross(segDir, viewDir), normalized and scaled by halfWidth.
+        Render::Float3 right = {
+            segDir.y * viewDir.z - segDir.z * viewDir.y,
+            segDir.z * viewDir.x - segDir.x * viewDir.z,
+            segDir.x * viewDir.y - segDir.y * viewDir.x,
+        };
+        const float rLen = std::sqrt(right.x * right.x + right.y * right.y + right.z * right.z);
+        if (rLen < 0.0001f) continue;
+        const float halfW = beam.width * 0.5f;
+        const float rScale = halfW / rLen;
+        right = { right.x * rScale, right.y * rScale, right.z * rScale };
+
+        auto clamp255 = [](float f) -> uint8_t {
+            float v = f * 255.0f;
+            if (v < 0.0f) v = 0.0f;
+            if (v > 255.0f) v = 255.0f;
+            return (uint8_t)v;
+        };
+        const uint32_t color =
+            (uint32_t(clamp255(beam.a)) << 24) |
+            (uint32_t(clamp255(beam.b)) << 16) |
+            (uint32_t(clamp255(beam.g)) << 8)  |
+            (uint32_t(clamp255(beam.r)));
+
+        const float v0 = beam.uvOffset;
+        const float v1 = beam.uvOffset + beam.tileFactor;
+
+        Render::Vertex3D verts[6];
+        auto setVert = [&](int idx, const Render::Float3& base, const Render::Float3& off, float u, float v) {
+            verts[idx].position = { base.x + off.x, base.y + off.y, base.z + off.z };
+            verts[idx].normal   = { viewDir.x, viewDir.y, viewDir.z };
+            verts[idx].texcoord = { u, v };
+            verts[idx].color    = color;
+        };
+        const Render::Float3 negRight = { -right.x, -right.y, -right.z };
+        setVert(0, beam.p0, right,    0, v0);
+        setVert(1, beam.p0, negRight, 1, v0);
+        setVert(2, beam.p1, right,    0, v1);
+        setVert(3, beam.p1, right,    0, v1);
+        setVert(4, beam.p0, negRight, 1, v0);
+        setVert(5, beam.p1, negRight, 1, v1);
+
+        Render::VertexBuffer vb;
+        vb.Create(m_device, verts, 6, sizeof(Render::Vertex3D));
+        Draw3DNoIndex(vb, 6, &m_lateBeamWhiteTex, identity, { 1, 1, 1, 1 });
+    }
+
+    m_lateBeams.clear();
 }
 
 void Renderer::ApplyShockwave()

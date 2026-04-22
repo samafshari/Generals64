@@ -158,6 +158,10 @@ extern "C" int SafeCanCallUpdate(const void* modulePtr)
 #include "Common/XferDeepCRC.h"
 #include "Common/GameSpyMiscPreferences.h"
 
+#if !defined(_M_IX86)
+#include <xmmintrin.h>   // _mm_setcsr for setFPMode on x64
+#endif
+
 #include "GameClient/ControlBar.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/GameClient.h"
@@ -179,6 +183,7 @@ extern "C" int SafeCanCallUpdate(const void* modulePtr)
 #include "GameLogic/CrateSystem.h"
 #include "GameLogic/FPUControl.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/GameTelemetry.h"
 #include "GameLogic/Locomotor.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/AIUpdate.h"
@@ -324,7 +329,26 @@ void setFPMode()
 	newVal = (newVal & ~_MCW_PC) | (_PC_24   & _MCW_PC);
 	_controlfp(newVal, _MCW_PC | _MCW_RC);
 #else
-	// x64: SSE2 always uses fixed precision — nothing to configure
+	// x64: the sim uses SSE2, so the x87 control word is irrelevant — but
+	// SSE2 has its own control register (MXCSR) that determines rounding
+	// mode, flush-to-zero, denormals-are-zero, and exception masks. MXCSR
+	// is NOT automatically uniform between processes: DirectX drivers,
+	// audio/input DLLs, and other libraries routinely flip FTZ/DAZ to win
+	// perf on their own math paths, and whatever state they leave behind
+	// is what the sim thread inherits. Two clients that loaded slightly
+	// different driver stacks can therefore compute bit-differing results
+	// from identical inputs — exactly the signature of a single-unit
+	// sub-voxel position drift observed in lockstep CRC mismatches.
+	//
+	// Pin MXCSR to a known state every setFPMode() call so the sim runs
+	// in the same FP environment across peers regardless of what other
+	// code ran first. Matches the *intent* of the x87 block above.
+	//   - rounding:           round-to-nearest-even (_MM_ROUND_NEAREST)
+	//   - flush-to-zero:      OFF  (denormals preserved, matches x87 semantics)
+	//   - denormals-as-zero:  OFF  (same)
+	//   - all exception masks ON   (no SIGFPE from denormal/underflow/etc.)
+	unsigned int mxcsr = 0x1F80u;   // default MXCSR: masks on, FTZ/DAZ off, round-nearest
+	_mm_setcsr(mxcsr);
 #endif
 }
 
@@ -1305,6 +1329,19 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	}
 
 	m_rankLevelLimit = 1000;	// this is reset every game.
+
+	// Flip the telemetry collector on so the periodic onLogicFrame hook
+	// starts shipping SCORE_EVENTS + the engine can emit a terminal
+	// GAMERESULT when the match ends. No-op in sandbox/campaign runs
+	// (onGameStart bails when g_authGameToken is empty). Placed AFTER
+	// the load-screen/early-return path above so it only fires on the
+	// "real" init pass; the first pass returns early before any game
+	// state is ready and there's nothing useful for the collector to
+	// do there. Without this call, m_active stays FALSE and the entire
+	// engine→relay telemetry stream is silently suppressed — exactly
+	// the bug that left the dashboard at zero across every sim-only stat.
+	if (TheGameTelemetry)
+		TheGameTelemetry->onGameStart();
 
 	//
 	// only reset the next object ID allocator counter when we're not loading a save game.
@@ -4211,6 +4248,17 @@ void GameLogic::update()
 
 
 
+	// Periodic GameTelemetry score events batch. Fires once every
+	// SCORE_EVENTS_EVERY_FRAMES (~3s @ 30Hz); no-ops between sends
+	// and for sandbox / non-authed sessions. Cheap to call every frame —
+	// the guard is a couple of pointer + int checks before any work.
+	// Network I/O for the batch happens on GameTelemetry's sender
+	// thread; this call returns as soon as the bytes are queued.
+	if (TheGameTelemetry)
+	{
+		TheGameTelemetry->onLogicFrame();
+	}
+
 	// increment world time
 	if (!m_startNewGame)
 	{
@@ -4549,6 +4597,83 @@ UnsignedInt GameLogic::getCRC( Int mode, AsciiString deepCRCFileName )
 		CRCGEN_LOG(("CRC for frame %d is 0x%8.8X", m_frame, theCRC));
 	}
 	return theCRC;
+}
+
+// ------------------------------------------------------------------------------------------------
+// Post-mortem desync manifest. Mirrors the walk done by getCRC(CRC_RECALC)
+// but writes a per-entry CRC into <f> instead of accumulating a single
+// world CRC. Designed to be diffed byte-for-byte against the same file
+// from the other peer: the first entry whose CRC differs is the first
+// diverging piece of state.
+//
+// Entry lines:
+//   OBJ  id=XXXX template=NAME owner=P pos=(x,y,z) hp=H crc=0x........
+//   SUB  PartitionManager                              crc=0x........
+//   SUB  ThePlayerList                                 crc=0x........
+//   SUB  TheAI                                         crc=0x........
+//
+// Each fresh XferCRC is opened with a deterministic identifier so the
+// object's reported CRC is independent of others. That makes the diff
+// robust even if the set of alive objects differs between clients (the
+// classic symptom of "unit destroyed on one peer but not the other").
+void GameLogic::writeDesyncObjectManifest(FILE* f)
+{
+	if (!f) return;
+	setFPMode();
+
+	fprintf(f, "\n--- Desync object manifest (frame %u) ---\n", (unsigned)m_frame);
+	fprintf(f, "Diff this section against the peer's desync.log; the first\n"
+	           "OBJ or SUB line with a different crc is the diverging state.\n\n");
+
+	// Per-object CRCs. Same iteration order as getCRC() uses.
+	unsigned objCount = 0;
+	for (Object* obj = m_objList; obj; obj = obj->getNextObject())
+	{
+		XferCRC xfer;
+		xfer.open(AsciiString("objCRC"));
+		xfer.xferSnapshot(obj);
+		xfer.close();
+		const UnsignedInt c = xfer.getCRC();
+
+		const char* tmplName = obj->getTemplate() ? obj->getTemplate()->getName().str() : "<null>";
+		const Coord3D* p = obj->getPosition();
+		const Player* pl = obj->getControllingPlayer();
+		const Int owner = pl ? pl->getPlayerIndex() : -1;
+		fprintf(f, "OBJ  id=%-6u template=%-40s owner=%-2d pos=(%.2f,%.2f,%.2f) hp=%.1f crc=0x%08X\n",
+			(unsigned)obj->getID(), tmplName, owner,
+			p ? p->x : 0.0f, p ? p->y : 0.0f, p ? p->z : 0.0f,
+			obj->getBodyModule() ? obj->getBodyModule()->getHealth() : 0.0f,
+			c);
+		++objCount;
+	}
+	fprintf(f, "OBJ  total=%u\n", objCount);
+
+	// Per-subsystem CRCs. These match what getCRC() folds in after the
+	// object walk; splitting them out tells us whether the divergence is
+	// in partition state, player state, or AI group state when OBJ lines
+	// all match.
+	{
+		XferCRC xfer; xfer.open(AsciiString("partCRC"));
+		if (ThePartitionManager) xfer.xferSnapshot(ThePartitionManager);
+		xfer.close();
+		fprintf(f, "SUB  PartitionManager  crc=0x%08X\n", xfer.getCRC());
+	}
+	{
+		XferCRC xfer; xfer.open(AsciiString("playersCRC"));
+		if (ThePlayerList) xfer.xferSnapshot(ThePlayerList);
+		xfer.close();
+		fprintf(f, "SUB  ThePlayerList     crc=0x%08X\n", xfer.getCRC());
+	}
+	{
+		XferCRC xfer; xfer.open(AsciiString("aiCRC"));
+		if (TheAI) xfer.xferSnapshot(TheAI);
+		xfer.close();
+		fprintf(f, "SUB  TheAI             crc=0x%08X\n", xfer.getCRC());
+	}
+
+	// Random seed — sim-visible, part of the real CRC input.
+	fprintf(f, "SUB  RandomSeedCRC      crc=0x%08X\n", GetGameLogicRandomSeedCRC());
+	fflush(f);
 }
 
 // ------------------------------------------------------------------------------------------------

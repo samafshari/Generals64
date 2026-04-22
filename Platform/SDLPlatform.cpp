@@ -2,6 +2,7 @@
 
 #include "SDLPlatform.h"
 #include "Inspector/Inspector.h"
+#include "GameClient/Keyboard.h"
 #include <SDL3/SDL.h>
 #include <cstdio>
 
@@ -219,12 +220,25 @@ void SDLPlatform::PumpEvents()
 
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
             m_hasFocus = true;
+            // Flush any stuck key state held over from whatever the
+            // window was doing before losing focus. Without this, a
+            // key held at Alt-Tab-out time would keep its KEY_STATE_DOWN
+            // in the engine's keyboard tracker indefinitely (the UP
+            // event gets delivered to whichever window had focus when
+            // the release happened, not to us). Keyboard::checkKeyRepeat
+            // reads that stale state and fires one synthetic
+            // KEY_BACKSPACE (or whatever) + AUTOREPEAT per frame — which
+            // reads as in-game textboxes erasing text unprompted.
+            if (TheKeyboard)
+                TheKeyboard->resetKeys();
             if (m_callbacks.onFocusGained)
                 m_callbacks.onFocusGained();
             break;
 
         case SDL_EVENT_WINDOW_FOCUS_LOST:
             m_hasFocus = false;
+            if (TheKeyboard)
+                TheKeyboard->resetKeys();
             if (m_callbacks.onFocusLost)
                 m_callbacks.onFocusLost();
             break;

@@ -310,6 +310,8 @@ void Device::EndFrame()
 
 void Device::Resize(int width, int height)
 {
+    if (!m_swapChain || !m_context)
+        return;
     if (width <= 0 || height <= 0)
         return;
     if (width == m_width && height == m_height)
@@ -318,12 +320,49 @@ void Device::Resize(int width, int height)
     m_width = width;
     m_height = height;
 
+    // IDXGISwapChain::ResizeBuffers fails silently if ANY reference to
+    // the backbuffer (RTV, UAV, shared SRV) or to backbuffer-sized
+    // resources (depth SRV bound to a PS slot, sceneRT bound as input)
+    // is still live. ClearState drops every PSSet/VSSet/OMSet binding
+    // and Flush drains outstanding GPU work. Without this the resize
+    // silently no-ops, the next frame renders to the wrong extent,
+    // and the HUD draws at coordinates that now clip off-screen —
+    // which is exactly the "HUD disappears / corrupts on resize" symptom.
+    m_context->ClearState();
+    m_context->Flush();
+    m_redirectRTV = nullptr;
+
     ReleaseBackBufferViews();
 
     UINT resizeFlags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
     if (m_tearingSupported && !m_vsync)
         resizeFlags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-    m_swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, resizeFlags);
+
+    HRESULT hr = m_swapChain->ResizeBuffers(0, (UINT)width, (UINT)height,
+                                            DXGI_FORMAT_UNKNOWN, resizeFlags);
+    if (FAILED(hr))
+    {
+        // Device-removed is unrecoverable here; swallow and keep the old
+        // backbuffer dimensions so CreateBackBufferViews at least rebuilds
+        // the depth buffer and we can limp to the next frame.
+        m_width = 0;
+        m_height = 0;
+    }
+
+    // DXGI can clamp the requested extent (monitor size, DPI). Trust the
+    // swap chain for the authoritative dimensions so subsequent viewport
+    // math matches the actual backbuffer.
+    DXGI_SWAP_CHAIN_DESC1 desc = {};
+    if (SUCCEEDED(m_swapChain->GetDesc1(&desc)) && desc.Width && desc.Height)
+    {
+        m_width = (int)desc.Width;
+        m_height = (int)desc.Height;
+    }
+    else if (m_width == 0 || m_height == 0)
+    {
+        m_width = width;
+        m_height = height;
+    }
 
     CreateBackBufferViews();
 

@@ -804,6 +804,23 @@ UpdateSleepTime ParticleUplinkCannonUpdate::update()
 				//here on... unless of course we lose sight again.
 				setClientStatus( m_status, revealThisFrame );
 			}
+			else if( !m_defaultInfoCached && m_status != STATUS_IDLE )
+			{
+				// Retry the original status's effect spawn. setClientStatus
+				// bails (without setting m_defaultInfoCached = TRUE) when
+				// the outer-node bone cache isn't yet populated — common on
+				// the very first transition into CHARGING / PREPARING /
+				// READY_TO_FIRE because the drawable's pristine bone cache
+				// hasn't been built yet. setClientStatus is otherwise only
+				// invoked on a status TRANSITION (and on shroud reveal),
+				// so without this per-frame retry the cannon sits in
+				// READY_TO_FIRE for many frames with no antenna flares,
+				// connector lasers, or prism glow — the "lights on the
+				// ready cannon" the original game had. Once the bone cache
+				// resolves, m_defaultInfoCached flips TRUE and this branch
+				// goes quiet for the rest of the cannon's lifetime.
+				setClientStatus( m_status, FALSE );
+			}
 		}
 		m_clientShroudedLastFrame = shrouded;
 	}

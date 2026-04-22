@@ -310,6 +310,191 @@ void RTS3DScene::flagOccludedObjects(CameraClass * camera)
 	}
 }
 
+#if 0 // Dead code — W3DScene.cpp is not in the build (sources.cmake only lists
+      // D3D11Shims.cpp which contains the live RTS3DScene::castRay). The real
+      // GeometryInfo pick fallback lives in D3D11Shims.cpp; keeping this block
+      // compiled-out so it doesn't mislead future edits here.
+namespace
+{
+
+// Return the game-logic Object (if any) behind a render object. We need this
+// to reach the authored GeometryInfo for the click-pick fallback below.
+static Object* GetPickableObjectFromRenderObj(RenderObjClass* robj)
+{
+	if (!robj)
+		return nullptr;
+	DrawableInfo* drawInfo = (DrawableInfo*)robj->Get_User_Data();
+	if (!drawInfo || !drawInfo->m_drawable)
+		return nullptr;
+	return drawInfo->m_drawable->getObject();
+}
+
+// Ray-vs-authored-GeometryInfo intersection in world space. Returns a
+// fraction in [0, 1] along `seg` (seg.Get_P0() -> seg.Get_P1()) of the
+// closest intersection, or -1 for no hit. `extraRadius` fattens the shape
+// by that world-unit amount — used to grow the infantry hitbox.
+//
+// The mesh-based Cast_Ray already used by castRay is per-triangle, so it
+// leaks rays through scaffolding gaps, windowless frames, or any hollow
+// section of a building and returns "no hit" — the click then falls
+// through to the terrain. Testing against the authored SPHERE/CYLINDER/
+// BOX that partition/pathing already use fills the whole building volume,
+// which matches the original game's "if the cursor is over the building
+// silhouette, it selects" behavior.
+static Real RayVsGeometryInfo(const LineSegClass& seg, const Object* obj, Real extraRadius)
+{
+	const GeometryInfo& geom = obj->getGeometryInfo();
+	const Coord3D* pos = obj->getPosition();
+	const Real angle = obj->getOrientation();
+
+	const Vector3& p0 = seg.Get_P0();
+	const Vector3& p1 = seg.Get_P1();
+	Vector3 d(p1.X - p0.X, p1.Y - p0.Y, p1.Z - p0.Z);
+	Real segLen = d.Length();
+	if (segLen <= 1e-4f)
+		return -1.0f;
+	d /= segLen;
+
+	switch (geom.getGeomType())
+	{
+		case GEOMETRY_SPHERE:
+		{
+			// Standard ray-sphere (distance units, t ∈ [0, segLen]).
+			Real r = geom.getMajorRadius() + extraRadius;
+			Vector3 m(p0.X - pos->x, p0.Y - pos->y,
+			          p0.Z - (pos->z + geom.getZDeltaToCenterPosition()));
+			Real b = m.X*d.X + m.Y*d.Y + m.Z*d.Z;
+			Real c = (m.X*m.X + m.Y*m.Y + m.Z*m.Z) - r*r;
+			Real disc = b*b - c;
+			if (disc < 0.0f)
+				return -1.0f;
+			Real sq = sqrtf(disc);
+			Real t = -b - sq;
+			if (t < 0.0f)
+				t = -b + sq;
+			if (t < 0.0f || t > segLen)
+				return -1.0f;
+			return t / segLen;
+		}
+
+		case GEOMETRY_CYLINDER:
+		{
+			// Z-axis vertical cylinder. Slab against XY-circle AND Z-extent,
+			// intersect the two t-ranges, take tMin.
+			Real r = geom.getMajorRadius() + extraRadius;
+			Real zLo = pos->z - extraRadius;
+			Real zHi = pos->z + geom.getMaxHeightAbovePosition() + extraRadius;
+
+			Real sx = p0.X - pos->x;
+			Real sy = p0.Y - pos->y;
+			Real ax = d.X*d.X + d.Y*d.Y;
+			Real bxy = sx*d.X + sy*d.Y;
+			Real cxy = sx*sx + sy*sy - r*r;
+
+			Real tMin = 0.0f;
+			Real tMax = segLen;
+			if (ax > 1e-6f)
+			{
+				Real disc = bxy*bxy - ax*cxy;
+				if (disc < 0.0f)
+					return -1.0f;
+				Real sq = sqrtf(disc);
+				Real t1 = (-bxy - sq) / ax;
+				Real t2 = (-bxy + sq) / ax;
+				if (t1 > t2) { Real tmp = t1; t1 = t2; t2 = tmp; }
+				if (t1 > tMin) tMin = t1;
+				if (t2 < tMax) tMax = t2;
+				if (tMin > tMax)
+					return -1.0f;
+			}
+			else
+			{
+				// Purely vertical ray — just test XY containment.
+				if (cxy > 0.0f)
+					return -1.0f;
+			}
+			if (fabsf(d.Z) > 1e-6f)
+			{
+				Real tz1 = (zLo - p0.Z) / d.Z;
+				Real tz2 = (zHi - p0.Z) / d.Z;
+				if (tz1 > tz2) { Real tmp = tz1; tz1 = tz2; tz2 = tmp; }
+				if (tz1 > tMin) tMin = tz1;
+				if (tz2 < tMax) tMax = tz2;
+				if (tMin > tMax)
+					return -1.0f;
+			}
+			else
+			{
+				if (p0.Z < zLo || p0.Z > zHi)
+					return -1.0f;
+			}
+			if (tMin < 0.0f)
+				tMin = 0.0f;
+			if (tMin > segLen)
+				return -1.0f;
+			return tMin / segLen;
+		}
+
+		case GEOMETRY_BOX:
+		{
+			// Oriented box: hx = forward half-len, hy = side half-len,
+			// hz = height. Undo the object's yaw, then slab-test against
+			// the axis-aligned box in local space.
+			Real hx = geom.getMajorRadius() + extraRadius;
+			Real hy = geom.getMinorRadius() + extraRadius;
+			Real zLo = -extraRadius;
+			Real zHi = geom.getMaxHeightAbovePosition() + extraRadius;
+
+			Real cs = cosf(-angle);
+			Real sn = sinf(-angle);
+
+			Real lsx = (p0.X - pos->x) * cs - (p0.Y - pos->y) * sn;
+			Real lsy = (p0.X - pos->x) * sn + (p0.Y - pos->y) * cs;
+			Real lsz = p0.Z - pos->z;
+			Real ldx = d.X * cs - d.Y * sn;
+			Real ldy = d.X * sn + d.Y * cs;
+			Real ldz = d.Z;
+
+			Real boxMin[3] = { -hx, -hy, zLo };
+			Real boxMax[3] = {  hx,  hy, zHi };
+			Real ls[3] = { lsx, lsy, lsz };
+			Real ld[3] = { ldx, ldy, ldz };
+
+			Real tMin = 0.0f;
+			Real tMax = segLen;
+			for (int i = 0; i < 3; ++i)
+			{
+				if (fabsf(ld[i]) < 1e-6f)
+				{
+					if (ls[i] < boxMin[i] || ls[i] > boxMax[i])
+						return -1.0f;
+				}
+				else
+				{
+					Real t1 = (boxMin[i] - ls[i]) / ld[i];
+					Real t2 = (boxMax[i] - ls[i]) / ld[i];
+					if (t1 > t2) { Real tmp = t1; t1 = t2; t2 = tmp; }
+					if (t1 > tMin) tMin = t1;
+					if (t2 < tMax) tMax = t2;
+					if (tMin > tMax)
+						return -1.0f;
+				}
+			}
+			if (tMin < 0.0f)
+				tMin = 0.0f;
+			if (tMin > segLen)
+				return -1.0f;
+			return tMin / segLen;
+		}
+
+		default:
+			return -1.0f;
+	}
+}
+
+} // anonymous namespace
+#endif // 0 — dead code guard (see comment above namespace)
+
 //=============================================================================
 // RTS3DScene::castRay
 //=============================================================================

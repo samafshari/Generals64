@@ -352,8 +352,23 @@ bool ProcessEvent(const SDL_Event* event)
         return io.WantCaptureMouse;
     }
 
-    case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP:
+        // KEY_UP events must ALWAYS reach the engine — even when
+        // ImGui is consuming the press stream — so the engine's
+        // `Keyboard::m_keyStatus` gets the release and stops
+        // synthesising autorepeat events for that key. Without this
+        // asymmetric carve-out, the sequence "user presses backspace
+        // while game has focus → user focuses an ImGui text field →
+        // user releases backspace" swallows the UP event and leaves
+        // `m_keyStatus[KEY_BACKSPACE].state` stuck in KEY_STATE_DOWN
+        // forever. `Keyboard::checkKeyRepeat()` then fires one
+        // synthetic MSG_RAW_KEY_DOWN + KEY_STATE_AUTOREPEAT per
+        // frame, manifesting as "textboxes erase text as if
+        // someone's holding backspace" — which was exactly the bug
+        // this fix addresses.
+        return false;
+
+    case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_TEXT_INPUT:
     case SDL_EVENT_TEXT_EDITING:
         // Route ALL keys to the engine by default — including ESC

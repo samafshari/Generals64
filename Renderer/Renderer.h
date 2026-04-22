@@ -6,6 +6,8 @@
 #include "Core/Texture.h"
 #include "Math/RenderMath.h"
 
+#include <vector>
+
 namespace Render
 {
 
@@ -188,6 +190,25 @@ public:
 
     // Laser beam 3D state: unlit glow profile shader with additive blend + depth test
     void SetLaserGlow3DState();
+
+    // Deferred laser-beam submission. W3DLaserDraw enqueues the beam
+    // parameters during per-drawable iteration and the D3D11 shim flushes
+    // them after every opaque mesh has been rendered — otherwise a building
+    // iterated after the beam's drawable ends up drawing on top of it in
+    // screen space, even though the beam itself runs with depth-disabled
+    // blending, because the building's LessEqual depth test still passes
+    // against the z-buffer left by the terrain underneath.
+    struct LateBeam
+    {
+        Render::Float3 p0;
+        Render::Float3 p1;
+        float width;
+        float r, g, b, a;
+        float tileFactor;
+        float uvOffset;
+    };
+    void QueueLateBeam(const LateBeam& beam);
+    void FlushLateBeams();
 
     // Reflection RT mesh state: regular lit shader, opaque blend, depth test +
     // write enabled, NO cull. Used to render scene meshes into the water
@@ -692,6 +713,13 @@ public:
     bool m_sharpenEnabled = false;
     bool m_tiltShiftEnabled = false;
     bool m_bwFilterEnabled = false;
+
+    // Deferred laser-beam queue (see QueueLateBeam/FlushLateBeams).
+    std::vector<LateBeam> m_lateBeams;
+    // 1x1 white fallback texture lazily built on first FlushLateBeams so the
+    // shader has something bound when beams don't supply their own texture.
+    Texture m_lateBeamWhiteTex;
+    bool m_lateBeamWhiteReady = false;
 
     Shader m_shaderShockwave;
     Shader m_shaderGodRayExtract;

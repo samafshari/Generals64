@@ -45,10 +45,30 @@ if %ERRORLEVEL% neq 0 (
     echo   ok
 )
 
-echo [3/3] test_thread_race_shape
+echo [3/4] test_thread_race_shape
 cl %CL_FLAGS% test_thread_race_shape.cpp /Fe:test_thread_race_shape.exe
 if %ERRORLEVEL% neq 0 (
     echo   FAILED: test_thread_race_shape
+    set /a ERRORS+=1
+) else (
+    echo   ok
+)
+
+echo [4/5] test_fpu_mxcsr_determinism
+cl %CL_FLAGS% test_fpu_mxcsr_determinism.cpp /Fe:test_fpu_mxcsr_determinism.exe
+if %ERRORLEVEL% neq 0 (
+    echo   FAILED: test_fpu_mxcsr_determinism
+    set /a ERRORS+=1
+) else (
+    echo   ok
+)
+
+rem /Od keeps stack layout stable so the garbage pattern survives long enough
+rem to be observable — this test is specifically about uninitialised stack use.
+echo [5/5] test_uninit_struct_shape
+cl %CL_FLAGS% /Od test_uninit_struct_shape.cpp /Fe:test_uninit_struct_shape.exe
+if %ERRORLEVEL% neq 0 (
+    echo   FAILED: test_uninit_struct_shape
     set /a ERRORS+=1
 ) else (
     echo   ok
@@ -58,7 +78,7 @@ rem ---------------------------------------------------------------------------
 rem Tier-2 harness tests (require shared infrastructure)
 rem ---------------------------------------------------------------------------
 
-echo [4/5] test_lockstep_baseline
+echo [Tier-2] test_lockstep_baseline
 cl %CL_FLAGS% test_lockstep_baseline.cpp %INFRA% /Fe:test_lockstep_baseline.exe
 if %ERRORLEVEL% neq 0 (
     echo   FAILED: test_lockstep_baseline
@@ -67,7 +87,7 @@ if %ERRORLEVEL% neq 0 (
     echo   ok
 )
 
-echo [5/5] test_lockstep_injected_desync
+echo [Tier-2] test_lockstep_injected_desync
 cl %CL_FLAGS% test_lockstep_injected_desync.cpp %INFRA% /Fe:test_lockstep_injected_desync.exe
 if %ERRORLEVEL% neq 0 (
     echo   FAILED: test_lockstep_injected_desync

@@ -315,16 +315,23 @@ static const char *messageToString(unsigned int message)
 #endif
 
 // Called from Win32GameEngine::update() between frames to handle deferred resize.
+// Idempotent: safe to call when no resize is actually pending (the dimension
+// check early-outs). All HUD / shell / cursor fix-ups live here so both the
+// WM_SIZE (maximize/restore) and WM_EXITSIZEMOVE (drag) paths converge on
+// identical behavior.
 void handleDeferredResize()
 {
-	if (!TheDisplay)
+	if (!TheDisplay || !ApplicationHWnd)
 		return;
 
 	RECT clientRect;
-	GetClientRect(ApplicationHWnd, &clientRect);
+	if (!GetClientRect(ApplicationHWnd, &clientRect))
+		return;
 	Int newWidth = clientRect.right - clientRect.left;
 	Int newHeight = clientRect.bottom - clientRect.top;
 
+	// Skip 0x0 (minimized) — ResizeBuffers with a zero extent is invalid and
+	// there's nothing to adapt the HUD to until the window returns.
 	if (newWidth <= 0 || newHeight <= 0)
 		return;
 	if (newWidth == (Int)TheDisplay->getWidth() && newHeight == (Int)TheDisplay->getHeight())
@@ -332,37 +339,38 @@ void handleDeferredResize()
 
 	try
 	{
-		if (TheDisplay->setDisplayMode(newWidth, newHeight, TheDisplay->getBitDepth(), TRUE))
+		if (!TheDisplay->setDisplayMode(newWidth, newHeight, TheDisplay->getBitDepth(), TRUE))
+			return;
+
+		TheWritableGlobalData->m_xResolution = newWidth;
+		TheWritableGlobalData->m_yResolution = newHeight;
+		if (TheHeaderTemplateManager)
+			TheHeaderTemplateManager->onResolutionChanged();
+		if (TheMouse)
+			TheMouse->onResolutionChanged();
+
+		// TheShell->recreateWindowLayouts() deconstructs the shell and
+		// runs the shutdown callback of every pushed screen via
+		// popImmediate(). The original ZH path only called it from
+		// the main-menu Options dialog, where the shell stack contains
+		// only menu screens. When invoked mid-mission (e.g. the user
+		// changed resolution from the IN-GAME options menu, or just
+		// dragged the window border), the re-entrant deconstruct runs
+		// the in-game Options menu's shutdown and tears down enough
+		// shell state to end the active mission. Skip the shell
+		// rebuild while a real mission is running — the in-game UI
+		// rebuild below still updates the control bar / fonts / cursor
+		// limits, which is what actually needs to follow the new
+		// framebuffer size.
+		const bool inRealMission = TheGameLogic
+			&& TheGameLogic->isInGame()
+			&& !TheGameLogic->isInShellGame();
+		if (TheShell && !inRealMission)
+			TheShell->recreateWindowLayouts();
+		if (TheInGameUI)
 		{
-			TheWritableGlobalData->m_xResolution = newWidth;
-			TheWritableGlobalData->m_yResolution = newHeight;
-			if (TheHeaderTemplateManager)
-				TheHeaderTemplateManager->onResolutionChanged();
-			if (TheMouse)
-				TheMouse->onResolutionChanged();
-			// TheShell->recreateWindowLayouts() deconstructs the shell and
-			// runs the shutdown callback of every pushed screen via
-			// popImmediate(). The original ZH path only called it from
-			// the main-menu Options dialog, where the shell stack contains
-			// only menu screens. When invoked mid-mission (e.g. the user
-			// changed resolution from the IN-GAME options menu, or just
-			// dragged the window border), the re-entrant deconstruct runs
-			// the in-game Options menu's shutdown and tears down enough
-			// shell state to end the active mission. Skip the shell
-			// rebuild while a real mission is running — the in-game UI
-			// rebuild below still updates the control bar / fonts / cursor
-			// limits, which is what actually needs to follow the new
-			// framebuffer size.
-			const bool inRealMission = TheGameLogic
-				&& TheGameLogic->isInGame()
-				&& !TheGameLogic->isInShellGame();
-			if (TheShell && !inRealMission)
-				TheShell->recreateWindowLayouts();
-			if (TheInGameUI)
-			{
-				TheInGameUI->recreateControlBar();
-				TheInGameUI->refreshCustomUiResources();
-			}
+			TheInGameUI->recreateControlBar();
+			TheInGameUI->refreshCustomUiResources();
 		}
 	}
 	catch (...)
@@ -487,6 +495,9 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message,
 
 				// Defer resize to main loop — don't reset D3D device from inside
 				// the window proc, as the game loop may be mid-render.
+				// SIZE_MINIMIZED is intentionally skipped (0x0 client rect would
+				// drive a zero-sized swap chain resize). SIZE_RESTORED covers
+				// both maximize-restore and user drag.
 				if (!gInitializing && TheGlobalData && TheGlobalData->m_windowed
 					&& (wParam == SIZE_MAXIMIZED || wParam == SIZE_RESTORED))
 				{
@@ -498,41 +509,12 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message,
 			//-------------------------------------------------------------------------
 			case WM_EXITSIZEMOVE:
 			{
-				// User finished dragging the window edge - now rebuild at the final size.
-				// This avoids resetting the D3D device on every pixel during the drag.
-				if (TheGlobalData && TheGlobalData->m_windowed && TheDisplay)
-				{
-					RECT clientRect;
-					GetClientRect(hWnd, &clientRect);
-					Int newWidth = clientRect.right - clientRect.left;
-					Int newHeight = clientRect.bottom - clientRect.top;
-					if (newWidth > 0 && newHeight > 0 &&
-						(newWidth != (Int)TheDisplay->getWidth() || newHeight != (Int)TheDisplay->getHeight()))
-					{
-						if (TheDisplay->setDisplayMode(newWidth, newHeight, TheDisplay->getBitDepth(), TRUE))
-						{
-							TheWritableGlobalData->m_xResolution = newWidth;
-							TheWritableGlobalData->m_yResolution = newHeight;
-							if (TheHeaderTemplateManager)
-								TheHeaderTemplateManager->onResolutionChanged();
-							if (TheMouse)
-								TheMouse->onResolutionChanged();
-							// See handleDeferredResize for why we skip the shell
-							// rebuild during an active mission — re-entrant
-							// deconstruct ends the mission.
-							const bool inRealMissionExitSizeMove = TheGameLogic
-								&& TheGameLogic->isInGame()
-								&& !TheGameLogic->isInShellGame();
-							if (TheShell && !inRealMissionExitSizeMove)
-								TheShell->recreateWindowLayouts();
-							if (TheInGameUI)
-							{
-								TheInGameUI->recreateControlBar();
-								TheInGameUI->refreshCustomUiResources();
-							}
-						}
-					}
-				}
+				// User finished dragging the window edge. Route through the same
+				// deferred path as WM_SIZE so the renderer only sees one resize
+				// per user action, and so the fix-ups live in a single place
+				// (handleDeferredResize) instead of being duplicated here.
+				if (TheGlobalData && TheGlobalData->m_windowed)
+					gPendingResize = TRUE;
 				break;
 			}
 
@@ -1023,9 +1005,71 @@ static void CrashLogUnbuffered(FILE* f) {
 	if (f) setvbuf(f, nullptr, _IONBF, 0);
 }
 
+// Forward declarations — the stack-overflow handler runs first in the
+// vectored chain but refers to globals and helpers defined later in the file.
+extern "C" {
+    extern char g_lastUpdateModuleName[128];
+    extern unsigned g_lastUpdateObjectId;
+    extern char g_lastUpdateObjectTemplate[128];
+    extern unsigned g_lastUpdateFrame;
+    extern const void* g_lastUpdateModulePtr;
+    extern const void* g_lastUpdateObjectPtr;
+    extern const char* g_lastUpdateModuleClass;
+}
+static void DumpDispatchRingSEH(FILE* f);  // defined below
+
+// STATUS_STACK_OVERFLOW specifically — the standard crash filter can't run
+// because there's no stack left. We reset the stack's guard page (giving us
+// a few KB of headroom), write a minimal log identifying the exception as a
+// stack overflow, then let the process terminate. Without this the game just
+// disappears silently — exactly what was observed with 2 humans vs 6 Brutal AI
+// on Death Valley after ~30 k frames.
+static LONG WINAPI StackOverflowHandler(EXCEPTION_POINTERS* ep) {
+	// _resetstkoflw is the CRT's one-and-only "recover a few KB of stack after
+	// a guard-page fault" routine. Without it, subsequent function calls would
+	// re-fault and we'd loop in exception dispatch.
+#ifdef _MSC_VER
+	_resetstkoflw();
+#endif
+	static LONG fired = 0;
+	if (InterlockedExchange(&fired, 1) != 0) return EXCEPTION_CONTINUE_SEARCH;
+
+	char crashLogName[64];
+	strcpy(crashLogName, "crash.log");
+	FILE* f = fopen(crashLogName, g_crashLogFired ? "a" : "w");
+	if (!f) return EXCEPTION_CONTINUE_SEARCH;
+	CrashLogUnbuffered(f);
+	g_crashLogFired = 1;
+
+	SYSTEMTIME st; GetLocalTime(&st);
+	fprintf(f, "=== STACK OVERFLOW %04u-%02u-%02u %02u:%02u:%02u ===\n",
+		st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+	fprintf(f, "The main thread blew its stack. This usually means a deep\n"
+	           "recursion or a chain of nested callbacks.\n"
+	           "RIP=%p\n", ep->ExceptionRecord->ExceptionAddress);
+
+	// The dispatch ring may or may not be intact. Dump what we can.
+	if (g_lastUpdateModulePtr) {
+		fprintf(f, "LAST UPDATE MODULE class=%s ptr=%p obj=%p id=%u frame=%u\n",
+			g_lastUpdateModuleClass ? g_lastUpdateModuleClass : "<unknown>",
+			g_lastUpdateModulePtr, g_lastUpdateObjectPtr,
+			g_lastUpdateObjectId, g_lastUpdateFrame);
+	}
+	__try { DumpDispatchRingSEH(f); }
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		fprintf(f, "(dispatch ring: resolver faulted)\n");
+	}
+	fflush(f);
+	fclose(f);
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+
 static LONG WINAPI VectoredCrashHandler(EXCEPTION_POINTERS* ep)
 {
 	const DWORD code = ep->ExceptionRecord->ExceptionCode;
+	if (code == EXCEPTION_STACK_OVERFLOW) {
+		return StackOverflowHandler(ep);
+	}
 	// Only react to actually-fatal conditions; ignore the many software
 	// exceptions Windows / runtime / drivers raise during normal operation:
 	//   0xE06D7363 - C++ throw (caught by language runtime)
@@ -1498,6 +1542,14 @@ static void OnSigAbrt(int sig) {
 static void InstallCrashHooks() {
 	static LONG installed = 0;
 	if (InterlockedExchange(&installed, 1) != 0) return;
+	// Reserve 64 KB of committed stack for the SO handler. Without this,
+	// _resetstkoflw() only gives us one 4 KB page and fprintf's internal
+	// buffers blow through it immediately (observed: the handler itself
+	// faulted in ucrtbase _vfprintf_l while logging the original overflow).
+	{
+		ULONG guarantee = 64 * 1024;
+		SetThreadStackGuarantee(&guarantee);
+	}
 	AddVectoredExceptionHandler(1, VectoredCrashHandler);
 	SetUnhandledExceptionFilter(CrashFilter);
 	atexit(AtExitDumpState);

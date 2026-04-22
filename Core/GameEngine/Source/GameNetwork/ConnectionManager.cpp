@@ -201,6 +201,7 @@ void ConnectionManager::init()
 	}
 	m_smallestPacketArrivalCushion = -1;
 	m_clientServerMode = FALSE;
+	m_disconnectingLocal = FALSE;
 
 	m_frameMetrics.init();
 
@@ -1936,6 +1937,15 @@ void ConnectionManager::quitGame() {
 }
 
 void ConnectionManager::disconnectLocalPlayer() {
+	// Reentrancy guard: in C/S mode, disconnectPlayer() on the server slot calls
+	// back into disconnectLocalPlayer(), which would re-enter the loop below and
+	// call disconnectPlayer(serverSlot) again -> stack overflow.
+	if (m_disconnectingLocal) {
+		DEBUG_LOG(("ConnectionManager::disconnectLocalPlayer() - already disconnecting, skipping reentry"));
+		return;
+	}
+	m_disconnectingLocal = TRUE;
+
 	// kill the frame data and the connections for all the other players.
 	DEBUG_LOG(("ConnectionManager::disconnectLocalPlayer()"));
 	for (Int i = 0; i < MAX_SLOTS; ++i) {
@@ -1943,6 +1953,8 @@ void ConnectionManager::disconnectLocalPlayer() {
 			disconnectPlayer(i);
 		}
 	}
+
+	m_disconnectingLocal = FALSE;
 }
 
 /**

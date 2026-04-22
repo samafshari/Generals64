@@ -221,6 +221,10 @@ xcopy /Y /D "$(SolutionDir)extern\sdl3\bin\*.dll" "$(OutDir)"</Command>
       <IgnoreSpecificDefaultLibraries>libci.lib;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <SubSystem>Windows</SubSystem>
       <ProgramDataBaseFile>$(OutDir)$(TargetName).pdb</ProgramDataBaseFile>
+      <!-- Main-thread stack kept at Windows default (1 MB). Bumping it would
+           mask the recursion bug we're still hunting. StackOverflowHandler
+           (installed via AddVectoredExceptionHandler) uses _resetstkoflw to
+           recover enough stack to write crash.log before the process dies. -->
     </Link>
     <PostBuildEvent>
       <Command>xcopy /Y /D "$(SolutionDir)extern\ffmpeg\bin\*.dll" "$(OutDir)"

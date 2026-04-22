@@ -22,6 +22,8 @@ echo.
 for %%T in (test_unordered_map_iteration.exe
             test_pathfind_memo_cooldown.exe
             test_thread_race_shape.exe
+            test_fpu_mxcsr_determinism.exe
+            test_uninit_struct_shape.exe
             test_lockstep_baseline.exe
             test_lockstep_injected_desync.exe) do (
 

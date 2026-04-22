@@ -20,9 +20,77 @@
 #include "GameNetwork/LANAPI.h"
 #include "GameNetwork/LANAPICallbacks.h"  // TheLAN
 
-#include <objbase.h>  // CoCreateGuid
+#include <chrono>
+#include <objbase.h>   // CoCreateGuid
+#include <shlobj.h>    // SHGetFolderPathA for %LOCALAPPDATA%
+#include <cstdio>
+#include <cstdarg>
+#include <mutex>
 
 extern char g_authGameToken[];  // CommandLine.cpp
+
+// ---------------------------------------------------------------------------
+// Triage trace: writes a line to a fixed absolute path whenever a key
+// GameTelemetry event fires. DEBUG_LOG is stripped from ReleasePublic so
+// this is the only way to see what's going on. Path is
+//   %LOCALAPPDATA%\Generals64\telemetry-trace.log
+// which is always writable regardless of the engine's CWD / elevation
+// state. Handle is opened once at first use and held open with line-
+// buffered flushing so a crash still leaves the last few lines on disk.
+// ---------------------------------------------------------------------------
+static std::mutex  g_traceMutex;
+static FILE       *g_traceFile = nullptr;
+static bool        g_traceTried = false;
+
+static FILE *telemetryTraceFile()
+{
+	if (g_traceFile || g_traceTried) return g_traceFile;
+	g_traceTried = true;
+
+	char localAppData[MAX_PATH];
+	if (FAILED(SHGetFolderPathA(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, localAppData)))
+		return nullptr;
+
+	char dir[MAX_PATH];
+	_snprintf(dir, sizeof(dir), "%s\\Generals64", localAppData);
+	dir[sizeof(dir) - 1] = '\0';
+	CreateDirectoryA(dir, nullptr);  // harmless if it already exists
+
+	char path[MAX_PATH];
+	_snprintf(path, sizeof(path), "%s\\telemetry-trace.log", dir);
+	path[sizeof(path) - 1] = '\0';
+
+	FILE *f = nullptr;
+	if (fopen_s(&f, path, "a") != 0 || !f) return nullptr;
+	// Line-buffered flushing so a crash preserves the last lines.
+	setvbuf(f, nullptr, _IOLBF, 1024);
+
+	SYSTEMTIME st;
+	GetLocalTime(&st);
+	fprintf(f, "==== telemetry trace opened %04d-%02d-%02d %02d:%02d:%02d ====\n",
+	        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+	fflush(f);
+	g_traceFile = f;
+	return g_traceFile;
+}
+
+static void telemetryTrace(const char *fmt, ...)
+{
+	std::lock_guard<std::mutex> lk(g_traceMutex);
+	FILE *f = telemetryTraceFile();
+	if (!f) return;
+	SYSTEMTIME st;
+	GetLocalTime(&st);
+	fprintf(f, "[%04d-%02d-%02d %02d:%02d:%02d.%03d] ",
+	        st.wYear, st.wMonth, st.wDay,
+	        st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+	va_list ap;
+	va_start(ap, fmt);
+	vfprintf(f, fmt, ap);
+	va_end(ap);
+	fputc('\n', f);
+	fflush(f);
+}
 
 GameTelemetry *TheGameTelemetry = NULL;
 
@@ -106,10 +174,23 @@ GameTelemetry::GameTelemetry()
 : m_active(FALSE)
 , m_gameStartFrame(0)
 , m_resultSent(FALSE)
+, m_lastSnapshotFrame(0)
+, m_senderShouldStop(false)
 {
+	memset(&m_lastSent, 0, sizeof(m_lastSent));
 }
 
-GameTelemetry::~GameTelemetry() {}
+GameTelemetry::~GameTelemetry()
+{
+	// Mirror the reset() teardown — if the thread is still up at
+	// process shutdown, signal it, drain the queue, and join.
+	if (m_senderThread.joinable())
+	{
+		m_senderShouldStop.store(true);
+		m_outboxCV.notify_all();
+		m_senderThread.join();
+	}
+}
 
 void GameTelemetry::init()
 {
@@ -117,6 +198,10 @@ void GameTelemetry::init()
 	m_sessionId.clear();
 	m_gameStartFrame = 0;
 	m_resultSent = FALSE;
+	m_lastSnapshotFrame = 0;
+	memset(&m_lastSent, 0, sizeof(m_lastSent));
+	// Note: sender thread is NOT started here — onGameStart owns that
+	// so a sandbox/campaign run with no auth token never spawns it.
 }
 
 void GameTelemetry::reset()
@@ -125,6 +210,66 @@ void GameTelemetry::reset()
 	m_sessionId.clear();
 	m_gameStartFrame = 0;
 	m_resultSent = FALSE;
+	m_lastSnapshotFrame = 0;
+	memset(&m_lastSent, 0, sizeof(m_lastSent));
+
+	// Stop the sender thread cleanly. The worker loop drains any
+	// remaining queued packets (waiting on the CV under the same
+	// shutdown flag) before it returns.
+	if (m_senderThread.joinable())
+	{
+		m_senderShouldStop.store(true);
+		m_outboxCV.notify_all();
+		m_senderThread.join();
+	}
+	m_senderShouldStop.store(false);
+	{
+		std::lock_guard<std::mutex> lk(m_outboxMutex);
+		m_outboxQueue.clear();
+	}
+}
+
+// ── Sender thread ──────────────────────────────────────────────────
+//
+// Producer (sim thread): copies the bytes into a vector, pushes onto
+// the deque under the mutex, notifies the CV. Returns immediately —
+// no network I/O on the sim thread.
+void GameTelemetry::enqueuePacket(const UnsignedByte *buf, Int len)
+{
+	if (!buf || len <= 0)
+		return;
+	std::vector<UnsignedByte> pkt(buf, buf + len);
+	{
+		std::lock_guard<std::mutex> lk(m_outboxMutex);
+		m_outboxQueue.push_back(std::move(pkt));
+	}
+	m_outboxCV.notify_one();
+}
+
+// Consumer: drain one packet at a time, run the blocking
+// relaySendAll() off the sim thread. Loops until shutdown flag is
+// set AND the queue is empty so any in-flight terminal packets
+// land before we exit.
+void GameTelemetry::senderThreadFn()
+{
+	for (;;)
+	{
+		std::vector<UnsignedByte> pkt;
+		{
+			std::unique_lock<std::mutex> lk(m_outboxMutex);
+			m_outboxCV.wait(lk, [this] {
+				return !m_outboxQueue.empty() || m_senderShouldStop.load();
+			});
+			if (m_outboxQueue.empty() && m_senderShouldStop.load())
+				return;
+			pkt = std::move(m_outboxQueue.front());
+			m_outboxQueue.pop_front();
+		}
+		if (TheLAN && !pkt.empty())
+		{
+			TheLAN->relaySendAll((const char *)pkt.data(), (int)pkt.size());
+		}
+	}
 }
 
 Int GameTelemetry::gameDurationSeconds() const
@@ -139,12 +284,25 @@ Int GameTelemetry::gameDurationSeconds() const
 
 void GameTelemetry::onGameStart()
 {
+	telemetryTrace("onGameStart: token=%s TheLAN=%s TheGameLogic=%s ThePlayerList=%s",
+	               g_authGameToken[0] == '\0' ? "EMPTY" : "present",
+	               TheLAN          ? "ok" : "null",
+	               TheGameLogic    ? "ok" : "null",
+	               ThePlayerList   ? "ok" : "null");
+
 	// No token = no launcher-auth = no relay to ship GAMERESULT to.
-	if (g_authGameToken[0] == '\0') return;
+	if (g_authGameToken[0] == '\0')
+	{
+		telemetryTrace("  bail: auth token empty (not launched via launcher, or -auth not parsed)");
+		return;
+	}
 
 	GUID guid{};
 	if (FAILED(CoCreateGuid(&guid)))
+	{
+		telemetryTrace("  bail: CoCreateGuid failed");
 		return;
+	}
 	char sid[33];
 	_snprintf(sid, sizeof(sid),
 	          "%08x%04x%04x%02x%02x%02x%02x%02x%02x%02x%02x",
@@ -156,24 +314,27 @@ void GameTelemetry::onGameStart()
 	m_active = TRUE;
 	m_resultSent = FALSE;
 	m_gameStartFrame = TheGameLogic ? (Int)TheGameLogic->getFrame() : 0;
+	m_lastSnapshotFrame = 0;
+	memset(&m_lastSent, 0, sizeof(m_lastSent));
+
+	// Spin up the telemetry sender thread now that we've actually
+	// minted a session and need to ship packets. Guard against a
+	// stale thread from a previous game leaking through (reset()
+	// should have torn it down, but be defensive).
+	if (!m_senderThread.joinable())
+	{
+		m_senderShouldStop.store(false);
+		m_senderThread = std::thread(&GameTelemetry::senderThreadFn, this);
+		telemetryTrace("  armed: m_active=TRUE sid=%s sender thread spawned", sid);
+	}
+	else
+	{
+		telemetryTrace("  armed: m_active=TRUE sid=%s (sender thread already running)", sid);
+	}
 }
 
-// Per-player score numbers read from ScoreKeeper. Under lockstep /
-// CRC-validated sim every peer's numbers agree, so the first report the
-// server receives wins.
-struct PerPlayerScore
-{
-	Int unitsBuilt;
-	Int unitsLost;
-	Int unitsKilledHuman;
-	Int unitsKilledAI;
-	Int buildingsBuilt;
-	Int buildingsLost;
-	Int buildingsKilledHuman;
-	Int buildingsKilledAI;
-	Int moneyEarned;
-	Int moneySpent;
-};
+// Note: PerPlayerScore lives in GameTelemetry.h so the watermark
+// member m_lastSent and this helper can share the layout.
 
 static void readScoreForPlayer(Player *subject, PerPlayerScore &out)
 {
@@ -233,6 +394,18 @@ void GameTelemetry::sendGameResultToRelay(Int localResult)
 	if (!localPlayer)
 		return;
 	const Int localIdx = localPlayer->getPlayerIndex();
+
+	// Force a terminal SCORE_EVENTS batch before GAMERESULT ships. The
+	// periodic onLogicFrame batch only runs every SCORE_EVENTS_EVERY_FRAMES
+	// (~3s), so a game that ends before the first tick (short matches,
+	// rage-quits) would otherwise never credit its score totals to the
+	// User rollup — the server's StatsService no longer reads score
+	// fields out of GAMERESULT at all, so without this forced send
+	// the totals stay zero for short games. Bypasses the normal
+	// throttle by zeroing the last-frame sentinel; the delta vs.
+	// m_lastSent still covers exactly the unreported tail.
+	m_lastSnapshotFrame = 0;
+	onLogicFrame();
 
 	AsciiString json;
 	json.concat("{\"ExternalKey\":\"");
@@ -376,7 +549,14 @@ void GameTelemetry::sendGameResultToRelay(Int localResult)
 
 	json.concat("}");
 
-	TheLAN->relaySendGameResult(json.str(), json.getLength());
+	// Pack on the sim thread, enqueue for the sender thread to ship.
+	// Bypasses TheLAN->relaySendGameResult's wrapper so relaySendAll
+	// is only ever invoked on the telemetry thread.
+	std::vector<UnsignedByte> packet;
+	TheLAN->packGameResultPacket(json.str(), json.getLength(), packet);
+	if (!packet.empty())
+		enqueuePacket(packet.data(), (Int)packet.size());
+
 	m_resultSent = TRUE;
 	m_active = FALSE;
 }
@@ -385,3 +565,178 @@ void GameTelemetry::onGameWon()         { sendGameResultToRelay(RES_WIN); }
 void GameTelemetry::onGameLost()        { sendGameResultToRelay(RES_LOSS); }
 void GameTelemetry::onGameSurrendered() { sendGameResultToRelay(RES_LOSS); }
 void GameTelemetry::onGameExited()      { sendGameResultToRelay(RES_DISCONNECT); }
+
+// ── Periodic score events ─────────────────────────────────────────
+//
+// Wire format (75-byte payload behind the standard
+// [4:size][4:sessionID][1:type=9] relay header):
+//
+//    [16] session GUID, raw bytes (not hex) — derived from m_sessionId
+//    [ 1] local player slot index
+//    [ 4] current logic frame           (Int32 LE)
+//    [ 8] wall-clock UTC milliseconds   (Int64 LE) at pack time
+//    [ 4] unitsBuilt                    (Int32 LE) — DELTA since last send
+//    [ 4] unitsLost                                   DELTA
+//    [ 4] unitsKilledHuman                            DELTA
+//    [ 4] unitsKilledAI                               DELTA
+//    [ 4] buildingsBuilt                              DELTA
+//    [ 4] buildingsLost                               DELTA
+//    [ 4] buildingsKilledHuman                        DELTA
+//    [ 4] buildingsKilledAI                           DELTA
+//    [ 4] moneyEarned                                 DELTA
+//    [ 4] moneySpent                                  DELTA
+//
+// All ten score fields are DELTAS = current ScoreKeeper total minus the
+// totals we shipped on the previous send (m_lastSent). The server
+// accumulates these onto the User rollup and appends a per-batch row
+// to GameScoreEvents so the timeline can be reconstructed by frame /
+// wall clock. Fire-and-forget; a dropped packet just means that
+// round's delta folds into the next batch.
+
+// ~3 s at 30 Hz. Lowered from the old 300-frame (~10 s) snapshot
+// cadence: each batch is now small (10 deltas, mostly zero in idle
+// stretches) so the dashboard can feel live without flooding the
+// relay. ~20 packets/minute per peer, still trivial vs. lockstep
+// netcode.
+static const Int SCORE_EVENTS_EVERY_FRAMES = 90;
+
+// Parse one hex char 0..9/a..f/A..F. Returns -1 on failure.
+static Int hexVal(char c)
+{
+	if (c >= '0' && c <= '9') return c - '0';
+	if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+	if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+	return -1;
+}
+
+// Convert m_sessionId (32 hex chars) into 16 raw bytes. Returns FALSE
+// on malformed input — caller skips this snapshot.
+static Bool sessionIdToBytes(const AsciiString &sid, UnsignedByte out[16])
+{
+	if (sid.getLength() != 32)
+		return FALSE;
+	const char *p = sid.str();
+	for (Int i = 0; i < 16; ++i)
+	{
+		Int hi = hexVal(p[i * 2]);
+		Int lo = hexVal(p[i * 2 + 1]);
+		if (hi < 0 || lo < 0)
+			return FALSE;
+		out[i] = (UnsignedByte)((hi << 4) | lo);
+	}
+	return TRUE;
+}
+
+void GameTelemetry::onLogicFrame()
+{
+	// First-time trace to confirm the hook is firing. Reset each
+	// onGameStart via s_tracedOnce = FALSE so every match logs once.
+	static Bool s_tracedOnce = FALSE;
+	if (!s_tracedOnce)
+	{
+		telemetryTrace("onLogicFrame first tick; m_active=%d m_resultSent=%d sid=%s",
+		               (int)m_active, (int)m_resultSent,
+		               m_sessionId.isEmpty() ? "empty" : m_sessionId.str());
+		s_tracedOnce = TRUE;
+	}
+
+	if (!m_active || m_resultSent || m_sessionId.isEmpty())
+		return;
+	if (!TheLAN || !TheGameLogic || !ThePlayerList)
+		return;
+
+	const Int currentFrame = (Int)TheGameLogic->getFrame();
+	if (m_lastSnapshotFrame != 0
+	    && (currentFrame - m_lastSnapshotFrame) < SCORE_EVENTS_EVERY_FRAMES)
+		return;
+
+	Player *localPlayer = ThePlayerList->getLocalPlayer();
+	if (!localPlayer)
+		return;
+
+	UnsignedByte sidBytes[16];
+	if (!sessionIdToBytes(m_sessionId, sidBytes))
+		return;
+
+	PerPlayerScore current;
+	readScoreForPlayer(localPlayer, current);
+
+	// Per-field delta vs. the last batch we shipped. Negative deltas
+	// shouldn't happen in normal play (ScoreKeeper totals are
+	// monotonic) but we don't clamp here — the server is responsible
+	// for any sanity floors so the wire stays a clean diff.
+	PerPlayerScore d;
+	d.unitsBuilt           = current.unitsBuilt           - m_lastSent.unitsBuilt;
+	d.unitsLost            = current.unitsLost            - m_lastSent.unitsLost;
+	d.unitsKilledHuman     = current.unitsKilledHuman     - m_lastSent.unitsKilledHuman;
+	d.unitsKilledAI        = current.unitsKilledAI        - m_lastSent.unitsKilledAI;
+	d.buildingsBuilt       = current.buildingsBuilt       - m_lastSent.buildingsBuilt;
+	d.buildingsLost        = current.buildingsLost        - m_lastSent.buildingsLost;
+	d.buildingsKilledHuman = current.buildingsKilledHuman - m_lastSent.buildingsKilledHuman;
+	d.buildingsKilledAI    = current.buildingsKilledAI    - m_lastSent.buildingsKilledAI;
+	d.moneyEarned          = current.moneyEarned          - m_lastSent.moneyEarned;
+	d.moneySpent           = current.moneySpent           - m_lastSent.moneySpent;
+
+	// Wall-clock UTC milliseconds since the Unix epoch. std::chrono
+	// system_clock is portable and matches what DateTime.UtcNow on the
+	// server reads from System.DateTime — no timezone math needed on
+	// either end.
+	const Int64 utcMillis =
+		std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::system_clock::now().time_since_epoch()).count();
+
+	// Pack the 75-byte payload. Little-endian on x86/x64 — memcpy of
+	// a native Int32/Int64 matches what BitConverter.ToInt32 /
+	// BitConverter.ToInt64 read on the other end.
+	UnsignedByte buf[75];
+	Int off = 0;
+	memcpy(buf + off, sidBytes, 16); off += 16;
+	buf[off++] = (UnsignedByte)(localPlayer->getPlayerIndex() & 0xFF);
+	Int frame = currentFrame;
+	memcpy(buf + off, &frame, 4); off += 4;
+	memcpy(buf + off, &utcMillis, 8); off += 8;
+
+	#define PUT_I32(v) do { Int _v = (Int)(v); memcpy(buf + off, &_v, 4); off += 4; } while (0)
+	PUT_I32(d.unitsBuilt);
+	PUT_I32(d.unitsLost);
+	PUT_I32(d.unitsKilledHuman);
+	PUT_I32(d.unitsKilledAI);
+	PUT_I32(d.buildingsBuilt);
+	PUT_I32(d.buildingsLost);
+	PUT_I32(d.buildingsKilledHuman);
+	PUT_I32(d.buildingsKilledAI);
+	PUT_I32(d.moneyEarned);
+	PUT_I32(d.moneySpent);
+	#undef PUT_I32
+
+	// Assert the payload length matches the wire contract. Compile-time
+	// check isn't an option because `off` is a runtime accumulator, but
+	// if this ever fires at runtime it means the fixed-width layout drifted.
+	if (off != sizeof(buf))
+		return;
+
+	// Pack the framed bytes on the sim thread, hand them to the
+	// telemetry sender thread for the blocking relaySendAll. Bypasses
+	// the relaySendScoreEvents wrapper so relaySendAll runs only on
+	// the sender thread.
+	std::vector<UnsignedByte> packet;
+	TheLAN->packScoreEventPacket(buf, (Int)sizeof(buf), packet);
+	if (!packet.empty())
+	{
+		enqueuePacket(packet.data(), (Int)packet.size());
+		telemetryTrace("enqueued SCORE_EVENTS frame=%d size=%d built=%d lost=%d killed=%d money=%d/%d",
+		               currentFrame, (int)packet.size(),
+		               d.unitsBuilt, d.unitsLost,
+		               d.unitsKilledHuman + d.unitsKilledAI,
+		               d.moneyEarned, d.moneySpent);
+	}
+	else
+	{
+		telemetryTrace("pack returned empty packet (relay likely disconnected)");
+	}
+
+	// Advance the watermark to the totals we just shipped. Any
+	// further changes will surface in the next batch's delta.
+	m_lastSent = current;
+	m_lastSnapshotFrame = currentFrame;
+}
