@@ -1034,8 +1034,15 @@ void FlightDeckBehavior::defectAllParkedUnits(Team* newTeam, UnsignedInt detecti
 
 			if (obj->isAboveTerrain() && !takeoffOrLanding)
 			{
-				// if the new team is a different controlling player, this guys loses his space.
-				if (newTeam->getControllingPlayer() != obj->getControllingPlayer())
+				// Rule 2 (benefits to allies): an allied aircraft keeps its
+				// flight-deck slot when this carrier switches teams, as long as
+				// the new team is still allied.
+				const Player *newOwner = newTeam->getControllingPlayer();
+				const Player *planeOwner = obj->getControllingPlayer();
+				Bool stillFriendly = (newOwner == planeOwner);
+				if (!stillFriendly && newOwner && planeOwner)
+					stillFriendly = (newOwner->getRelationship( planeOwner->getDefaultTeam() ) == ALLIES);
+				if (!stillFriendly)
 				{
 					releaseSpace(obj->getID());
 					if (obj->getProducerID() == getObject()->getID())

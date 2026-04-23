@@ -374,8 +374,9 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 			if( building == nullptr )
 				break;
 
-			// sanity check, the building must be under our control to cancel construction
-			if( building->getControllingPlayer() != ThePlayerList->getLocalPlayer() )
+			// sanity check, the building must be commandable by us
+			// (own, or teammate's under Shared Control) to cancel construction.
+			if( !building->isCommandableBy( ThePlayerList->getLocalPlayer() ) )
 				break;
 
 			// do the message
@@ -489,8 +490,10 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 			if( producer == nullptr )
 				break;
 
-			// sanity, we must control the producer ... if this isn't true they might be hacking the game
-			if( producer->getControllingPlayer() != ThePlayerList->getLocalPlayer() )
+			// sanity, we must be able to command the producer ... if this
+			// isn't true they might be hacking the game. Shared Control
+			// allows teammate-controlled queue cancellation.
+			if( !producer->isCommandableBy( ThePlayerList->getLocalPlayer() ) )
 				break;
 
 			// send a message to cancel that particular production entry

@@ -64,8 +64,17 @@ static void checkForGrantStealth( Object *testObj, void *userData )
 	if( testObj->isEffectivelyDead() )
 		return;
 
-	if( testObj->getControllingPlayer() != helper->m_theGrantor->getControllingPlayer() )
-		return;
+	// Rule 2 (benefits to allies): stealth-grant aura extends to allied units.
+	{
+		const Player *grantorPlayer = helper->m_theGrantor->getControllingPlayer();
+		const Player *testPlayer = testObj->getControllingPlayer();
+		if( testPlayer != grantorPlayer )
+		{
+			if( !grantorPlayer || !testPlayer ||
+			    grantorPlayer->getRelationship( testPlayer->getDefaultTeam() ) != ALLIES )
+				return;
+		}
+	}
 
 	if( testObj->isOffMap() )
 		return;

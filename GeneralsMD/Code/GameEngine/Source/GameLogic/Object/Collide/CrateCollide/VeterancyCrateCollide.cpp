@@ -101,11 +101,18 @@ Bool VeterancyCrateCollide::isValidToExecute( const Object *other ) const
 
 	if( d->m_isPilot )
 	{
-		if( other->getControllingPlayer() != getObject()->getControllingPlayer() )
+		// Rule 2 (benefits to allies): a pilot may hop into an allied vehicle,
+		// not just their own. Keeps civilian/enemy vehicles rejected.
+		const Player *pilotPlayer = getObject()->getControllingPlayer();
+		const Player *vehiclePlayer = other->getControllingPlayer();
+		Bool friendly = (vehiclePlayer == pilotPlayer);
+		if( !friendly && pilotPlayer && vehiclePlayer )
+			friendly = (pilotPlayer->getRelationship( vehiclePlayer->getDefaultTeam() ) == ALLIES);
+		if( !friendly )
 		{
 			//This is a pilot and we are checking to make sure the pilot is entering a vehicle on
-			//the same team. If it's not, then don't allow it.. this is particularly the case for
-			//pilots attempting to enter civilian vehicles.
+			//the same team (or an allied team). If it's not, then don't allow it.. this is
+			//particularly the case for pilots attempting to enter civilian vehicles.
 			return false;
 		}
 

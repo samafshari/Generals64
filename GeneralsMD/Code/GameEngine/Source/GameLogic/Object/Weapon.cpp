@@ -722,7 +722,15 @@ Bool WeaponTemplate::shouldProjectileCollideWith(
 
 	if (thingWeCollidedWith->isKindOf(KINDOF_STRUCTURE))
 	{
-		if (thingWeCollidedWith->getControllingPlayer() == projectile->getControllingPlayer())
+		// Rule 2 (benefits to allies): allied structures count as "controlled"
+		// for projectile collision purposes, so friendly-fire behavior
+		// (passing through own buildings) extends to teammate buildings.
+		const Player *projPlayer = projectile->getControllingPlayer();
+		const Player *structPlayer = thingWeCollidedWith->getControllingPlayer();
+		Bool friendlyStruct = (structPlayer == projPlayer);
+		if (!friendlyStruct && projPlayer && structPlayer)
+			friendlyStruct = (projPlayer->getRelationship( structPlayer->getDefaultTeam() ) == ALLIES);
+		if (friendlyStruct)
 			requiredMask |= WEAPON_COLLIDE_CONTROLLED_STRUCTURES;
 		else
 			requiredMask |= WEAPON_COLLIDE_STRUCTURES;

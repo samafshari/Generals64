@@ -503,8 +503,18 @@ StateReturnType DozerActionDoActionState::update()
 		case DOZER_TASK_BUILD:
 		{
 			//GS Moved this inside Build, since you are allowed to Repair things that are not your player (canRepairObject handles it)
-			if (dozer->getControllingPlayer() != goalObject->getControllingPlayer())//Yipes, SOmehow I have changed sides in mid build!
-				return STATE_FAILURE;
+			// Rule 2 (benefits to allies): a mid-build side switch to an allied
+			// owner is still OK — the dozer keeps building. Only a genuine
+			// defection to a non-ally fails the task.
+			{
+				const Player *dozerPlayer = dozer->getControllingPlayer();
+				const Player *goalPlayer  = goalObject->getControllingPlayer();
+				Bool stillFriendly = (dozerPlayer == goalPlayer);
+				if (!stillFriendly && dozerPlayer && goalPlayer)
+					stillFriendly = (dozerPlayer->getRelationship( goalPlayer->getDefaultTeam() ) == ALLIES);
+				if (!stillFriendly)
+					return STATE_FAILURE; //Yipes, SOmehow I have changed sides in mid build!
+			}
 
 			// if we need to select the dock location and move there do so
 			if( dozerAI->getBuildSubTask() == DOZER_SELECT_BUILD_DOCK_LOCATION )
@@ -1665,9 +1675,12 @@ Object *DozerAIUpdate::construct( const ThingTemplate *what,
 	if( what == nullptr || pos == nullptr || owningPlayer == nullptr )
 		return nullptr;
 
-	// sanity
-	DEBUG_ASSERTCRASH( getObject()->getControllingPlayer() == owningPlayer,
-										 ("Dozer::Construct - The controlling player of the Dozer is not the owning player passed in") );
+	// sanity — under Shared Control the commanding player may be a
+	// teammate of the dozer's owner. The resulting building is still
+	// owned by the dozer's owner (owningPlayer), so we only check that
+	// the dozer is commandable by that player.
+	DEBUG_ASSERTCRASH( getObject()->isCommandableBy( owningPlayer ),
+										 ("Dozer::Construct - Dozer is not commandable by the owning player passed in") );
 
 	// if we're not rebuilding, we have a few checks to pass first for sanity
 	if( isRebuild == FALSE )

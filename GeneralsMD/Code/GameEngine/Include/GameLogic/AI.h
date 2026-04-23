@@ -1015,6 +1015,17 @@ public:
 
 	// Remove any objects that aren't owned by the player, and return true if the group was destroyed due to emptiness
 	Bool removeAnyObjectsNotOwnedByPlayer( const Player *ownerPlayer );
+
+	// Remove any objects that can't be commanded by the commanding player,
+	// and return true if the group was destroyed due to emptiness.
+	// When Shared Control is off this behaves identically to
+	// removeAnyObjectsNotOwnedByPlayer. When Shared Control is on,
+	// teammates are accepted — any object controlled by a player on the
+	// same GameSlot team as the commander stays in the group. The
+	// authorization gate on every GameLogic command flows through this
+	// function, so "commander changes, owner doesn't" is enforced by
+	// widening here rather than per-command-type.
+	Bool removeAnyObjectsNotCommandableBy( const Player *commandingPlayer );
 	
 	UnsignedInt getID( void );
 		

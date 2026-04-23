@@ -329,11 +329,15 @@ Object *BuildAssistant::buildObjectNow( Object *constructorObject, const ThingTe
 	if( owningPlayer == nullptr )
 		return nullptr;// Invalid pointer.  Won't happen.
 
-	// sanity
+	// sanity — the constructor's owner is normally the owning player. Under
+	// Shared Control a teammate can also direct the constructor, so accept
+	// any commander who isCommandableBy-valid for the constructor. The
+	// resulting building's owner is still owningPlayer — Shared Control
+	// widens the commander, not the owner.
 	if( constructorObject )
 	{
-		DEBUG_ASSERTCRASH( constructorObject->getControllingPlayer() == owningPlayer,
-											 ("buildObjectNow: Constructor object player is not the same as the controlling player passed in\n") );
+		DEBUG_ASSERTCRASH( constructorObject->isCommandableBy( owningPlayer ),
+											 ("buildObjectNow: Constructor object is not commandable by the owning player passed in\n") );
 
 	}
 
@@ -1316,13 +1320,18 @@ CanMakeType BuildAssistant::canMakeUnit( Object *builder, const ThingTemplate *w
 
 	ProductionUpdateInterface* pu = builder->getProductionUpdateInterface();
 
-	//If our builder is actually constructing an object via a special power, then allow it if the templates match.
-	//It's possible they won't match because a GLA command center could be in "place sneak attack" mode, and queue
-	//up a worker in the meantime.
-	if( pu && pu->getSpecialPowerConstructionCommandButton() && pu->getSpecialPowerConstructionCommandButton()->getThingTemplate() == whatToBuild )
-	{
-		return CANMAKE_OK;
-	}
+	// Historical note: there used to be a bypass here that returned CANMAKE_OK
+	// when the builder's ProductionUpdate held an m_specialPowerConstructionCommandButton
+	// whose template matched whatToBuild. That field is only written from
+	// client-side UI (ControlBarCommandProcessing.cpp, when the local player
+	// clicks a "sneak attack / special-power construct" button), so only the
+	// local peer ever sees it set. Reading it here — from a sim-reachable
+	// predicate that runs identically on all peers — meant the local peer
+	// took the bypass while every remote peer did not, which is a latent
+	// cross-peer desync source (and narrow-window vanilla MP desync, not
+	// specific to Shared Control). Bypass removed; the rare case it
+	// papered over (same-template same-tick re-queue during aim) now
+	// returns the same CANMAKE_* value on every peer via the normal path.
 
   Player *player = builder->getControllingPlayer();
 

@@ -40,6 +40,8 @@
 #include "GameLogic/Damage.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
+
+#include "GameNetwork/GameInfo.h"
 #include "GameLogic/Squad.h"
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/ContainModule.h"
@@ -199,8 +201,30 @@ Bool CanSelectDrawable( const Drawable *draw, Bool dragSelecting )
 	}
 	//Now allowing the selection of everything including enemies... but only if not drag selecting.
 	//In fact the only way you can drag select is if the unit is on your team.
+	// Under Shared Control + CTRL held: drag-select also includes teammate-
+	// owned units so the local player can box-select mixed groups and issue
+	// commands. Without CTRL the drag-select stays own-only (so box-selecting
+	// in a shared base doesn't grab teammate units by accident). Ownership
+	// is not changed — this is just a UX gate on the client's selection.
+	//
+	// We use CTRL rather than ALT because ALT is already bound to the
+	// "select all of type across map" double-click behavior at line 500,
+	// and on Windows ALT tends to get eaten by the system's menu-bar focus.
+	// CTRL is only otherwise used with number keys (Ctrl+1..9 control
+	// groups), so a plain CTRL-drag is safe.
 	if( dragSelecting && !obj->isLocallyControlled() )
 	{
+		if( TheGameInfo && TheGameInfo->isSharedTeamControlEffective() &&
+		    TheKeyboard && TheKeyboard->isCtrl() )
+		{
+			const Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : nullptr;
+			const Player *objPlayer = obj->getControllingPlayer();
+			if( localPlayer && objPlayer &&
+					localPlayer->getRelationship( objPlayer->getDefaultTeam() ) == ALLIES )
+			{
+				return TRUE;
+			}
+		}
 		return FALSE;
 	}
 
@@ -1045,14 +1069,26 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			if ( group >= 0 && group < 10 )
 			{
 				DEBUG_LOG(("META: create team %d",group));
-				// Assign selected items to a group
+				// Assign selected items to a group. Under Shared Control,
+				// teammate-owned units are also eligible — the local player
+				// drag-selected a mixed group, and the group should remember
+				// all of them so the next Ctrl+N recalls the same set.
+				const Bool sharedControl = (TheGameInfo && TheGameInfo->isSharedTeamControlEffective());
+				const Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : nullptr;
 				GameMessage *newmsg = TheMessageStream->appendMessage((GameMessage::Type)(GameMessage::MSG_CREATE_TEAM0 + group));
 				Drawable *drawable = TheGameClient->getDrawableList();
 				while (drawable != nullptr)
 				{
-					if (drawable->isSelected() && drawable->getObject() && drawable->getObject()->isLocallyControlled())
+					if (drawable->isSelected() && drawable->getObject())
 					{
-						newmsg->appendObjectIDArgument(drawable->getObject()->getID());
+						Object *obj = drawable->getObject();
+						Bool eligible = obj->isLocallyControlled();
+						if (!eligible && sharedControl && localPlayer && obj->getControllingPlayer())
+						{
+							eligible = (localPlayer->getRelationship( obj->getControllingPlayer()->getDefaultTeam() ) == ALLIES);
+						}
+						if (eligible)
+							newmsg->appendObjectIDArgument(obj->getID());
 					}
 					drawable = drawable->getNextDrawable();
 				}

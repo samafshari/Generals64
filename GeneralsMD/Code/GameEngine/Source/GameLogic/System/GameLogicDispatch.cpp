@@ -84,6 +84,7 @@
 #include "GameClient/Module/BeaconClientUpdate.h"
 #include "GameClient/LookAtXlat.h"
 
+#include "GameNetwork/GameInfo.h"
 #include "GameNetwork/NetworkInterface.h"
 
 
@@ -391,9 +392,12 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 					currentlySelectedGroup = nullptr;
 				}
 
-				// If there are any units that the player doesn't own, then remove them from the "currentlySelectedGroup"
+				// Authorization gate: strip any units the commanding player isn't
+				// allowed to command. Shared-Control-aware — when the host has
+				// Shared Control on, teammates' units stay; otherwise this
+				// enforces classic owner-only command authorization.
 				if (currentlySelectedGroup)
-					if (currentlySelectedGroup->removeAnyObjectsNotOwnedByPlayer(thisPlayer))
+					if (currentlySelectedGroup->removeAnyObjectsNotCommandableBy(thisPlayer))
 						currentlySelectedGroup = nullptr;
 
 				if(TheStatsCollector)
@@ -1045,7 +1049,8 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 				break;
 
 			// sanity, the player must actually control this object
-			if( objectWantingToExit->getControllingPlayer() != thisPlayer )
+			// (or be a teammate under Shared Control).
+			if( !objectWantingToExit->isCommandableBy( thisPlayer ) )
 				break;
 
 			objectWantingToExit->releaseWeaponLock(LOCKED_TEMPORARILY);	// release any temporary locks.
@@ -1353,7 +1358,8 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 				break;
 
 			// the player must actually control the producer object
-			if( producer->getControllingPlayer() != thisPlayer )
+			// (or be a teammate under Shared Control).
+			if( !producer->isCommandableBy( thisPlayer ) )
 				break;
 
 			// producer must have a production update
@@ -1420,7 +1426,8 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 				break;
 
 			// sanity, the player must control the producer
-			if( producer->getControllingPlayer() != thisPlayer )
+			// (or be a teammate under Shared Control).
+			if( !producer->isCommandableBy( thisPlayer ) )
 				break;
 
 			// get the unit production interface
@@ -1455,6 +1462,21 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 
 			if( place == nullptr || constructorObject == nullptr )
 				break;  //These are not crashes, as the object may have died before this message came in
+
+			// Destructive-action carve-out under Shared Control: teammates may
+			// select each other's dozers/workers and build regular buildings,
+			// but NOT superweapon buildings. Superweapons are a strategic
+			// commitment the owner must make for themselves. Gated on
+			// isSharedTeamControlEffective() as a clarity + defense-in-depth
+			// measure: in non-SC games the chokepoint guarantees
+			// constructor owner == thisPlayer anyway, but being explicit keeps
+			// the check robust if the chokepoint ever changes semantics.
+			if( place->isKindOf( KINDOF_FS_SUPERWEAPON ) &&
+					TheGameInfo && TheGameInfo->isSharedTeamControlEffective() &&
+					constructorObject->getControllingPlayer() != thisPlayer )
+			{
+				break;
+			}
 
 			if( msg->getType() == GameMessage::MSG_DOZER_CONSTRUCT )
 			{
@@ -1504,7 +1526,8 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 				break;
 
 			// the player sending this message must actually control this building
-			if( building->getControllingPlayer() != thisPlayer )
+			// (or be a teammate under Shared Control).
+			if( !building->isCommandableBy( thisPlayer ) )
 				break;
 
 			// Check to make sure it is actually under construction
@@ -1533,6 +1556,18 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		// --------------------------------------------------------------------------------------------
 		case GameMessage::MSG_SELL:
 		{
+
+			// Destructive-action carve-out under Shared Control: teammates may
+			// select each other's buildings for commands like Fire-Particle-
+			// Cannon or cancel-production, but selling is irreversible — only
+			// the actual owner can sell. Strip any teammate-owned objects
+			// from the group before dispatch.
+			if( currentlySelectedGroup &&
+					TheGameInfo && TheGameInfo->isSharedTeamControlEffective() )
+			{
+				if( currentlySelectedGroup->removeAnyObjectsNotOwnedByPlayer( thisPlayer ) )
+					currentlySelectedGroup = nullptr;
+			}
 
 			// use the selected group
 			if( currentlySelectedGroup )
@@ -1781,9 +1816,9 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 						const ThingTemplate *thing = TheThingFactory->findTemplate( playerTemplate->getBeaconTemplate() );
 						if (thing && thing->isEquivalentTo(beacon->getTemplate()))
 						{
-							if (beacon->getControllingPlayer() == thisPlayer)
+							if (beacon->isCommandableBy( thisPlayer ))
 							{
-								destroyObject(beacon); // the owner is telling it to go away.  such is life.
+								destroyObject(beacon); // the owner (or their Shared Control teammate) is telling it to go away.
 
 								TheControlBar->markUIDirty(); // check if we should un-grey out the button
 							}

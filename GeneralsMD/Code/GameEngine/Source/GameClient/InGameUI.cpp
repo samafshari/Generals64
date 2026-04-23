@@ -2917,12 +2917,26 @@ void InGameUI::createCommandHint( const GameMessage *msg )
 		srcObj = (srcDraw ? srcDraw->getObject() : nullptr);
 	}
 
+	// Is the selected source object commandable by the local player?
+	// Under Shared Control, an allied source unit drives the same cursor
+	// logic as if it were our own.
+	Bool srcCommandable = (srcObj && srcObj->isLocallyControlled());
+	if (srcObj && !srcCommandable &&
+	    TheGameInfo && TheGameInfo->isSharedTeamControlEffective())
+	{
+		const Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : nullptr;
+		const Player *srcPlayer = srcObj->getControllingPlayer();
+		if (localPlayer && srcPlayer &&
+		    localPlayer->getRelationship( srcPlayer->getDefaultTeam() ) == ALLIES)
+			srcCommandable = TRUE;
+	}
+
 	switch (m_mouseMode)
 	{
 		case MOUSEMODE_DEFAULT:
 			{
 				// This section of code only gets called when there is no specific cursor mode happening.
-				if (underWindow || (srcObj && !srcObj->isLocallyControlled()))
+				if (underWindow || (srcObj && !srcCommandable))
 				{
 					setMouseCursor(Mouse::ARROW);
 					return;
@@ -2931,9 +2945,19 @@ void InGameUI::createCommandHint( const GameMessage *msg )
 				{
 					case GameMessage::MSG_DO_MOVETO_HINT:
 					{
-						if( !drawSelectable && srcObj && srcObj->isLocallyControlled() && srcObj->isKindOf(KINDOF_STRUCTURE))
+						// Hover object selectable-for-commanding? (own OR ally under SC)
+						Bool hoverCommandable = (obj && obj->isLocallyControlled());
+						if (obj && !hoverCommandable &&
+						    TheGameInfo && TheGameInfo->isSharedTeamControlEffective())
+						{
+							const Player *lp = ThePlayerList ? ThePlayerList->getLocalPlayer() : nullptr;
+							const Player *op = obj->getControllingPlayer();
+							if (lp && op && lp->getRelationship( op->getDefaultTeam() ) == ALLIES)
+								hoverCommandable = TRUE;
+						}
+						if( !drawSelectable && srcCommandable && srcObj && srcObj->isKindOf(KINDOF_STRUCTURE))
 							setMouseCursor( Mouse::GENERIC_INVALID );
-						else if( drawSelectable && obj->isLocallyControlled() && !obj->isKindOf(KINDOF_MINE))
+						else if( drawSelectable && hoverCommandable && !obj->isKindOf(KINDOF_MINE))
 							setMouseCursor( Mouse::SELECTING );
 						else if( TheRadar->isRadarWindow( window ) && !rts::localPlayerHasRadar() )
 							setMouseCursor( Mouse::ARROW );
@@ -2942,11 +2966,22 @@ void InGameUI::createCommandHint( const GameMessage *msg )
 						break;
 					}
 					case GameMessage::MSG_DO_ATTACKMOVETO_HINT:
-						if( drawSelectable && obj->isLocallyControlled()  )
+					{
+						Bool hoverCommandable = (obj && obj->isLocallyControlled());
+						if (obj && !hoverCommandable &&
+						    TheGameInfo && TheGameInfo->isSharedTeamControlEffective())
+						{
+							const Player *lp = ThePlayerList ? ThePlayerList->getLocalPlayer() : nullptr;
+							const Player *op = obj->getControllingPlayer();
+							if (lp && op && lp->getRelationship( op->getDefaultTeam() ) == ALLIES)
+								hoverCommandable = TRUE;
+						}
+						if( drawSelectable && hoverCommandable  )
 							setMouseCursor( Mouse::SELECTING );
 						else
 							setMouseCursor( Mouse::ATTACKMOVETO );
 						break;
+					}
 					case GameMessage::MSG_ADD_WAYPOINT_HINT:
 						setMouseCursor( Mouse::WAYPOINT );
 						break;
@@ -4509,10 +4544,28 @@ Bool InGameUI::areSelectedObjectsControllable() const
 	{
 		// get this drawable
 		draw = *it;
+		const Object *obj = draw ? draw->getObject() : nullptr;
+		if (!obj)
+			continue;
 
-		// All selected objects will have the same local controller, so
-		// simply return the first one.
-		return draw->getObject()->isLocallyControlled();
+		// Normally "controllable" means own. Under Shared Control, allied
+		// units / buildings are also commandable by the local player, so
+		// they count as controllable for UI purposes (command bar shows
+		// their buttons, right-click commands flow through).
+		if (obj->isLocallyControlled())
+			return TRUE;
+
+		if (TheGameInfo && TheGameInfo->isSharedTeamControlEffective())
+		{
+			const Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : nullptr;
+			const Player *objPlayer = obj->getControllingPlayer();
+			if (localPlayer && objPlayer &&
+			    localPlayer->getRelationship( objPlayer->getDefaultTeam() ) == ALLIES)
+				return TRUE;
+		}
+
+		// First selected object is neither own nor ally — not controllable.
+		return FALSE;
 	}
 
 	// Nothing selected...

@@ -182,13 +182,12 @@ Bool TransportContain::isValidContainerFor(const Object* rider, Bool checkCapaci
 	if( OpenContain::isValidContainerFor( rider, checkCapacity ) == false )
 		return false;
 
-//	// only allied objects can be transported.
-//	// order matters: we want to know if I consider it to be an ally, not vice versa
-//	if (getObject()->getRelationship(rider) != ALLIES)
-//		return false;
-
-// no... actually, only OUR OWN units can be transported.
-	if (rider->getControllingPlayer() != getObject()->getControllingPlayer())
+	// Rule 2 (benefits to allies): allied units can board our transports.
+	// Previously this was owner-only; now we accept any ally (own included,
+	// since self is trivially ALLIES).
+	// order matters: we want to know if I (the transport) consider rider
+	// an ally — the rider's perspective doesn't gate boarding.
+	if (getObject()->getRelationship(rider) != ALLIES)
 		return false;
 
 	Int transportSlotCount = rider->getTransportSlotCount();

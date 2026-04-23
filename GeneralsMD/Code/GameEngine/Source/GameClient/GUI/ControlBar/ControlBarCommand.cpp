@@ -1134,6 +1134,18 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 				BuildableStatus bStatus = whatToBuild->getBuildable();
 				if (bStatus == BSTATUS_NO || (bStatus == BSTATUS_ONLY_BY_AI && obj->getControllingPlayer()->getPlayerType() != PLAYER_COMPUTER))
 					return COMMAND_HIDDEN;
+
+				// Destructive-action carve-out: under Shared Control, teammates
+				// cannot start construction of superweapon buildings on your
+				// dozer. Hide the button on their client so they don't see it
+				// at all (matches the sim-side enforcement in GameLogicDispatch
+				// MSG_DOZER_CONSTRUCT).
+				if (whatToBuild->isKindOf( KINDOF_FS_SUPERWEAPON ))
+				{
+					const Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : nullptr;
+					if (localPlayer && obj->getControllingPlayer() != localPlayer)
+						return COMMAND_HIDDEN;
+				}
 			}
 
 			// sanity, non dozer object
@@ -1178,6 +1190,15 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
     //since the container can be subdued, , M Lorenzen 8/11
       if ( obj->isDisabledByType( DISABLED_SUBDUED ) )
         return COMMAND_RESTRICTED;
+
+			// Destructive-action carve-out: under Shared Control, teammates
+			// cannot sell your buildings. Hide the button rather than let
+			// the sim-side filter swallow it silently.
+			{
+				const Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : nullptr;
+				if (localPlayer && obj->getControllingPlayer() != localPlayer)
+					return COMMAND_HIDDEN;
+			}
 
 			break;
 		}

@@ -64,8 +64,20 @@ static void checkForAutoHeal( Object *testObj, void *userData )
 	if( testObj->isEffectivelyDead() )
 		return;
 
-	if( testObj->getControllingPlayer() != helper->m_theHealer->getControllingPlayer() )
-		return;
+	// Rule 2 (benefits to allies): auto-heal affects own + allied units,
+	// not just own. Heals are a benefit so they extend to allies; under
+	// Shared Money + Power + Control they effectively are team-level
+	// anyway. Self is always considered an ally.
+	{
+		const Player *healerPlayer = helper->m_theHealer->getControllingPlayer();
+		const Player *testPlayer = testObj->getControllingPlayer();
+		if( testPlayer != healerPlayer )
+		{
+			if( !healerPlayer || !testPlayer ||
+			    healerPlayer->getRelationship( testPlayer->getDefaultTeam() ) != ALLIES )
+				return;
+		}
+	}
 
 	if( testObj->isOffMap() )
 		return;

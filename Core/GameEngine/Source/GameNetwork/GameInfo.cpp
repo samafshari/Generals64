@@ -327,7 +327,10 @@ void GameInfo::reset()
   m_sharedTeamMoney = FALSE; // Team-pooled credits mode; host toggles via lobby checkbox
   m_sharedTeamPower = FALSE; // Team-pooled energy mode; host toggles via lobby checkbox
   m_aiChecksMoney   = FALSE; // Retail default: AI dozer construction skips the money check. Host toggles via lobby.
-  m_aiRebuildsCC    = FALSE; // Retail default: AI gives up if it loses its last Command Center. Host toggles via lobby.
+  m_aiRebuildsCC    = TRUE;  // New default: let the AI recover from decapitation. Host can toggle off via lobby.
+                             // NOTE: because default flipped, ARC= is emitted unconditionally in
+                             // GameInfoToAsciiString (can't rely on emit-only-when-on any more).
+  m_sharedTeamControl = FALSE; // Team shared-control mode; host toggles via lobby checkbox. Requires Shared Money + Power.
 //	m_localIP = 0; // BGC - actually we don't want this to be reset since the m_localIP is
 										// set properly in the constructor of LANGameInfo which uses this as a base class.
 	m_mapCRC = 0;
@@ -978,9 +981,32 @@ AsciiString GameInfoToAsciiString( const GameInfo *game )
 	if (game->isAiChecksMoney())
 		optionsString.concat("ACM=1;");
 
-	// AI Rebuilds CC flag. Same emit-only-when-on convention.
-	if (game->isAiRebuildsCC())
-		optionsString.concat("ARC=1;");
+	// AI Rebuilds CC flag. The default flipped from FALSE to TRUE, so
+	// "emit only when on" would silently break when the host unchecks —
+	// joiners' reset-initialized state (TRUE) would not be overwritten
+	// because the absent key wouldn't trigger the setter. Always emit
+	// the explicit 0/1 so toggling off propagates correctly.
+	{
+		AsciiString arcStr;
+		arcStr.format("ARC=%d;", game->isAiRebuildsCC() ? 1 : 0);
+		optionsString.concat(arcStr);
+	}
+
+	// Shared Control flag. Always emit 0/1 (not emit-only-when-on) so
+	// that a host disabling SC actually propagates to joiners: with
+	// emit-only-when-on, an absent key leaves the joiner at its
+	// previously-parsed value, not at the reset default. Even though
+	// the default is FALSE (which would make emit-only-when-on look
+	// correct on first join), subsequent host toggles would be silently
+	// lost. Defense-in-depth vs the emit-only-when-on bug that STM and
+	// STP still carry. isSharedTeamControlEffective() requires STM+STP
+	// to also be on, so the reader still guards against a malformed
+	// STC=1 without prereqs.
+	{
+		AsciiString stcStr;
+		stcStr.format("STC=%d;", game->isSharedTeamControl() ? 1 : 0);
+		optionsString.concat(stcStr);
+	}
 
 	//add player info for each slot
 	optionsString.concat(slotListID);
@@ -1230,6 +1256,10 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
 		else if (key.compare("ARC") == 0)
 		{
 			game->setAiRebuildsCC( atoi(val.str()) != 0 );
+		}
+		else if (key.compare("STC") == 0)
+		{
+			game->setSharedTeamControl( atoi(val.str()) != 0 );
 		}
 		else if (key.getLength() == 1 && *key.str() == slotListID)
 		{
@@ -1679,7 +1709,11 @@ void SkirmishGameInfo::xfer( Xfer *xfer )
 	// preserves retail AI-cheat behavior in older saves).
 	// Version 8 adds the "AI Rebuilds CC" host flag (default FALSE,
 	// preserves retail decapitation behavior).
-	const XferVersion currentVersion = 8;
+	// Version 9 adds the "Shared Control" team-mode flag (default FALSE,
+	// and isSharedTeamControl() requires Shared Money + Power anyway so
+	// a v9 save from a session that had all three on replays as
+	// shared-control-on; older saves simply load as FALSE).
+	const XferVersion currentVersion = 9;
 #endif
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
@@ -1834,6 +1868,16 @@ void SkirmishGameInfo::xfer( Xfer *xfer )
   {
     // Pre-v8 save — AI never recovered from CC loss.
     m_aiRebuildsCC = FALSE;
+  }
+
+  if ( version >= 9 )
+  {
+    xfer->xferBool( &m_sharedTeamControl );
+  }
+  else if ( xfer->getXferMode() == XFER_LOAD )
+  {
+    // Pre-v9 save — no shared-control mode was possible.
+    m_sharedTeamControl = FALSE;
   }
 }
 

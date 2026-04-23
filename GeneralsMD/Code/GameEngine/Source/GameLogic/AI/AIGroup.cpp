@@ -33,6 +33,7 @@
 #include "Common/CRCDebug.h"
 #include "Common/Player.h"
 #include "Common/SpecialPower.h"
+#include "GameNetwork/GameInfo.h"
 #include "Common/ThingTemplate.h"
 #include "Common/Upgrade.h"
 #include "Common/Xfer.h"
@@ -271,6 +272,54 @@ Bool AIGroup::removeAnyObjectsNotOwnedByPlayer( const Player *ownerPlayer )
 			// Advance the iterator first, its about to become invalid.
 			++it;
 
+			if (remove(obj)) {
+				return TRUE;
+			}
+			continue;
+		}
+
+		++it;
+	}
+
+	return FALSE;
+}
+
+/**
+ * Remove any objects the commanding player isn't allowed to command, and
+ * return true if the group was emptied. This is the Shared-Control-aware
+ * variant of removeAnyObjectsNotOwnedByPlayer — when TheGameInfo says
+ * Shared Control is on, teammates on the same lobby team as the commander
+ * are accepted (the ALLIES relationship is what the lobby-team setup
+ * produces via GameLogic::startNewGame's ally bindings).
+ *
+ * Shared Control off → behaves identically to owner-only filtering.
+ *
+ * Ownership of accepted objects is NOT changed here. This is purely a
+ * command-time authorization gate.
+ */
+Bool AIGroup::removeAnyObjectsNotCommandableBy( const Player *commandingPlayer )
+{
+	const Bool sharedControl = (TheGameInfo && TheGameInfo->isSharedTeamControlEffective());
+
+	ListObjectPtrIt it;
+	for (it = m_memberList.begin(); it != m_memberList.end(); /* empty */) {
+		Object *obj = (*it);
+		if (!obj) {
+			continue;
+		}
+
+		const Player *ownerPlayer = obj->getControllingPlayer();
+		Bool isCommandable = (ownerPlayer == commandingPlayer);
+		if (!isCommandable && sharedControl && commandingPlayer && ownerPlayer) {
+			// Same lobby team under Shared Control — accept teammate's unit.
+			// Lobby teammates are wired as ALLIES via GameLogic::startNewGame
+			// so we use the diplomatic relationship as the is-teammate test.
+			isCommandable = (commandingPlayer->getRelationship(ownerPlayer->getDefaultTeam()) == ALLIES);
+		}
+
+		if (!isCommandable) {
+			// Advance the iterator first, its about to become invalid.
+			++it;
 			if (remove(obj)) {
 				return TRUE;
 			}

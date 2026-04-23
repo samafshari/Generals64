@@ -2040,9 +2040,14 @@ void ControlBar::evaluateContextUI()
 				Player *localPlayer = ThePlayerList->getLocalPlayer();
 				Relationship relationship;
 
-				// we cannot select objects that are controlled by our enemies
+				// we cannot select objects that are controlled by our enemies.
+				// Under Shared Control, allied garrisoned structures also show
+				// their inventory so the teammate can evacuate the occupants.
 				relationship = localPlayer->getRelationship( obj->getTeam() );
-				if( obj->isLocallyControlled() == TRUE || relationship == NEUTRAL )
+				const Bool sharedControl = (TheGameInfo && TheGameInfo->isSharedTeamControlEffective());
+				if( obj->isLocallyControlled() == TRUE ||
+				    relationship == NEUTRAL ||
+				    (sharedControl && relationship == ALLIES) )
 					switchToContext( CB_CONTEXT_STRUCTURE_INVENTORY, drawToEvaluateFor );
 
 			}

@@ -304,6 +304,32 @@ public:
   inline Bool isAiRebuildsCC() const;
   inline void setAiRebuildsCC( Bool enabled );
 
+  // "Shared Control" team mode. When on, teammates can select, see
+  // command buttons on, and issue orders to each other's units and
+  // buildings. Ownership stays with the original owner — teammates
+  // are remote controllers, not co-owners. XP, cost, cooldowns,
+  // upgrades, score, per-player limits all accrue to the owner.
+  //
+  // Two accessors:
+  //   isSharedTeamControl()            - raw flag as the host set it
+  //   isSharedTeamControlEffective()   - raw flag AND both prereqs on
+  //
+  // Sim code should call isSharedTeamControlEffective(); the lobby UI
+  // reads the raw flag so toggling can drive the linkage even before
+  // the prereqs have been flipped on. isSharedTeamControlEffective()
+  // is also defense-in-depth against a malformed options string that
+  // set STC=1 without STM / STP.
+  //
+  // Destructive-action carve-outs even when Shared Control is on:
+  //   - teammates cannot start construction of superweapon buildings
+  //     on your construction yard
+  //   - teammates cannot sell your buildings
+  // These are enforced in the build/sell authorization paths and
+  // follow the rule "commander changes, owner doesn't."
+  inline Bool isSharedTeamControl() const;
+  inline Bool isSharedTeamControlEffective() const;
+  inline void setSharedTeamControl( Bool shared );
+
   Bool isClientServerMode() const { return m_clientServerMode; }
   void setClientServerMode(Bool cs) { m_clientServerMode = cs; }
 
@@ -343,6 +369,7 @@ protected:
   Bool m_sharedTeamPower;  // Host-enabled "shared power" team mode — see isSharedTeamPower comment
   Bool m_aiChecksMoney;    // When TRUE, AI respects the normal cost check — see isAiChecksMoney comment
   Bool m_aiRebuildsCC;     // When TRUE, AI conjures a new CC if all its CCs + dozers are destroyed — see isAiRebuildsCC comment
+  Bool m_sharedTeamControl;// Host-enabled "shared control" team mode — see isSharedTeamControl comment. Requires m_sharedTeamMoney && m_sharedTeamPower.
 };
 
 extern GameInfo *TheGameInfo;
@@ -372,6 +399,19 @@ Bool        GameInfo::isAiChecksMoney() const           { return m_aiChecksMoney
 void        GameInfo::setAiChecksMoney( Bool enabled )  { m_aiChecksMoney = enabled; }
 Bool        GameInfo::isAiRebuildsCC() const            { return m_aiRebuildsCC; }
 void        GameInfo::setAiRebuildsCC( Bool enabled )   { m_aiRebuildsCC = enabled; }
+// Raw flag as the host set it. Lobby UI calls this so toggling can
+// drive the prereq linkage directly (if we used the Effective variant
+// here, the linkage would never fire: the flag would read FALSE on
+// turn-on because the prereqs haven't been flipped yet, and the
+// "value unchanged" early-return would hit).
+Bool        GameInfo::isSharedTeamControl() const       { return m_sharedTeamControl; }
+// Sim-effective view: requires all three team-sharing flags. Guards
+// against malformed options strings that set STC=1 without STM / STP.
+Bool        GameInfo::isSharedTeamControlEffective() const
+{
+	return m_sharedTeamControl && m_sharedTeamMoney && m_sharedTeamPower;
+}
+void        GameInfo::setSharedTeamControl( Bool shared ) { m_sharedTeamControl = shared; }
 
 AsciiString GameInfoToAsciiString( const GameInfo *game );
 Bool ParseAsciiStringToGameInfo( GameInfo *game, AsciiString options );

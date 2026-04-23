@@ -43,6 +43,7 @@
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/GadgetPushButton.h"
 #include "GameClient/HotKey.h"
+#include "GameNetwork/GameInfo.h"
 
 
 #define STOP_ID			10
@@ -207,8 +208,12 @@ void ControlBar::updateContextStructureInventory()
 	// in that case we want to unselect the building so that we can't see the contents
 	//
 	Player *localPlayer = ThePlayerList->getLocalPlayer();
-	if( source->isLocallyControlled() == FALSE &&
-			localPlayer->getRelationship( source->getTeam() ) != NEUTRAL )
+	Relationship rel = localPlayer->getRelationship( source->getTeam() );
+	const Bool sharedControl = (TheGameInfo && TheGameInfo->isSharedTeamControlEffective());
+	const Bool canViewInventory = source->isLocallyControlled()
+	                              || rel == NEUTRAL
+	                              || (sharedControl && rel == ALLIES);
+	if( !canViewInventory )
 	{
 		Drawable *draw = source->getDrawable();
 

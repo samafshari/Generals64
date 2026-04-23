@@ -120,6 +120,7 @@ static NameKeyType checkBoxSharedMoneyID = NAMEKEY_INVALID;
 static NameKeyType checkBoxSharedPowerID = NAMEKEY_INVALID;
 static NameKeyType checkBoxAiChecksMoneyID = NAMEKEY_INVALID;
 static NameKeyType checkBoxAiRebuildsCCID = NAMEKEY_INVALID;
+static NameKeyType checkBoxSharedControlID = NAMEKEY_INVALID;
 static NameKeyType windowMapID = NAMEKEY_INVALID;
 // Window Pointers ------------------------------------------------------------------------
 static GameWindow *parentLanGameOptions = nullptr;
@@ -151,6 +152,11 @@ static GameWindow *checkBoxAiChecksMoney = nullptr;
 // behavior; when on, the AI conjures a new CC via the thin-air
 // build path if its last CC and all dozers are destroyed.
 static GameWindow *checkBoxAiRebuildsCC = nullptr;
+// "Shared Control" — below the AI row. Host-only. Enabling it auto-
+// enables Shared Money + Shared Power (its hard prerequisites);
+// disabling either prereq forces Shared Control off. See
+// handleSharedControlToggle / handleSharedMoneyToggle / handleSharedPowerToggle.
+static GameWindow *checkBoxSharedControl = nullptr;
 
 // Preset values for the host's superweapon-limit combo. Counts are interpreted
 // PER TEAM, not per player — see Player::canBuildMoreOfType for the change.
@@ -808,6 +814,26 @@ static void handleSharedMoneyToggle()
 		return;
 
 	myGame->setSharedTeamMoney(newVal);
+
+	// Shared Control requires Shared Money — turning Money off forces
+	// Control off too. The updateGameOptions refresh loop will sync
+	// the Shared Control checkbox on the next tick, but we clear the
+	// GameInfo flag immediately so the rebroadcast reflects reality.
+	if (!newVal && myGame->isSharedTeamControl())
+		myGame->setSharedTeamControl(FALSE);
+
+	// Soft link: enabling Shared Money auto-enables AI Checks Money so
+	// the AI doesn't secretly drain the team pool via its free-dozer-
+	// construction shortcut. The reverse is NOT tied: the host can turn
+	// AI Checks Money off again after this auto-enable, and turning
+	// Shared Money off later doesn't touch AI Checks Money.
+	if (newVal && !myGame->isAiChecksMoney())
+	{
+		myGame->setAiChecksMoney(TRUE);
+		if (checkBoxAiChecksMoney && !GadgetCheckBoxIsChecked(checkBoxAiChecksMoney))
+			GadgetCheckBoxSetChecked(checkBoxAiChecksMoney, TRUE);
+	}
+
 	myGame->resetAccepted();
 
 	if (!s_isIniting)
@@ -832,6 +858,9 @@ static void handleSharedPowerToggle()
 		return;
 
 	myGame->setSharedTeamPower(newVal);
+	// Shared Control requires Shared Power — same rule as Shared Money.
+	if (!newVal && myGame->isSharedTeamControl())
+		myGame->setSharedTeamControl(FALSE);
 	myGame->resetAccepted();
 
 	if (!s_isIniting)
@@ -862,6 +891,63 @@ static void handleAiChecksMoneyToggle()
 	{
 		// Rebroadcast so every peer (and any server-side match record
 		// that scrapes the options string) picks up ACM=N.
+		TheLAN->RequestGameOptions(GenerateGameOptionsString(), true);
+		lanUpdateSlotList();
+	}
+}
+
+static void handleSharedControlToggle()
+{
+	LANGameInfo *myGame = TheLAN->GetMyGame();
+	if (!myGame || !checkBoxSharedControl)
+		return;
+
+	if (!myGame->amIHost())
+		return;
+
+	// isSharedTeamControl() now returns the raw flag (the "Effective"
+	// variant requires all three and is for sim reads), so we can use it
+	// directly here for the "no change" early-return.
+	const Bool newVal = GadgetCheckBoxIsChecked(checkBoxSharedControl);
+	if (newVal == myGame->isSharedTeamControl())
+		return;
+
+	// Enabling Shared Control auto-enables its two prerequisites.
+	// Flip the checkbox visuals directly in addition to the GameInfo
+	// flag so the linkage is immediate — the updateGameOptions refresh
+	// loop only fires on specific events, not every tick, so relying
+	// on it gave a "checkbox doesn't react" experience.
+	if (newVal)
+	{
+		if (!myGame->isSharedTeamMoney())
+		{
+			myGame->setSharedTeamMoney(TRUE);
+			if (checkBoxSharedMoney && !GadgetCheckBoxIsChecked(checkBoxSharedMoney))
+				GadgetCheckBoxSetChecked(checkBoxSharedMoney, TRUE);
+			// Cascading soft link: Shared Money pulls in AI Checks Money.
+			// Same reversal rules (host can toggle ACM off later).
+			if (!myGame->isAiChecksMoney())
+			{
+				myGame->setAiChecksMoney(TRUE);
+				if (checkBoxAiChecksMoney && !GadgetCheckBoxIsChecked(checkBoxAiChecksMoney))
+					GadgetCheckBoxSetChecked(checkBoxAiChecksMoney, TRUE);
+			}
+		}
+		if (!myGame->isSharedTeamPower())
+		{
+			myGame->setSharedTeamPower(TRUE);
+			if (checkBoxSharedPower && !GadgetCheckBoxIsChecked(checkBoxSharedPower))
+				GadgetCheckBoxSetChecked(checkBoxSharedPower, TRUE);
+		}
+	}
+
+	myGame->setSharedTeamControl(newVal);
+	myGame->resetAccepted();
+
+	if (!s_isIniting)
+	{
+		// Rebroadcast so every peer picks up STC=N (and possibly STM / STP
+		// if we just auto-enabled them) via ParseAsciiStringToGameInfo.
 		TheLAN->RequestGameOptions(GenerateGameOptionsString(), true);
 		lanUpdateSlotList();
 	}
@@ -994,6 +1080,7 @@ void InitLanGameGadgets()
   checkBoxSharedPowerID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:CheckBoxSharedPower" );
   checkBoxAiChecksMoneyID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:CheckBoxAiChecksMoney" );
   checkBoxAiRebuildsCCID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:CheckBoxAiRebuildsCC" );
+  checkBoxSharedControlID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:CheckBoxSharedControl" );
 	windowMapID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:MapWindow" );
 
 	// Initialize the pointers to our gadgets
@@ -1072,6 +1159,15 @@ void InitLanGameGadgets()
 			TheLAN->GetMyGame() ? TheLAN->GetMyGame()->isAiRebuildsCC() : FALSE);
 	}
 
+  checkBoxSharedControl = TheWindowManager->winGetWindowFromId( parentLanGameOptions, checkBoxSharedControlID );
+  DEBUG_ASSERTCRASH(checkBoxSharedControl, ("Could not find the checkBoxSharedControl"));
+	if (checkBoxSharedControl)
+	{
+		GadgetCheckBoxSetText(checkBoxSharedControl, UnicodeString::TheEmptyString);
+		GadgetCheckBoxSetChecked(checkBoxSharedControl,
+			TheLAN->GetMyGame() ? TheLAN->GetMyGame()->isSharedTeamControl() : FALSE);
+	}
+
 	// Override all five top-row option labels at runtime. The .wnd's
 	// TEXT = "GUI:..." values are kept in place for when/if CSF keys
 	// are added; these overrides win at display time until then.
@@ -1110,6 +1206,11 @@ void InitLanGameGadgets()
 			parentLanGameOptions,
 			TheNameKeyGenerator->nameToKey("LanGameOptionsMenu.wnd:StaticTextAiRebuildsCC"));
 		if (lblARC) GadgetStaticTextSetText(lblARC, UnicodeString(L"AI Rebuilds CC"));
+
+		GameWindow *lblSC = TheWindowManager->winGetWindowFromId(
+			parentLanGameOptions,
+			TheNameKeyGenerator->nameToKey("LanGameOptionsMenu.wnd:StaticTextSharedControl"));
+		if (lblSC) GadgetStaticTextSetText(lblSC, UnicodeString(L"Shared Control (requires Shared Money + Power)"));
 	}
 
 	windowMap = TheWindowManager->winGetWindowFromId( parentLanGameOptions,windowMapID  );
@@ -1277,6 +1378,7 @@ void DeinitLanGameGadgets()
   checkBoxSharedPower = nullptr;
   checkBoxAiChecksMoney = nullptr;
   checkBoxAiRebuildsCC = nullptr;
+  checkBoxSharedControl = nullptr;
 	if (windowMap)
 	{
 		windowMap->winSetUserData(nullptr);
@@ -1392,6 +1494,8 @@ void LanGameOptionsMenuInit( WindowLayout *layout, void *userData )
       checkBoxAiChecksMoney->winEnable( FALSE );  // Host-only, same reason
     if (checkBoxAiRebuildsCC)
       checkBoxAiRebuildsCC->winEnable( FALSE );   // Host-only, same reason
+    if (checkBoxSharedControl)
+      checkBoxSharedControl->winEnable( FALSE );  // Host-only, same reason
 		TheLAN->GetMyGame()->setMapCRC( TheLAN->GetMyGame()->getMapCRC() );		// force a recheck
 		TheLAN->GetMyGame()->setMapSize( TheLAN->GetMyGame()->getMapSize() ); // of if we have the map
 		TheLAN->RequestHasMap();
@@ -1556,6 +1660,17 @@ void updateGameOptions()
       Bool shouldBeCheckedARC = theGame->isAiRebuildsCC();
       if (GadgetCheckBoxIsChecked(checkBoxAiRebuildsCC) != shouldBeCheckedARC)
         GadgetCheckBoxSetChecked(checkBoxAiRebuildsCC, shouldBeCheckedARC);
+    }
+    if (checkBoxSharedControl)
+    {
+      // Raw flag. If the host has turned SC on but for any reason the
+      // prereqs aren't on (shouldn't happen — the toggle handlers keep
+      // them synchronized — but defensive), the UI still shows the
+      // host's intent; sim reads isSharedTeamControlEffective() so it
+      // won't act on an SC flag whose prereqs are missing.
+      Bool shouldBeCheckedSC = theGame->isSharedTeamControl();
+      if (GadgetCheckBoxIsChecked(checkBoxSharedControl) != shouldBeCheckedSC)
+        GadgetCheckBoxSetChecked(checkBoxSharedControl, shouldBeCheckedSC);
     }
 
     // Mirror the host's chosen game speed into the combo. If the host picked a
@@ -1884,6 +1999,11 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
 				if ( controlID == checkBoxAiRebuildsCCID )
 				{
 					handleAiRebuildsCCToggle();
+					break;
+				}
+				if ( controlID == checkBoxSharedControlID )
+				{
+					handleSharedControlToggle();
 					break;
 				}
 

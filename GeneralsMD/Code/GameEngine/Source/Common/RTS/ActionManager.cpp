@@ -598,22 +598,31 @@ Bool ActionManager::canEnterObject( const Object *obj, const Object *objectToEnt
 		if (!obj->isAboveTerrain())
 			return FALSE;
 
-		if( obj->getControllingPlayer() == objectToEnter->getControllingPlayer() )
+		// Rule 2 (benefits to allies): aircraft can land on allied airstrips.
+		// Previously own-airstrip only.
 		{
-			//Kris -- added code to prevent aircraft from landing in any airstrips other than their own!
-
-			/// @todo srj -- this is horrible, but expedient.
-			for (BehaviorModule** i = objectToEnter->getBehaviorModules(); *i; ++i)
+			const Player *planePlayer = obj->getControllingPlayer();
+			const Player *fieldPlayer = objectToEnter->getControllingPlayer();
+			Bool friendly = (planePlayer == fieldPlayer);
+			if (!friendly && planePlayer && fieldPlayer)
+				friendly = (planePlayer->getRelationship( fieldPlayer->getDefaultTeam() ) == ALLIES);
+			if (friendly)
 			{
-				ParkingPlaceBehaviorInterface* pp = (*i)->getParkingPlaceBehaviorInterface();
-				if (pp == nullptr)
-					continue;
+				//Kris -- added code to prevent aircraft from landing in any airstrips other than their own!
 
-				if (pp->hasReservedSpace(obj->getID()))
-					return TRUE;
+				/// @todo srj -- this is horrible, but expedient.
+				for (BehaviorModule** i = objectToEnter->getBehaviorModules(); *i; ++i)
+				{
+					ParkingPlaceBehaviorInterface* pp = (*i)->getParkingPlaceBehaviorInterface();
+					if (pp == nullptr)
+						continue;
 
-				if (pp->shouldReserveDoorWhenQueued(obj->getTemplate()) && pp->hasAvailableSpaceFor(obj->getTemplate()))
-					return TRUE;
+					if (pp->hasReservedSpace(obj->getID()))
+						return TRUE;
+
+					if (pp->shouldReserveDoorWhenQueued(obj->getTemplate()) && pp->hasAvailableSpaceFor(obj->getTemplate()))
+						return TRUE;
+				}
 			}
 		}
 		return FALSE;
@@ -686,8 +695,21 @@ Bool ActionManager::canEnterObject( const Object *obj, const Object *objectToEnt
 		Int stealthContainCount = contain->getStealthUnitsContained();
 		Int nonStealthContainCount = containCount - stealthContainCount;
 
-		// not ours... must do special checks.
-		if (objectToEnter->getControllingPlayer() != obj->getControllingPlayer())
+		// Rule 2 (benefits to allies): allied containers are treated as
+		// "friendly" for entry purposes, which means units can enter an
+		// allied faction structure (tunnels, garrisons with existing
+		// occupants, etc.). Ownership of the container doesn't change —
+		// the unit goes into the container's owner's list. For TunnelContain
+		// this means your unit joins the tunnel owner's TunnelTracker and
+		// can exit from any of their tunnels.
+		const Player *enterPlayer  = obj->getControllingPlayer();
+		const Player *targetPlayer = objectToEnter->getControllingPlayer();
+		Bool friendlyContainer = (targetPlayer == enterPlayer);
+		if (!friendlyContainer && enterPlayer && targetPlayer)
+			friendlyContainer = (enterPlayer->getRelationship( targetPlayer->getDefaultTeam() ) == ALLIES);
+
+		// not ours and not an ally's... must do special checks.
+		if (!friendlyContainer)
 		{
 			// not empty... can't do it.
 			if (nonStealthContainCount > 0)

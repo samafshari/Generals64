@@ -340,9 +340,12 @@ Object *WorkerAIUpdate::construct( const ThingTemplate *what,
 	if( what == nullptr || pos == nullptr || owningPlayer == nullptr )
 		return nullptr;
 
-	// sanity
-	DEBUG_ASSERTCRASH( getObject()->getControllingPlayer() == owningPlayer,
-										 ("Dozer::Construct - The controlling player of the Dozer is not the owning player passed in") );
+	// sanity — under Shared Control the commanding player may be a
+	// teammate of the worker's owner. The resulting building is still
+	// owned by the worker's owner (owningPlayer), so we only check that
+	// the worker is commandable by that player.
+	DEBUG_ASSERTCRASH( getObject()->isCommandableBy( owningPlayer ),
+										 ("Dozer::Construct - Worker is not commandable by the owning player passed in") );
 
 	// if we're not rebuilding, we have a few checks to pass first for sanity
 	if( isRebuild == FALSE )

@@ -50,6 +50,8 @@
 #include "Common/XferCRC.h"
 #include "Common/PerfTimer.h"
 
+#include "GameNetwork/GameInfo.h"
+
 #include "GameClient/Anim2D.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/Drawable.h"
@@ -1614,6 +1616,37 @@ Player * Object::getControllingPlayer() const
 		return myTeam->getControllingPlayer();
 
 	return nullptr;
+}
+
+//=============================================================================
+// Object::isCommandableBy
+//=============================================================================
+// See header — authorization predicate. This is the single source of truth
+// for "can player X issue a command to this object" on the sim side.
+// Pattern mirrors AIGroup::removeAnyObjectsNotCommandableBy.
+Bool Object::isCommandableBy(const Player *commander) const
+{
+	if (commander == nullptr)
+		return FALSE;
+
+	const Player *ownerPlayer = getControllingPlayer();
+	if (ownerPlayer == commander)
+		return TRUE;
+
+	if (!ownerPlayer)
+		return FALSE;
+
+	// Shared Control: accept commands from lobby teammates. Lobby-team
+	// membership is wired as ALLIES at startNewGame, so we use the
+	// diplomatic relationship as the is-teammate test (same pattern as
+	// the chokepoint in AIGroup).
+	if (TheGameInfo && TheGameInfo->isSharedTeamControlEffective())
+	{
+		if (commander->getRelationship(ownerPlayer->getDefaultTeam()) == ALLIES)
+			return TRUE;
+	}
+
+	return FALSE;
 }
 
 //=============================================================================

@@ -252,6 +252,15 @@ public:
 	Player* getControllingPlayer() const;
 	Relationship getRelationship(const Object *that) const;
 
+	// Is this object commandable by the given player? Returns TRUE when
+	// commander owns the object, and (if Shared Control is active) when
+	// commander is on the same lobby team as the owner. Does NOT change
+	// ownership — this is a command-time authorization predicate.
+	// Used by the command-dispatch A-category checks (container exit,
+	// cancel upgrade, cancel unit create, cancel construction, beacon
+	// destroy) plus the dozer/worker construction asserts.
+	Bool isCommandableBy(const Player *commander) const;
+
 	Color getIndicatorColor() const;
 	Color getNightIndicatorColor() const;
 	Bool hasCustomIndicatorColor() const { return m_indicatorColor != 0; }

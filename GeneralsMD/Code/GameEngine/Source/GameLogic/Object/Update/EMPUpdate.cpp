@@ -219,10 +219,19 @@ void EMPUpdate::doDisableAttack()
 				continue;
 			}
 
-			//Some EMP attacks don't affect our own buildings.
+			//Some EMP attacks don't affect our own buildings. Rule 2 (drawbacks
+			//don't extend to allies): the immunity also covers allied buildings,
+			//so an allied EMP burst won't fry their teammate's power plants.
 			if( data->m_doesNotAffectMyOwnBuildings && curVictim->isKindOf( KINDOF_STRUCTURE ) )
 			{
-				if( curVictim->getControllingPlayer() == object->getControllingPlayer() )
+				const Player *sourcePlayer = object->getControllingPlayer();
+				const Player *victimPlayer = curVictim->getControllingPlayer();
+				if( victimPlayer == sourcePlayer )
+				{
+					continue;
+				}
+				if( sourcePlayer && victimPlayer &&
+				    sourcePlayer->getRelationship( victimPlayer->getDefaultTeam() ) == ALLIES )
 				{
 					continue;
 				}

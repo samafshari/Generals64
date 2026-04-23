@@ -821,6 +821,9 @@ void OpenContain::onCollide( Object *other, const Coord3D *loc, const Coord3D *n
 
 	// last-minute change: don't allow units from multiple (different) players to occupy the same
 	// unit. so eject everyone else if they aren't controlled by the same player. (srj)
+	// Rule 2 (benefits to allies): allied riders are OK — don't eject them
+	// just because a new rider has a different owner within the alliance.
+	const Player *incomingPlayer = other->getControllingPlayer();
 	for( ContainedItemsList::iterator it = m_containList.begin(); it != m_containList.end(); )
 	{
 		// save the rider...
@@ -830,8 +833,13 @@ void OpenContain::onCollide( Object *other, const Coord3D *loc, const Coord3D *n
 		// the iterator becomes invalid)
 		++it;
 
-		// call it
-		if( rider->getControllingPlayer() != other->getControllingPlayer() )
+		// call it — only eject if the existing rider is NEITHER the incoming
+		// rider's owner NOR an ally of the incoming rider. Allies share.
+		const Player *riderPlayer = rider->getControllingPlayer();
+		Bool ejectThisRider = (riderPlayer != incomingPlayer);
+		if( ejectThisRider && riderPlayer && incomingPlayer )
+			ejectThisRider = (incomingPlayer->getRelationship( riderPlayer->getDefaultTeam() ) != ALLIES);
+		if( ejectThisRider )
 		{
 			if( rider->getAI() )
 			{
