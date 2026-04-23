@@ -40,6 +40,7 @@
 #include "Common/Money.h"
 #include "Common/Radar.h"
 #include "Common/RandomValue.h"
+#include "GameNetwork/GameInfo.h"
 #include "Common/GameState.h"
 #include "Common/GlobalData.h"
 #include "Common/Xfer.h"
@@ -1678,6 +1679,26 @@ Object *DozerAIUpdate::construct( const ThingTemplate *what,
 		{
 
 			// Just build it.  The ai will validate, or cheat.  jba.
+			//
+			// Opt-in host flag: when TheGameInfo->isAiChecksMoney() is
+			// TRUE, we hold the AI to the same cost check a human pays
+			// (mostly relevant for shared-money team games where the
+			// retail cheat would otherwise drain the pool below what
+			// the human teammate can access). Default is FALSE, which
+			// preserves the retail AI-cheat behavior bit-for-bit —
+			// replays and existing game modes play exactly as before.
+			// Other AI cheats (location legality, rebuild-is-free)
+			// are untouched regardless of the flag.
+			if( TheGameInfo && TheGameInfo->isAiChecksMoney() )
+			{
+				Money *aiMoney = owningPlayer->getMoney();
+				if( aiMoney )
+				{
+					const Int cost = what->calcCostToBuild( owningPlayer );
+					if( (Int)aiMoney->countMoney() < cost )
+						return nullptr;
+				}
+			}
 
 		}
 		else

@@ -72,6 +72,9 @@ public:
 		m_energyConsumption = 0;
 		m_powerSabotagedTillFrame = 0;
 		m_owner = owner;
+		// Pool binding is NOT reset here on purpose — it's set by
+		// GameLogic::startNewGame after the player list is built,
+		// which runs AFTER Player::init (which calls this).
 	}
 
 	/// return current energy production in kilowatts
@@ -95,8 +98,30 @@ public:
 	void addPowerBonus( Object *obj );
 	void removePowerBonus( Object *obj );
 
-	void setPowerSabotagedTillFrame( UnsignedInt frame ) { m_powerSabotagedTillFrame = frame; }
+	// When pool-bound, setPowerSabotagedTillFrame propagates the frame
+	// to every teammate's Energy so a single sabotage crate affects the
+	// whole team — per the shared-power feature spec. Out-of-line so
+	// the propagation loop + idempotency guard can live in Energy.cpp
+	// without pulling PlayerList.h into every consumer of Energy.h.
+	void setPowerSabotagedTillFrame( UnsignedInt frame );
 	UnsignedInt getPowerSabotagedTillFrame() const { return m_powerSabotagedTillFrame; }
+
+	// Bind this Energy to the per-team shared power pool. Called from
+	// GameLogic::startNewGame after the player roster is built.
+	//
+	//   enabled    : GameInfo::isSharedTeamPower
+	//   teamNumber : GameSlot::getTeamNumber(); -1 = solo
+	//
+	// When enabled && teamNumber >= 0, subsequent calls to
+	// getProduction / getConsumption / hasSufficientPower /
+	// getEnergySupplyRatio return team-wide sums instead of this
+	// player's individual values, and setPowerSabotagedTillFrame
+	// propagates to the whole team. m_energyProduction /
+	// m_energyConsumption on each Energy still accumulate from that
+	// player's own buildings (via objectEnteringInfluence etc).
+	void setSharedTeamBinding( Bool enabled, Int teamNumber );
+	Bool isSharedPoolBound() const { return m_useSharedPool; }
+	Int  getSharedTeamIndex() const { return m_sharedTeamIndex; }
 
 	/**
 		return the percentage of energy needed that we actually produce, as a 0.0 ... 1.0 fraction.
@@ -113,10 +138,23 @@ protected:
 	void addProduction(Int amt);
 	void addConsumption(Int amt);
 
+	// Team-sum helpers for the pooled getters. Walk ThePlayerList once
+	// and add up every teammate's raw m_energyProduction / Consumption
+	// (factoring each teammate's sabotage state for production).
+	Int getTeamTotalProduction() const;
+	Int getTeamTotalConsumption() const;
+
+	// Fire onPowerBrownOutChange on every teammate in the pool — used
+	// by addProduction / addConsumption / setPowerSabotagedTillFrame so
+	// the whole team reacts together when the pool flips brownout state.
+	void broadcastBrownOutToTeam(Bool brownedOut);
+
 private:
 
 	Int		m_energyProduction;		///< level of energy production, in kw
 	Int		m_energyConsumption;	///< level of energy consumption, in kw
 	UnsignedInt m_powerSabotagedTillFrame; ///< If power is sabotaged, the frame will be greater than now.
 	Player *m_owner;						///< Tight pointer to the Player I am intrinsic to.
+	Bool   m_useSharedPool;			///< TRUE when bound to a team power pool (see setSharedTeamBinding)
+	Int    m_sharedTeamIndex;		///< GameSlot team number when m_useSharedPool is TRUE; unused otherwise
 };

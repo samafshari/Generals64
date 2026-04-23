@@ -1733,23 +1733,27 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	TheTeamFactory->reset();
 	ThePlayerList->newGame();
 
-	// Shared-money team binding. Every peer runs this block with the
-	// same TheGameInfo (synced via the lobby options string), so every
-	// peer binds the same Players to the same team pool indices — no
-	// additional network traffic required. Observers, open/closed
+	// Shared-resources team bindings. Every peer runs this block with
+	// the same TheGameInfo (synced via the lobby options string), so
+	// every peer binds the same Players to the same team pool indices
+	// — no additional network traffic required. Observers, open/closed
 	// slots, and solo players (team == -1) keep their individual
-	// Money object behavior: setSharedPoolBinding explicitly no-ops
-	// for teamNumber < 0, which is the correct exclusion for "players
-	// with no team" per the feature spec.
+	// Money / Energy object behavior: the setSharedPoolBinding /
+	// setSharedTeamBinding methods explicitly no-op for teamNumber < 0,
+	// which is the correct exclusion for "players with no team".
 	if (TheGameInfo)
 	{
-		// Reset the pool first so a replay or a re-entered lobby starts
-		// from zero balances. setSharedPoolBinding below will fold each
-		// player's starting-cash deposit (already applied by PlayerTemplate::init
-		// during the PlayerList->newGame() call above) into the pool.
+		// Reset the money pool first so a replay or a re-entered lobby
+		// starts from zero balances. Money::setSharedPoolBinding below
+		// folds each player's starting-cash deposit (already applied
+		// by PlayerTemplate::init during PlayerList->newGame()) into
+		// the pool. Energy has no equivalent pool state — its team
+		// totals are derived live from per-player production /
+		// consumption, so no reset is required.
 		Money::resetAllSharedPools();
 
-		const Bool sharedMode = TheGameInfo->isSharedTeamMoney();
+		const Bool sharedMoney = TheGameInfo->isSharedTeamMoney();
+		const Bool sharedPower = TheGameInfo->isSharedTeamPower();
 		for (Int i = 0; i < MAX_SLOTS; ++i)
 		{
 			const GameSlot *slot = TheGameInfo->getConstSlot(i);
@@ -1764,11 +1768,9 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 			if (!p)
 				continue;
 
-			// teamNumber < 0 (== "no team") always routes to the solo
-			// branch inside setSharedPoolBinding, regardless of
-			// sharedMode. Players with a real team number only share
-			// when sharedMode is TRUE.
-			p->getMoney()->setSharedPoolBinding(sharedMode, slot->getTeamNumber());
+			const Int teamNum = slot->getTeamNumber();
+			p->getMoney()->setSharedPoolBinding(sharedMoney, teamNum);
+			p->getEnergy()->setSharedTeamBinding(sharedPower, teamNum);
 		}
 	}
 

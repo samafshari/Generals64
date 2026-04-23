@@ -111,6 +111,7 @@ public:
 	// continue to record the player's contribution even though the cash
 	// itself lives in the team pool.
 	void setSharedPoolBinding( Bool enabled, Int teamNumber );
+	Bool isSharedPoolBound() const { return m_useSharedPool; }
 
 	// Shared-pool static accessors (for GameInfo save/load xfer and for
 	// startup bookkeeping). The pool is keyed by GameSlot team number

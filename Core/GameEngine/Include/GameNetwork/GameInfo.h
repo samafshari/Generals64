@@ -267,6 +267,43 @@ public:
   inline Bool isSharedTeamMoney() const;
   inline void setSharedTeamMoney( Bool shared );
 
+  // Shared-power team mode. When on, every player whose GameSlot team
+  // number is >= 0 pools their energy production, consumption, AND
+  // sabotage state with their teammates: one teammate's surplus plants
+  // cover another's deficit, and a sabotage crate hitting one
+  // teammate's power plant applies to the whole team's energy for
+  // the duration. Players with team = -1 keep their individual Energy
+  // object unchanged.
+  //
+  // Unlike shared money, there is no pool balance to persist — the
+  // pooled production / consumption is derived each frame from the
+  // individual Energy objects (which still accumulate per-player from
+  // building objectEnteringInfluence/objectLeavingInfluence calls).
+  inline Bool isSharedTeamPower() const;
+  inline void setSharedTeamPower( Bool shared );
+
+  // "AI Checks Money" mode. Default FALSE, which preserves the retail
+  // behavior where the AI's dozer construction skips the money check
+  // entirely (see DozerAIUpdate::construct's `dozerIsAI` branch). When
+  // TRUE, the AI is held to the same BuildAssistant::canMakeUnit
+  // cost check a human pays — matters in shared-money team games
+  // where the AI would otherwise drain the team pool below what its
+  // human teammate can access.
+  inline Bool isAiChecksMoney() const;
+  inline void setAiChecksMoney( Bool enabled );
+
+  // "AI Rebuilds Command Center" mode. Default FALSE (retail
+  // behavior: if the AI's CC and dozers are all destroyed, the AI is
+  // permanently decapitated since the CC is the only building that
+  // produces dozers and dozers are the only units that build CCs).
+  // When TRUE, the AI's base-building loop treats a destroyed
+  // Command-Center build-list entry as a special case: if no dozer
+  // can be found, the CC is rebuilt via the existing thin-air build
+  // path (AIPlayer::buildStructureNow) so the AI has a chance to
+  // recover. Narrow cheat — only fires for CCs, not other buildings.
+  inline Bool isAiRebuildsCC() const;
+  inline void setAiRebuildsCC( Bool enabled );
+
   Bool isClientServerMode() const { return m_clientServerMode; }
   void setClientServerMode(Bool cs) { m_clientServerMode = cs; }
 
@@ -303,6 +340,9 @@ protected:
   Bool m_clientServerMode; // Client-server networking mode (vs P2P lockstep)
   Int  m_gameFps;          // Logic / network frame rate in Hz, host-chosen via the LAN options dropdown
   Bool m_sharedTeamMoney;  // Host-enabled "shared money" team mode — see isSharedTeamMoney comment
+  Bool m_sharedTeamPower;  // Host-enabled "shared power" team mode — see isSharedTeamPower comment
+  Bool m_aiChecksMoney;    // When TRUE, AI respects the normal cost check — see isAiChecksMoney comment
+  Bool m_aiRebuildsCC;     // When TRUE, AI conjures a new CC if all its CCs + dozers are destroyed — see isAiRebuildsCC comment
 };
 
 extern GameInfo *TheGameInfo;
@@ -326,6 +366,12 @@ Bool        GameInfo::oldFactionsOnly() const           { return m_oldFactionsOn
 void        GameInfo::setOldFactionsOnly( Bool oldFactionsOnly ) { m_oldFactionsOnly = oldFactionsOnly; }
 Bool        GameInfo::isSharedTeamMoney() const         { return m_sharedTeamMoney; }
 void        GameInfo::setSharedTeamMoney( Bool shared ) { m_sharedTeamMoney = shared; }
+Bool        GameInfo::isSharedTeamPower() const         { return m_sharedTeamPower; }
+void        GameInfo::setSharedTeamPower( Bool shared ) { m_sharedTeamPower = shared; }
+Bool        GameInfo::isAiChecksMoney() const           { return m_aiChecksMoney; }
+void        GameInfo::setAiChecksMoney( Bool enabled )  { m_aiChecksMoney = enabled; }
+Bool        GameInfo::isAiRebuildsCC() const            { return m_aiRebuildsCC; }
+void        GameInfo::setAiRebuildsCC( Bool enabled )   { m_aiRebuildsCC = enabled; }
 
 AsciiString GameInfoToAsciiString( const GameInfo *game );
 Bool ParseAsciiStringToGameInfo( GameInfo *game, AsciiString options );

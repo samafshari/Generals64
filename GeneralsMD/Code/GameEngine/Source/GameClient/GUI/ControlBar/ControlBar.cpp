@@ -185,6 +185,67 @@ static void commandButtonTooltip(GameWindow *window,
 	TheMouse->setCursorTooltip(tip, -1);
 }
 
+// PowerWindow's tooltip was going through commandButtonTooltip above,
+// but that function short-circuits on non-push-buttons (the PowerWindow
+// is a plain GameWindow) and again on a null CommandButton payload,
+// so the tooltip silently never surfaced. Render a dedicated power
+// summary here that reads directly from the local player's Energy.
+static void powerBarTooltip(GameWindow *window,
+													  WinInstanceData *instData,
+													  UnsignedInt mouse)
+{
+	if (!window || !TheMouse)
+		return;
+	if (TheInGameUI && TheInGameUI->areTooltipsDisabled())
+	{
+		TheMouse->setCursorTooltip(UnicodeString::TheEmptyString);
+		return;
+	}
+
+	// The control bar follows the "currently viewed" player when the
+	// local user is an observer; use the same getter so the tooltip
+	// matches what the power bar is actually drawing.
+	if (!TheControlBar)
+		return;
+	Player *p = TheControlBar->getCurrentlyViewedPlayer();
+	if (!p)
+		return;
+	Energy *e = p->getEnergy();
+	if (!e)
+		return;
+
+	const Int prod = e->getProduction();
+	const Int cons = e->getConsumption();
+	const Int delta = prod - cons;
+
+	UnicodeString tip;
+	tip.format(e->isSharedPoolBound() ? L"Team Power Pool" : L"Power");
+
+	UnicodeString line;
+	line.format(L"\nProduction: %d", prod);
+	tip.concat(line);
+	line.format(L"\nConsumption: %d", cons);
+	tip.concat(line);
+	line.format(delta >= 0 ? L"\nSurplus: %d" : L"\nShortage: %d",
+		delta >= 0 ? delta : -delta);
+	tip.concat(line);
+
+	// Sabotage countdown — if set and still active, show remaining
+	// seconds. In shared-power mode the frame is identical across
+	// all teammates (propagation in Energy::setPowerSabotagedTillFrame),
+	// so reading the local player's frame is sufficient.
+	const UnsignedInt sabFrame = e->getPowerSabotagedTillFrame();
+	if (TheGameLogic && TheGameLogic->getFrame() < sabFrame)
+	{
+		const UnsignedInt framesLeft = sabFrame - TheGameLogic->getFrame();
+		const UnsignedInt secondsLeft = framesLeft / LOGICFRAMES_PER_SECOND;
+		line.format(L"\nSABOTAGED (%u sec remaining)", secondsLeft);
+		tip.concat(line);
+	}
+
+	TheMouse->setCursorTooltip(tip, -1);
+}
+
 /// mark the UI as dirty so the context of everything is re-evaluated
 void ControlBar::markUIDirty()
 {
@@ -1283,7 +1344,9 @@ void ControlBar::init()
 		win = TheWindowManager->winGetWindowFromId(nullptr,TheNameKeyGenerator->nameToKey("ControlBar.wnd:PowerWindow"));
 		if(win)
 		{
-			win->winSetTooltipFunc(commandButtonTooltip);
+			// Dedicated tooltip — commandButtonTooltip returns without
+			// setting anything for non-push-button windows like this one.
+			win->winSetTooltipFunc(powerBarTooltip);
 		}
 		win = TheWindowManager->winGetWindowFromId(nullptr,TheNameKeyGenerator->nameToKey("ControlBar.wnd:MoneyDisplay"));
 		if(win)

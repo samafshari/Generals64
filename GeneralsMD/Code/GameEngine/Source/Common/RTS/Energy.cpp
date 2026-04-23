@@ -61,11 +61,80 @@ Energy::Energy()
 	m_energyConsumption = 0;
 	m_owner = nullptr;
 	m_powerSabotagedTillFrame = 0;
+	m_useSharedPool = FALSE;
+	m_sharedTeamIndex = -1;
+}
+
+// ------------------------------------------------------------------------------------------------
+// Shared-power helpers. Called by the pooled getters below.
+//
+// Sum-across-teammates is computed live each frame by iterating
+// ThePlayerList — simple, deterministic, and saves us having to keep
+// a parallel cache in sync on every objectEnteringInfluence /
+// objectLeavingInfluence / addPowerBonus call.
+//
+// Each teammate's own sabotage frame is honored individually: if a
+// teammate is sabotaged, their production contributes 0. Because
+// setPowerSabotagedTillFrame propagates to every teammate in a pool,
+// "one sabotaged → all contribute 0" — which matches the feature
+// spec ("sabotage applies to all members of the same team").
+// ------------------------------------------------------------------------------------------------
+static Bool isEnergySabotaged(const Energy *e)
+{
+	return TheGameLogic && TheGameLogic->getFrame() < e->getPowerSabotagedTillFrame();
+}
+
+Int Energy::getTeamTotalProduction() const
+{
+	if (!m_useSharedPool || !ThePlayerList)
+		return isEnergySabotaged(this) ? 0 : m_energyProduction;
+
+	Int total = 0;
+	const Int count = ThePlayerList->getPlayerCount();
+	for (Int i = 0; i < count; ++i)
+	{
+		Player *p = ThePlayerList->getNthPlayer(i);
+		if (!p) continue;
+		const Energy *e = p->getEnergy();
+		if (!e || !e->m_useSharedPool || e->m_sharedTeamIndex != m_sharedTeamIndex)
+			continue;
+		if (isEnergySabotaged(e))
+			continue;
+		total += e->m_energyProduction;
+	}
+	return total;
+}
+
+Int Energy::getTeamTotalConsumption() const
+{
+	if (!m_useSharedPool || !ThePlayerList)
+		return m_energyConsumption;
+
+	Int total = 0;
+	const Int count = ThePlayerList->getPlayerCount();
+	for (Int i = 0; i < count; ++i)
+	{
+		Player *p = ThePlayerList->getNthPlayer(i);
+		if (!p) continue;
+		const Energy *e = p->getEnergy();
+		if (!e || !e->m_useSharedPool || e->m_sharedTeamIndex != m_sharedTeamIndex)
+			continue;
+		// Consumption is NOT zeroed on sabotage — enemies can still
+		// drain power from your pool even while your plants are out,
+		// matching the "whole team loses power" feel the feature asks
+		// for. This mirrors the solo branch where hasSufficientPower
+		// returns FALSE when sabotaged regardless of consumption.
+		total += e->m_energyConsumption;
+	}
+	return total;
 }
 
 //-----------------------------------------------------------------------------
 Int Energy::getProduction() const
 {
+	if (m_useSharedPool)
+		return getTeamTotalProduction();
+
 	if( TheGameLogic->getFrame() < m_powerSabotagedTillFrame )
 	{
 		//Power sabotaged, therefore no power.
@@ -78,6 +147,15 @@ Int Energy::getProduction() const
 Real Energy::getEnergySupplyRatio() const
 {
 	DEBUG_ASSERTCRASH(m_energyProduction >= 0 && m_energyConsumption >= 0, ("neg Energy numbers"));
+
+	if (m_useSharedPool)
+	{
+		const Int teamProd = getTeamTotalProduction();
+		const Int teamCons = getTeamTotalConsumption();
+		if (teamCons == 0)
+			return (Real)teamProd;
+		return (Real)teamProd / (Real)teamCons;
+	}
 
 	if( TheGameLogic->getFrame() < m_powerSabotagedTillFrame )
 	{
@@ -94,6 +172,16 @@ Real Energy::getEnergySupplyRatio() const
 //-------------------------------------------------------------------------------------------------
 Bool Energy::hasSufficientPower() const
 {
+	if (m_useSharedPool)
+	{
+		// Team pool is sufficient when team production >= team consumption.
+		// Individual sabotage already zeroes contributors, so no separate
+		// sabotage check needed here — if every teammate is sabotaged
+		// (propagation guarantees they all are), team production is 0
+		// and this returns FALSE as soon as any consumer exists.
+		return getTeamTotalProduction() >= getTeamTotalConsumption();
+	}
+
 	if( TheGameLogic->getFrame() < m_powerSabotagedTillFrame )
 	{
 		//Power sabotaged, therefore no power.
@@ -234,7 +322,11 @@ void Energy::addProduction(Int amt)
 
 	// A repeated Brownout signal does nothing bad, and we need to handle more than just edge cases.
 	// Like low power, now even more low power, refresh disable.
-	m_owner->onPowerBrownOutChange( !hasSufficientPower() );
+	const Bool brownedOut = !hasSufficientPower();
+	if (m_useSharedPool)
+		broadcastBrownOutToTeam(brownedOut);
+	else
+		m_owner->onPowerBrownOutChange( brownedOut );
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -245,7 +337,84 @@ void Energy::addConsumption(Int amt)
 	if( m_owner == nullptr )
 		return;
 
-	m_owner->onPowerBrownOutChange( !hasSufficientPower() );
+	const Bool brownedOut = !hasSufficientPower();
+	if (m_useSharedPool)
+		broadcastBrownOutToTeam(brownedOut);
+	else
+		m_owner->onPowerBrownOutChange( brownedOut );
+}
+
+// ------------------------------------------------------------------------------------------------
+void Energy::broadcastBrownOutToTeam(Bool brownedOut)
+{
+	// Fire the brownout callback on every teammate's Player so their
+	// radar, superweapons, base defenses etc all flip state in lockstep
+	// with the team pool's supply/demand. Caller guarantees we're in
+	// a pool; we still defensively early-out if the player list is
+	// unavailable (shouldn't happen mid-game).
+	if (!ThePlayerList) return;
+	const Int count = ThePlayerList->getPlayerCount();
+	for (Int i = 0; i < count; ++i)
+	{
+		Player *p = ThePlayerList->getNthPlayer(i);
+		if (!p) continue;
+		const Energy *e = p->getEnergy();
+		if (!e || !e->m_useSharedPool || e->m_sharedTeamIndex != m_sharedTeamIndex)
+			continue;
+		p->onPowerBrownOutChange(brownedOut);
+	}
+}
+
+// ------------------------------------------------------------------------------------------------
+void Energy::setPowerSabotagedTillFrame( UnsignedInt frame )
+{
+	// Idempotent short-circuit: crucial for the pooled propagation path
+	// so a setFrame call starting on any teammate visits each other
+	// teammate exactly once and then early-returns instead of
+	// recursing. Also keeps Player::update's "clear to 0" loop cheap
+	// when it fires on every teammate every frame.
+	if (m_powerSabotagedTillFrame == frame)
+		return;
+
+	m_powerSabotagedTillFrame = frame;
+
+	if (m_useSharedPool && ThePlayerList)
+	{
+		// Propagate to every teammate's Energy so "one teammate
+		// sabotaged → whole team is out of power" as per the feature
+		// spec. Each teammate that already has this frame value
+		// early-returns at the top of this function, so propagation
+		// terminates after one pass through the team.
+		const Int count = ThePlayerList->getPlayerCount();
+		for (Int i = 0; i < count; ++i)
+		{
+			Player *p = ThePlayerList->getNthPlayer(i);
+			if (!p) continue;
+			Energy *e = p->getEnergy();
+			if (!e || e == this) continue;
+			if (!e->m_useSharedPool || e->m_sharedTeamIndex != m_sharedTeamIndex)
+				continue;
+			e->setPowerSabotagedTillFrame(frame);
+		}
+
+		// Broadcast a brownout change now that the team's effective
+		// production has shifted. Without this, buildings that only
+		// react on addProduction/addConsumption wouldn't see the
+		// sabotage-induced drop until the next building change.
+		broadcastBrownOutToTeam(!hasSufficientPower());
+	}
+}
+
+// ------------------------------------------------------------------------------------------------
+void Energy::setSharedTeamBinding( Bool enabled, Int teamNumber )
+{
+	// Symmetric with Money::setSharedPoolBinding — this just flips
+	// the routing flag; there's no balance to migrate because team
+	// production / consumption is derived from the per-player values
+	// each time a getter runs.
+	const Bool shouldBind = enabled && teamNumber >= 0;
+	m_useSharedPool = shouldBind;
+	m_sharedTeamIndex = shouldBind ? teamNumber : -1;
 }
 
 // ------------------------------------------------------------------------------------------------

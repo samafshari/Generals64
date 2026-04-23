@@ -35,6 +35,7 @@
 #include "GameClient/GameText.h"
 #include "GameClient/MapUtil.h"
 #include "Common/MultiplayerSettings.h"
+#include "Common/Energy.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "Common/PlayerTemplate.h"
@@ -324,6 +325,9 @@ void GameInfo::reset()
   m_clientServerMode = FALSE;
   m_gameFps = 70; // Default skirmish/MP logic FPS — see GameInfo::getGameFps comment
   m_sharedTeamMoney = FALSE; // Team-pooled credits mode; host toggles via lobby checkbox
+  m_sharedTeamPower = FALSE; // Team-pooled energy mode; host toggles via lobby checkbox
+  m_aiChecksMoney   = FALSE; // Retail default: AI dozer construction skips the money check. Host toggles via lobby.
+  m_aiRebuildsCC    = FALSE; // Retail default: AI gives up if it loses its last Command Center. Host toggles via lobby.
 //	m_localIP = 0; // BGC - actually we don't want this to be reset since the m_localIP is
 										// set properly in the constructor of LANGameInfo which uses this as a base class.
 	m_mapCRC = 0;
@@ -963,6 +967,21 @@ AsciiString GameInfoToAsciiString( const GameInfo *game )
 	if (game->isSharedTeamMoney())
 		optionsString.concat("STM=1;");
 
+	// Shared-power team mode flag, same emit-only-when-on convention.
+	if (game->isSharedTeamPower())
+		optionsString.concat("STP=1;");
+
+	// AI Checks Money flag. Same convention — only emitted when on.
+	// Goes to GameSpy staging room / LAN broadcast / replay header
+	// alongside the other options so the server-side match record
+	// captures which rules the host picked.
+	if (game->isAiChecksMoney())
+		optionsString.concat("ACM=1;");
+
+	// AI Rebuilds CC flag. Same emit-only-when-on convention.
+	if (game->isAiRebuildsCC())
+		optionsString.concat("ARC=1;");
+
 	//add player info for each slot
 	optionsString.concat(slotListID);
 	optionsString.concat('=');
@@ -1199,6 +1218,18 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
 		else if (key.compare("STM") == 0)
 		{
 			game->setSharedTeamMoney( atoi(val.str()) != 0 );
+		}
+		else if (key.compare("STP") == 0)
+		{
+			game->setSharedTeamPower( atoi(val.str()) != 0 );
+		}
+		else if (key.compare("ACM") == 0)
+		{
+			game->setAiChecksMoney( atoi(val.str()) != 0 );
+		}
+		else if (key.compare("ARC") == 0)
+		{
+			game->setAiRebuildsCC( atoi(val.str()) != 0 );
 		}
 		else if (key.getLength() == 1 && *key.str() == slotListID)
 		{
@@ -1639,9 +1670,16 @@ void SkirmishGameInfo::xfer( Xfer *xfer )
 #else
 	// Version 5 adds the "shared money" team-pool flag + the per-team
 	// pool balances. Older saves default to sharedTeamMoney=FALSE and
-	// an all-zero pool, which is correct — without the flag there is
-	// nothing to restore.
-	const XferVersion currentVersion = 5;
+	// an all-zero pool.
+	// Version 6 adds the "shared power" team-mode flag. No pool state
+	// is persisted because pooled production / consumption is derived
+	// each frame from the per-player Energy objects (which already get
+	// rebuilt from building objectEnteringInfluence calls on load).
+	// Version 7 adds the "AI Checks Money" host flag (default FALSE,
+	// preserves retail AI-cheat behavior in older saves).
+	// Version 8 adds the "AI Rebuilds CC" host flag (default FALSE,
+	// preserves retail decapitation behavior).
+	const XferVersion currentVersion = 8;
 #endif
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
@@ -1767,6 +1805,36 @@ void SkirmishGameInfo::xfer( Xfer *xfer )
     m_sharedTeamMoney = FALSE;
     Money::resetAllSharedPools();
   }
+
+  if ( version >= 6 )
+  {
+    xfer->xferBool( &m_sharedTeamPower );
+  }
+  else if ( xfer->getXferMode() == XFER_LOAD )
+  {
+    // Pre-v6 save — no shared-power mode was possible.
+    m_sharedTeamPower = FALSE;
+  }
+
+  if ( version >= 7 )
+  {
+    xfer->xferBool( &m_aiChecksMoney );
+  }
+  else if ( xfer->getXferMode() == XFER_LOAD )
+  {
+    // Pre-v7 save — AI always cheated on the money check.
+    m_aiChecksMoney = FALSE;
+  }
+
+  if ( version >= 8 )
+  {
+    xfer->xferBool( &m_aiRebuildsCC );
+  }
+  else if ( xfer->getXferMode() == XFER_LOAD )
+  {
+    // Pre-v8 save — AI never recovered from CC loss.
+    m_aiRebuildsCC = FALSE;
+  }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1786,7 +1854,8 @@ void SkirmishGameInfo::loadPostProcess()
 	if (!ThePlayerList)
 		return;
 
-	const Bool sharedMode = isSharedTeamMoney();
+	const Bool sharedMoney = isSharedTeamMoney();
+	const Bool sharedPower = isSharedTeamPower();
 	for (Int i = 0; i < MAX_SLOTS; ++i)
 	{
 		const GameSlot *slot = getConstSlot(i);
@@ -1801,7 +1870,9 @@ void SkirmishGameInfo::loadPostProcess()
 		if (!p)
 			continue;
 
-		p->getMoney()->setSharedPoolBinding(sharedMode, slot->getTeamNumber());
+		const Int teamNum = slot->getTeamNumber();
+		p->getMoney()->setSharedPoolBinding(sharedMoney, teamNum);
+		p->getEnergy()->setSharedTeamBinding(sharedPower, teamNum);
 	}
 }
 

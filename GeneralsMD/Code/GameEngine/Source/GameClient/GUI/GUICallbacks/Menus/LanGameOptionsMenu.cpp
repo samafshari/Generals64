@@ -45,6 +45,7 @@
 #include "GameClient/GadgetTextEntry.h"
 #include "GameClient/GadgetStaticText.h"
 #include "GameClient/GadgetPushButton.h"
+#include "GameClient/GadgetStaticText.h"
 #include "GameClient/GadgetCheckBox.h"
 #include "GameClient/MapUtil.h"
 #include "GameClient/Mouse.h"
@@ -116,6 +117,9 @@ static NameKeyType comboBoxSuperweaponLimitID = NAMEKEY_INVALID;
 static NameKeyType comboBoxStartingCashID = NAMEKEY_INVALID;
 static NameKeyType comboBoxGameSpeedID = NAMEKEY_INVALID;
 static NameKeyType checkBoxSharedMoneyID = NAMEKEY_INVALID;
+static NameKeyType checkBoxSharedPowerID = NAMEKEY_INVALID;
+static NameKeyType checkBoxAiChecksMoneyID = NAMEKEY_INVALID;
+static NameKeyType checkBoxAiRebuildsCCID = NAMEKEY_INVALID;
 static NameKeyType windowMapID = NAMEKEY_INVALID;
 // Window Pointers ------------------------------------------------------------------------
 static GameWindow *parentLanGameOptions = nullptr;
@@ -130,13 +134,23 @@ static GameWindow *comboBoxStartingCash = nullptr;
 static GameWindow *comboBoxGameSpeed = nullptr;
 static GameWindow *windowMap = nullptr;
 
-// "Shared Money" checkbox — declared in LanGameOptionsMenu.wnd
-// alongside the other host-side options (starting cash, game speed,
-// superweapon limit) and looked up here by NAMEKEY. Host-only;
-// disabled for joiners. When toggled, flips GameInfo::m_sharedTeamMoney
-// and re-broadcasts the game options string so every joiner picks up
-// the new value via the STM= key in ParseAsciiStringToGameInfo.
+// "Shared Money" / "Shared Power" checkboxes — both declared in
+// LanGameOptionsMenu.wnd alongside the other host-side options and
+// looked up here by NAMEKEY. Host-only; disabled for joiners. When
+// toggled, each flips its GameInfo flag and re-broadcasts the game
+// options string so every joiner picks up the new value via the
+// STM= / STP= keys in ParseAsciiStringToGameInfo.
 static GameWindow *checkBoxSharedMoney = nullptr;
+static GameWindow *checkBoxSharedPower = nullptr;
+// "AI Checks Money" — on the second options row (opened up by
+// shrinking the chat listbox). Host-only. Default FALSE preserves
+// retail AI-cheat behavior.
+static GameWindow *checkBoxAiChecksMoney = nullptr;
+// "AI Rebuilds CC" — same row as AI Checks Money. Host-only.
+// Default FALSE preserves retail "AI gives up when decapitated"
+// behavior; when on, the AI conjures a new CC via the thin-air
+// build path if its last CC and all dozers are destroyed.
+static GameWindow *checkBoxAiRebuildsCC = nullptr;
 
 // Preset values for the host's superweapon-limit combo. Counts are interpreted
 // PER TEAM, not per player — see Player::canBuildMoreOfType for the change.
@@ -804,6 +818,79 @@ static void handleSharedMoneyToggle()
 	}
 }
 
+static void handleSharedPowerToggle()
+{
+	LANGameInfo *myGame = TheLAN->GetMyGame();
+	if (!myGame || !checkBoxSharedPower)
+		return;
+
+	if (!myGame->amIHost())
+		return;
+
+	const Bool newVal = GadgetCheckBoxIsChecked(checkBoxSharedPower);
+	if (newVal == myGame->isSharedTeamPower())
+		return;
+
+	myGame->setSharedTeamPower(newVal);
+	myGame->resetAccepted();
+
+	if (!s_isIniting)
+	{
+		// Rebroadcast so every peer picks up STP=N via ParseAsciiStringToGameInfo.
+		TheLAN->RequestGameOptions(GenerateGameOptionsString(), true);
+		lanUpdateSlotList();
+	}
+}
+
+static void handleAiChecksMoneyToggle()
+{
+	LANGameInfo *myGame = TheLAN->GetMyGame();
+	if (!myGame || !checkBoxAiChecksMoney)
+		return;
+
+	if (!myGame->amIHost())
+		return;
+
+	const Bool newVal = GadgetCheckBoxIsChecked(checkBoxAiChecksMoney);
+	if (newVal == myGame->isAiChecksMoney())
+		return;
+
+	myGame->setAiChecksMoney(newVal);
+	myGame->resetAccepted();
+
+	if (!s_isIniting)
+	{
+		// Rebroadcast so every peer (and any server-side match record
+		// that scrapes the options string) picks up ACM=N.
+		TheLAN->RequestGameOptions(GenerateGameOptionsString(), true);
+		lanUpdateSlotList();
+	}
+}
+
+static void handleAiRebuildsCCToggle()
+{
+	LANGameInfo *myGame = TheLAN->GetMyGame();
+	if (!myGame || !checkBoxAiRebuildsCC)
+		return;
+
+	if (!myGame->amIHost())
+		return;
+
+	const Bool newVal = GadgetCheckBoxIsChecked(checkBoxAiRebuildsCC);
+	if (newVal == myGame->isAiRebuildsCC())
+		return;
+
+	myGame->setAiRebuildsCC(newVal);
+	myGame->resetAccepted();
+
+	if (!s_isIniting)
+	{
+		// Rebroadcast so every peer picks up ARC=N.
+		TheLAN->RequestGameOptions(GenerateGameOptionsString(), true);
+		lanUpdateSlotList();
+	}
+}
+
 static void handleSuperweaponLimitSelection()
 {
 	LANGameInfo *myGame = TheLAN->GetMyGame();
@@ -904,6 +991,9 @@ void InitLanGameGadgets()
   comboBoxStartingCashID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:ComboBoxStartingCash" );
   comboBoxGameSpeedID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:ComboBoxGameSpeed" );
   checkBoxSharedMoneyID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:CheckBoxSharedMoney" );
+  checkBoxSharedPowerID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:CheckBoxSharedPower" );
+  checkBoxAiChecksMoneyID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:CheckBoxAiChecksMoney" );
+  checkBoxAiRebuildsCCID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:CheckBoxAiRebuildsCC" );
 	windowMapID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:MapWindow" );
 
 	// Initialize the pointers to our gadgets
@@ -933,18 +1023,93 @@ void InitLanGameGadgets()
   DEBUG_ASSERTCRASH(comboBoxGameSpeed, ("Could not find the comboBoxGameSpeed"));
 	PopulateGameSpeedComboBox(comboBoxGameSpeed, TheLAN->GetMyGame());
 
+  // The two checkboxes are just tick-boxes now — their label text is
+  // rendered by sibling STATICTEXT widgets to the right. The native
+  // CHECKBOX widget's own text rendering doesn't honor the FONT's
+  // SIZE attribute (confirmed experimentally at Arial 14 → still
+  // tiny on screen), so we render the label via a real static-text
+  // widget which does respect the .wnd FONT setting correctly.
+  // The .wnd's required-non-empty TEXT gets routed through
+  // TheGameText->fetch() during widget creation; since we don't ship
+  // CSF keys for these, every checkbox ends up with a
+  // "MISSING: '...'" label rendered next to its tick in the tiny
+  // checkbox-internal font. Clear each widget's text to the empty
+  // unicode string right after lookup — the sibling STATICTEXT
+  // widgets provide the real visible label.
   checkBoxSharedMoney = TheWindowManager->winGetWindowFromId( parentLanGameOptions, checkBoxSharedMoneyID );
   DEBUG_ASSERTCRASH(checkBoxSharedMoney, ("Could not find the checkBoxSharedMoney"));
 	if (checkBoxSharedMoney)
 	{
-		// Override the .wnd's CSF key with a literal so we don't ship
-		// a new "GUI:SharedMoney" string key right now. If/when the
-		// CSF gets that entry, the .wnd's TEXT = "GUI:SharedMoney"
-		// will automatically take over and this override becomes a
-		// no-op for localized builds.
-		GadgetCheckBoxSetText(checkBoxSharedMoney, UnicodeString(L"Shared Money"));
+		GadgetCheckBoxSetText(checkBoxSharedMoney, UnicodeString::TheEmptyString);
 		GadgetCheckBoxSetChecked(checkBoxSharedMoney,
 			TheLAN->GetMyGame() ? TheLAN->GetMyGame()->isSharedTeamMoney() : FALSE);
+	}
+
+  checkBoxSharedPower = TheWindowManager->winGetWindowFromId( parentLanGameOptions, checkBoxSharedPowerID );
+  DEBUG_ASSERTCRASH(checkBoxSharedPower, ("Could not find the checkBoxSharedPower"));
+	if (checkBoxSharedPower)
+	{
+		GadgetCheckBoxSetText(checkBoxSharedPower, UnicodeString::TheEmptyString);
+		GadgetCheckBoxSetChecked(checkBoxSharedPower,
+			TheLAN->GetMyGame() ? TheLAN->GetMyGame()->isSharedTeamPower() : FALSE);
+	}
+
+  checkBoxAiChecksMoney = TheWindowManager->winGetWindowFromId( parentLanGameOptions, checkBoxAiChecksMoneyID );
+  DEBUG_ASSERTCRASH(checkBoxAiChecksMoney, ("Could not find the checkBoxAiChecksMoney"));
+	if (checkBoxAiChecksMoney)
+	{
+		GadgetCheckBoxSetText(checkBoxAiChecksMoney, UnicodeString::TheEmptyString);
+		GadgetCheckBoxSetChecked(checkBoxAiChecksMoney,
+			TheLAN->GetMyGame() ? TheLAN->GetMyGame()->isAiChecksMoney() : FALSE);
+	}
+
+  checkBoxAiRebuildsCC = TheWindowManager->winGetWindowFromId( parentLanGameOptions, checkBoxAiRebuildsCCID );
+  DEBUG_ASSERTCRASH(checkBoxAiRebuildsCC, ("Could not find the checkBoxAiRebuildsCC"));
+	if (checkBoxAiRebuildsCC)
+	{
+		GadgetCheckBoxSetText(checkBoxAiRebuildsCC, UnicodeString::TheEmptyString);
+		GadgetCheckBoxSetChecked(checkBoxAiRebuildsCC,
+			TheLAN->GetMyGame() ? TheLAN->GetMyGame()->isAiRebuildsCC() : FALSE);
+	}
+
+	// Override all five top-row option labels at runtime. The .wnd's
+	// TEXT = "GUI:..." values are kept in place for when/if CSF keys
+	// are added; these overrides win at display time until then.
+	{
+		GameWindow *lblCash = TheWindowManager->winGetWindowFromId(
+			parentLanGameOptions,
+			TheNameKeyGenerator->nameToKey("LanGameOptionsMenu.wnd:StaticTextStartingCash"));
+		if (lblCash) GadgetStaticTextSetText(lblCash, UnicodeString(L"Cash"));
+
+		GameWindow *lblSpeed = TheWindowManager->winGetWindowFromId(
+			parentLanGameOptions,
+			TheNameKeyGenerator->nameToKey("LanGameOptionsMenu.wnd:StaticTextGameSpeed"));
+		if (lblSpeed) GadgetStaticTextSetText(lblSpeed, UnicodeString(L"Speed"));
+
+		GameWindow *lblSW = TheWindowManager->winGetWindowFromId(
+			parentLanGameOptions,
+			TheNameKeyGenerator->nameToKey("LanGameOptionsMenu.wnd:StaticTextSuperweaponLimit"));
+		if (lblSW) GadgetStaticTextSetText(lblSW, UnicodeString(L"# Superweapons:"));
+
+		GameWindow *lblSM = TheWindowManager->winGetWindowFromId(
+			parentLanGameOptions,
+			TheNameKeyGenerator->nameToKey("LanGameOptionsMenu.wnd:StaticTextSharedMoney"));
+		if (lblSM) GadgetStaticTextSetText(lblSM, UnicodeString(L"Shared Money"));
+
+		GameWindow *lblSP = TheWindowManager->winGetWindowFromId(
+			parentLanGameOptions,
+			TheNameKeyGenerator->nameToKey("LanGameOptionsMenu.wnd:StaticTextSharedPower"));
+		if (lblSP) GadgetStaticTextSetText(lblSP, UnicodeString(L"Shared Power"));
+
+		GameWindow *lblACM = TheWindowManager->winGetWindowFromId(
+			parentLanGameOptions,
+			TheNameKeyGenerator->nameToKey("LanGameOptionsMenu.wnd:StaticTextAiChecksMoney"));
+		if (lblACM) GadgetStaticTextSetText(lblACM, UnicodeString(L"AI Checks Money"));
+
+		GameWindow *lblARC = TheWindowManager->winGetWindowFromId(
+			parentLanGameOptions,
+			TheNameKeyGenerator->nameToKey("LanGameOptionsMenu.wnd:StaticTextAiRebuildsCC"));
+		if (lblARC) GadgetStaticTextSetText(lblARC, UnicodeString(L"AI Rebuilds CC"));
 	}
 
 	windowMap = TheWindowManager->winGetWindowFromId( parentLanGameOptions,windowMapID  );
@@ -1104,11 +1269,14 @@ void DeinitLanGameGadgets()
   comboBoxSuperweaponLimit = nullptr;
   comboBoxStartingCash = nullptr;
   comboBoxGameSpeed = nullptr;
-  // Shared-money checkbox: we created it via gogoGadgetCheckbox, so the
-  // window manager tear-down will destroy the widget itself when the
-  // parent menu window goes away. We only need to null our cached
-  // pointer so the next init starts clean.
+  // Shared-money / shared-power / ai-checks-money checkboxes live in
+  // the .wnd — the window manager tears them down with the rest of
+  // the layout. We only need to null our cached pointers so the next
+  // init starts clean.
   checkBoxSharedMoney = nullptr;
+  checkBoxSharedPower = nullptr;
+  checkBoxAiChecksMoney = nullptr;
+  checkBoxAiRebuildsCC = nullptr;
 	if (windowMap)
 	{
 		windowMap->winSetUserData(nullptr);
@@ -1218,6 +1386,12 @@ void LanGameOptionsMenuInit( WindowLayout *layout, void *userData )
     comboBoxGameSpeed->winEnable( FALSE );        // Host-only, see handleGameSpeedSelection
     if (checkBoxSharedMoney)
       checkBoxSharedMoney->winEnable( FALSE );    // Host-only, mirrors the other host-side options
+    if (checkBoxSharedPower)
+      checkBoxSharedPower->winEnable( FALSE );    // Host-only, same reason
+    if (checkBoxAiChecksMoney)
+      checkBoxAiChecksMoney->winEnable( FALSE );  // Host-only, same reason
+    if (checkBoxAiRebuildsCC)
+      checkBoxAiRebuildsCC->winEnable( FALSE );   // Host-only, same reason
 		TheLAN->GetMyGame()->setMapCRC( TheLAN->GetMyGame()->getMapCRC() );		// force a recheck
 		TheLAN->GetMyGame()->setMapSize( TheLAN->GetMyGame()->getMapSize() ); // of if we have the map
 		TheLAN->RequestHasMap();
@@ -1364,6 +1538,24 @@ void updateGameOptions()
       Bool shouldBeChecked = theGame->isSharedTeamMoney();
       if (GadgetCheckBoxIsChecked(checkBoxSharedMoney) != shouldBeChecked)
         GadgetCheckBoxSetChecked(checkBoxSharedMoney, shouldBeChecked);
+    }
+    if (checkBoxSharedPower)
+    {
+      Bool shouldBeCheckedP = theGame->isSharedTeamPower();
+      if (GadgetCheckBoxIsChecked(checkBoxSharedPower) != shouldBeCheckedP)
+        GadgetCheckBoxSetChecked(checkBoxSharedPower, shouldBeCheckedP);
+    }
+    if (checkBoxAiChecksMoney)
+    {
+      Bool shouldBeCheckedACM = theGame->isAiChecksMoney();
+      if (GadgetCheckBoxIsChecked(checkBoxAiChecksMoney) != shouldBeCheckedACM)
+        GadgetCheckBoxSetChecked(checkBoxAiChecksMoney, shouldBeCheckedACM);
+    }
+    if (checkBoxAiRebuildsCC)
+    {
+      Bool shouldBeCheckedARC = theGame->isAiRebuildsCC();
+      if (GadgetCheckBoxIsChecked(checkBoxAiRebuildsCC) != shouldBeCheckedARC)
+        GadgetCheckBoxSetChecked(checkBoxAiRebuildsCC, shouldBeCheckedARC);
     }
 
     // Mirror the host's chosen game speed into the combo. If the host picked a
@@ -1677,6 +1869,21 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
 				if ( controlID == checkBoxSharedMoneyID )
 				{
 					handleSharedMoneyToggle();
+					break;
+				}
+				if ( controlID == checkBoxSharedPowerID )
+				{
+					handleSharedPowerToggle();
+					break;
+				}
+				if ( controlID == checkBoxAiChecksMoneyID )
+				{
+					handleAiChecksMoneyToggle();
+					break;
+				}
+				if ( controlID == checkBoxAiRebuildsCCID )
+				{
+					handleAiRebuildsCCToggle();
 					break;
 				}
 

@@ -48,6 +48,7 @@
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/TerrainLogic.h"
 #include "GameLogic/Module/AIUpdate.h"
+#include "GameNetwork/GameInfo.h"
 #include "GameLogic/Module/DozerAIUpdate.h"
 #include "GameLogic/Module/RebuildHoleBehavior.h"
 #include "GameLogic/Module/UpdateModule.h"
@@ -256,6 +257,39 @@ void AISkirmishPlayer::processBaseBuilding( void )
 #ifdef USE_DOZER
 			// dozer-construct the building
 			bldg = buildStructureWithDozer(bldgPlan, bldgInfo);
+
+			// Decapitation recovery — same as AIPlayer::processBaseBuilding.
+			// When the host has "AI Rebuilds CC" on and the AI has
+			// lost every CC and dozer, use the thin-air build path so
+			// the AI can restart its economy.
+			//
+			// Money interaction: if "AI Checks Money" is ALSO on, the
+			// AI must pay the cost (and is denied if broke). With ACM
+			// off, the AI gets a free CC.
+			if (!bldg
+				&& TheGameInfo
+				&& TheGameInfo->isAiRebuildsCC()
+				&& bldgPlan->isKindOf(KINDOF_COMMANDCENTER)
+				&& findDozer(bldgInfo->getLocation()) == NULL)
+			{
+				Bool proceed = TRUE;
+				if (TheGameInfo->isAiChecksMoney())
+				{
+					Money *aiMoney = m_player->getMoney();
+					const Int cost = bldgPlan->calcCostToBuild(m_player);
+					if (!aiMoney || (Int)aiMoney->countMoney() < cost)
+					{
+						proceed = FALSE;
+					}
+					else
+					{
+						aiMoney->withdraw(cost);
+					}
+				}
+				if (proceed)
+					bldg = buildStructureNow(bldgPlan, bldgInfo);
+			}
+
 			// store the object with the build order
 			if (bldg)
 			{

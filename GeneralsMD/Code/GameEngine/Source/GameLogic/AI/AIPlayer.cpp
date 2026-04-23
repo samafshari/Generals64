@@ -37,6 +37,7 @@
 #include "Common/SpecialPower.h"
 #include "Common/Team.h" 
 #include "Common/ThingFactory.h"
+#include "GameNetwork/GameInfo.h"
 #include "Common/PlayerList.h"
 #include "Common/BuildAssistant.h"
 #include "Common/ThingTemplate.h"
@@ -794,6 +795,52 @@ void AIPlayer::processBaseBuilding( void )
 #ifdef USE_DOZER
 					// dozer-construct the building
 					bldg = buildStructureWithDozer(bldgPlan, info);
+
+					// Decapitation recovery: if we're trying to rebuild
+					// a Command Center but have no dozer (because the
+					// CC — the only dozer factory — was destroyed), we
+					// would be permanently stuck. When the host has
+					// the "AI Rebuilds CC" option on, fall through to
+					// the thin-air build path so the AI can recover.
+					// Narrow cheat: only fires for CCs, only when no
+					// dozer exists; other buildings still require a
+					// live dozer.
+					//
+					// Money interaction: if "AI Checks Money" is ALSO
+					// on, the AI must pay the full cost (and is denied
+					// if broke) — otherwise the decapitated AI gets a
+					// free CC. This combination keeps the two toggles
+					// composable without needing a third flag.
+					if (!bldg
+						&& TheGameInfo
+						&& TheGameInfo->isAiRebuildsCC()
+						&& bldgPlan->isKindOf(KINDOF_COMMANDCENTER)
+						&& findDozer(info->getLocation()) == NULL)
+					{
+						Bool proceed = TRUE;
+						if (TheGameInfo->isAiChecksMoney())
+						{
+							Money *aiMoney = m_player->getMoney();
+							const Int cost = bldgPlan->calcCostToBuild(m_player);
+							if (!aiMoney || (Int)aiMoney->countMoney() < cost)
+							{
+								proceed = FALSE;
+							}
+							else
+							{
+								// Pay now. buildStructureNow itself
+								// doesn't charge (it uses the
+								// BuildAssistant thin-air path), so we
+								// manually deduct to match the "fair
+								// play" invariant ACM is enforcing
+								// everywhere else.
+								aiMoney->withdraw(cost);
+							}
+						}
+						if (proceed)
+							bldg = buildStructureNow(bldgPlan, info);
+					}
+
 					// store the object with the build order
 					if (bldg)
 					{
