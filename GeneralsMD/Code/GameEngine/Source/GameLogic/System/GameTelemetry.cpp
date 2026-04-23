@@ -140,6 +140,45 @@ enum : Int { RES_UNKNOWN = 0, RES_WIN = 1, RES_LOSS = 2, RES_DRAW = 3, RES_DISCO
 // sessions and games.
 static Bool s_thingManifestShipped = FALSE;
 
+// Append a "<key>":{"thingId":count,...} fragment to <dst>, filtered
+// to unit-kind ThingTemplates only (anything isKindOf(KINDOF_STRUCTURE)
+// is treated as a building and skipped — buildings are tracked on the
+// same page's future Building-Mastery surface, not here). Emits nothing
+// — not even the key — when the filtered map is empty, so the caller
+// can safely concat it and the comma-preserving writer above stays
+// correct. Caller is responsible for the leading comma when appending
+// after an existing field.
+static void appendUnitThingIdCountMapJson(AsciiString &dst, const char *key,
+	const std::map<const ThingTemplate *, Int> &counts)
+{
+	if (counts.empty()) return;
+
+	Bool first = TRUE;
+	char buf[48];
+	AsciiString body;
+	for (auto it = counts.begin(); it != counts.end(); ++it)
+	{
+		const ThingTemplate *t = it->first;
+		const Int count = it->second;
+		if (!t || count <= 0) continue;
+		if (t->isKindOf(KINDOF_STRUCTURE)) continue;  // unit-kind only
+		const UnsignedShort id = t->getTemplateID();
+		if (id == 0) continue;
+		if (!first) body.concat(",");
+		first = FALSE;
+		_snprintf(buf, sizeof(buf), "\"%u\":%d", (unsigned)id, count);
+		buf[sizeof(buf) - 1] = '\0';
+		body.concat(buf);
+	}
+	if (first) return;  // every entry filtered out
+
+	dst.concat(",\"");
+	dst.concat(key);
+	dst.concat("\":{");
+	dst.concat(body.str());
+	dst.concat("}");
+}
+
 // Walk every ThingTemplate the factory knows about and append
 //    "ThingManifest":{"1":"AmericaTankCrusader","2":"ChinaTankOverlord",...}
 // to <dst>. Caller is responsible for placing the comma that precedes
@@ -567,8 +606,15 @@ void GameTelemetry::sendGameResultToRelay(Int localResult)
 			sideStr = tmpl->getSide();
 
 		// Team number from GameInfo when available (lobby slot), else -1
-		// (server treats as null).
+		// (server treats as null). While we're walking the slots we also
+		// capture the ORIGINAL template the player picked in the lobby —
+		// if it was PLAYERTEMPLATE_RANDOM we preserve that fact as a
+		// separate flag on the wire, while Side above keeps the resolved
+		// faction the sim actually ran. Without this split the "I rolled
+		// China off random" case becomes indistinguishable from "I picked
+		// China deliberately" once the report hits the server.
 		Int teamNum = -1;
+		Bool wasRandom = FALSE;
 		if (TheGameInfo)
 		{
 			for (Int s = 0; s < MAX_SLOTS; ++s)
@@ -580,6 +626,7 @@ void GameTelemetry::sendGameResultToRelay(Int localResult)
 				if (slotName.compare(displayName.str()) == 0)
 				{
 					teamNum = slot->getTeamNumber();
+					wasRandom = (slot->getOriginalPlayerTemplate() == PLAYERTEMPLATE_RANDOM);
 					break;
 				}
 			}
@@ -607,6 +654,8 @@ void GameTelemetry::sendGameResultToRelay(Int localResult)
 			buf[sizeof(buf) - 1] = '\0';
 			json.concat(buf);
 		}
+		if (wasRandom)
+			json.concat(",\"WasRandom\":true");
 
 		_snprintf(buf, sizeof(buf),
 		        ",\"Result\":%d"
@@ -614,7 +663,7 @@ void GameTelemetry::sendGameResultToRelay(Int localResult)
 		        ",\"UnitsKilledHuman\":%d,\"UnitsKilledAI\":%d"
 		        ",\"BuildingsBuilt\":%d,\"BuildingsLost\":%d"
 		        ",\"BuildingsKilledHuman\":%d,\"BuildingsKilledAI\":%d"
-		        ",\"MoneyEarned\":%d,\"MoneySpent\":%d}",
+		        ",\"MoneyEarned\":%d,\"MoneySpent\":%d",
 		        playerResult,
 		        s.unitsBuilt, s.unitsLost,
 		        s.unitsKilledHuman, s.unitsKilledAI,
@@ -623,6 +672,32 @@ void GameTelemetry::sendGameResultToRelay(Int localResult)
 		        s.moneyEarned, s.moneySpent);
 		buf[sizeof(buf) - 1] = '\0';
 		json.concat(buf);
+
+		// Per-unit-type kill + loss maps — drives the "top destroyers"
+		// and "survival rate" breakdowns on the Mastery/Units page.
+		// Only ships when the underlying ScoreKeeper has at least one
+		// unit-kind entry; the helper itself emits nothing on empty so
+		// short / no-kill games don't bloat the payload.
+		if (ScoreKeeper *sk = p->getScoreKeeper())
+		{
+			// Sum kills across every victim slot into a single map
+			// (thingId is identifying the VICTIM's template; which slot
+			// owned that victim doesn't matter for mastery stats, only
+			// the unit type does). Self-kills already suppressed server-
+			// side by ScoreKeeper::addObjectDestroyed's player-index
+			// tracking, so we sum every slot unconditionally.
+			std::map<const ThingTemplate *, Int> killsByType;
+			for (Int v = 0; v < MAX_PLAYER_COUNT; ++v)
+			{
+				const auto &m = sk->getObjectsDestroyedAgainst(v);
+				for (auto it = m.begin(); it != m.end(); ++it)
+					killsByType[it->first] += it->second;
+			}
+			appendUnitThingIdCountMapJson(json, "UnitKills", killsByType);
+			appendUnitThingIdCountMapJson(json, "UnitsLostByType", sk->getObjectsLost());
+		}
+
+		json.concat("}");
 	}
 
 	json.concat("]");

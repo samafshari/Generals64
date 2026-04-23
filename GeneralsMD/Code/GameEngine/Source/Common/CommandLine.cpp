@@ -327,6 +327,20 @@ Int parseLogObjectCRCs(char *args[], int argc)
 
 //=============================================================================
 //=============================================================================
+// Set to TRUE by -crcDump. When TRUE, GameLogic dumps a per-object state
+// manifest to crc_dump.log every time the per-frame world CRC is computed —
+// in both live (recording) games and replay playback. Diffing a live dump
+// against its replay's playback dump pinpoints any record-vs-playback sim
+// divergence to the exact frame + object + field it first appears at.
+// Declared extern in GameLogic.cpp where the hook lives.
+extern Bool g_crcDumpEnabled;
+
+Int parseCrcDump(char *args[], int argc)
+{
+	g_crcDumpEnabled = TRUE;
+	return 1;
+}
+
 Int parseNetCRCInterval(char *args[], int argc)
 {
 	// Available in every build, not just DEBUG_CRC — NET_CRC_INTERVAL is
@@ -1586,6 +1600,7 @@ static CommandLineParam paramsForEngineInit[] =
 	// Number of frames between each CRC check between all players in multiplayer games
 	// (if not all crcs are equal, mismatch occurs).
 	{ "-NetCRCInterval", parseNetCRCInterval },
+	{ "-crcDump",         parseCrcDump },
 
 	// Number of frames between each CRC that is written to replay files in singleplayer games.
 	{ "-ReplayCRCInterval", parseReplayCRCInterval },

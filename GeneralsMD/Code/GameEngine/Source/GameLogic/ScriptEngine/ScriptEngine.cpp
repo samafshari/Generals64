@@ -8978,7 +8978,11 @@ void ScriptEngine::xfer( Xfer *xfer )
 	Int i;
 
 	// version
-	const XferVersion currentVersion = 5;
+	// v6 folds in m_objectCounts + m_frameObjectCountChanged — previously
+	// absent from the CRC walk but read by getObjectCount() which drives
+	// script conditions like "if PlayerX has N ObjectY". Silent state
+	// there desyncs script-timed events across record/playback or peers.
+	const XferVersion currentVersion = 6;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -9435,6 +9439,44 @@ void ScriptEngine::xfer( Xfer *xfer )
 	else
 	{
 		m_ChooseVictimAlwaysUsesNormal = false;
+	}
+
+	if (version >= 6)
+	{
+		// Script-visible per-player object counts. std::map is ordered by
+		// key, so iteration is deterministic under XFER_CRC. Older saves
+		// (version < 6) skip this block; counts on load come from object
+		// creation events replayed at level-init time.
+		xfer->xferUnsignedInt(&m_frameObjectCountChanged);
+		for (i = 0; i < MAX_PLAYER_COUNT; ++i)
+		{
+			UnsignedShort entryCount = (UnsignedShort)m_objectCounts[i].size();
+			xfer->xferUnsignedShort(&entryCount);
+			if (xfer->getXferMode() == XFER_LOAD)
+			{
+				m_objectCounts[i].clear();
+				AsciiString key;
+				Int val = 0;
+				for (UnsignedShort j = 0; j < entryCount; ++j)
+				{
+					xfer->xferAsciiString(&key);
+					xfer->xferInt(&val);
+					m_objectCounts[i][key] = val;
+				}
+			}
+			else
+			{
+				// XFER_SAVE or XFER_CRC — iterate ordered map deterministically.
+				for (ObjectTypeCount::iterator it = m_objectCounts[i].begin();
+				     it != m_objectCounts[i].end(); ++it)
+				{
+					AsciiString key = it->first;
+					Int val = it->second;
+					xfer->xferAsciiString(&key);
+					xfer->xferInt(&val);
+				}
+			}
+		}
 	}
 
 	if( xfer->getXferMode() == XFER_LOAD ) {

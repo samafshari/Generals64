@@ -100,6 +100,25 @@ public:
 	// for battle honor calculation.  done once at the end of each online game
 	Int getTotalUnitsBuilt( KindOfMaskType validMask, KindOfMaskType invalidMask );
 
+	// Per-ThingTemplate iteration. Added so GameTelemetry can emit a
+	// per-unit-type kill/loss breakdown in GAMERESULT JSON — we don't
+	// want to widen the map access itself (the maps stay private) but
+	// GameTelemetry needs to walk every (template, count) pair. These
+	// return const references; no copy, cheap to call.
+	const std::map<const ThingTemplate *, Int> &getObjectsLost() const
+		{ return m_objectsLost; }
+	// Kills across every victim slot — callers interested in the total
+	// "how many of template T did this subject kill" should sum across
+	// all MAX_PLAYER_COUNT entries. Exposed as the full per-victim array
+	// so upstream decisions about crediting human-vs-AI kills are still
+	// possible (mirrors the existing getUnitsDestroyedByPlayer semantics).
+	const std::map<const ThingTemplate *, Int> &getObjectsDestroyedAgainst( Int victimIdx ) const
+	{
+		static const std::map<const ThingTemplate *, Int> empty;
+		return (victimIdx >= 0 && victimIdx < MAX_PLAYER_COUNT)
+			? m_objectsDestroyed[victimIdx] : empty;
+	}
+
 protected:
 
 	// snapshot methods

@@ -422,7 +422,12 @@ void TeamFactory::teamAboutToBeDeleted(Team* team)
 // ------------------------------------------------------------------------
 void TeamFactory::crc( Xfer *xfer )
 {
-
+	// Route crc through xfer() so module-specific state enters the CRC.
+	// Without this m_uniqueTeamID (the team-id counter) and every team
+	// prototype's xfer state were invisible to lockstep. Same pattern as
+	// the 141-class sweep earlier — TeamFactory was missed there because
+	// it's not a Behavior/Update module.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------
@@ -2711,7 +2716,11 @@ void Team::updateGenericScripts()
 // ------------------------------------------------------------------------------------------------
 void Team::crc( Xfer *xfer )
 {
-
+	// Route crc through xfer() so Team state (id, m_currentlySelectedID,
+	// m_prevTeamState, production counters, attack queue, etc.) enters
+	// the CRC. Team::xfer already handles 20+ mutable fields; crc was
+	// empty so none of them were hashed into the lockstep check.
+	this->xfer(xfer);
 }
 
 // ------------------------------------------------------------------------------------------------

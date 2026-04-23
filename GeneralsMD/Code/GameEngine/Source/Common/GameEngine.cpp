@@ -808,8 +808,22 @@ void GameEngine::init()
 					if (logicFPS > 120) logicFPS = 120;
 					if (logicFPS < 5) logicFPS = 5;
 
-					TheSkirmishGameInfo->reset();
+					// Normally TheSkirmishGameInfo is created when the user opens
+					// the Skirmish menu; -launchconfig skips all menus so we have
+					// to create it here. Without this, the next line crashes with
+					// a NULL deref and the launch silently fails.
+					if (TheSkirmishGameInfo == nullptr)
+						TheSkirmishGameInfo = NEW SkirmishGameInfo;
+
+					// NOTE: enterGame() internally calls reset(), so it MUST come
+					// before any setMap/setSlot/setSeed calls — otherwise it wipes
+					// them back to the default m_mapName="NOMAP" state. That was
+					// the bug that caused the launched sim to bail out with
+					// "Could not find map 'NOMAP'" at startNewGame::findMap even
+					// though our setMap just before clearly stored the right path.
+					TheSkirmishGameInfo->enterGame();
 					TheSkirmishGameInfo->setMap(mapName);
+					printf("[launchconfig] map='%s'\n", TheSkirmishGameInfo->getMap().str());
 					TheSkirmishGameInfo->setSeed(seed);
 					{
 					Money cash;
@@ -856,6 +870,9 @@ void GameEngine::init()
 					TheWritableGlobalData->m_mapName = mapName;
 					TheWritableGlobalData->m_shellMapOn = FALSE;
 					TheWritableGlobalData->m_playIntro = FALSE;
+					// enterGame() was already called up above (before setMap)
+					// to establish m_inGame=true without wiping the fields
+					// we're setting. startGame() just flips m_inProgress.
 					TheSkirmishGameInfo->startGame(0);
 
 					InitRandom(seed);

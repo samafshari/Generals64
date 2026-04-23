@@ -162,6 +162,13 @@ extern "C" int SafeCanCallUpdate(const void* modulePtr)
 #include <xmmintrin.h>   // _mm_setcsr for setFPMode on x64
 #endif
 
+// -crcDump: when TRUE, the per-frame world CRC compute path also writes a
+// per-object manifest to crc_dump.log so a live-game dump can be diffed
+// against its replay's playback dump to locate record-vs-playback
+// divergences exactly. Wired in at the CRC call site in GameLogic::update.
+// Set from CommandLine.cpp's parseCrcDump.
+Bool g_crcDumpEnabled = FALSE;
+
 #include "GameClient/ControlBar.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/GameClient.h"
@@ -3954,6 +3961,26 @@ void GameLogic::update()
 		LIVE_PERF_SCOPE("GameLogic::update/CRC");
 		m_CRC = getCRC( CRC_RECALC );
 		bool isPlayback = (TheRecorder && TheRecorder->isPlaybackMode());
+
+		// -crcDump: mirror the per-object state into crc_dump.log every time
+		// a world CRC is generated (same frames in live and in playback). A
+		// live game writes "record"-side lines; playing the resulting replay
+		// with the same flag writes "playback"-side lines. Diffing the two
+		// files pinpoints any record-vs-playback sim divergence to an exact
+		// frame + object + field rather than leaving us with just "frame
+		// 12000 mismatched". Opt-in, does nothing without the flag.
+		if (g_crcDumpEnabled)
+		{
+			FILE* df = fopen("crc_dump.log", "a");
+			if (df) {
+				setvbuf(df, nullptr, _IONBF, 0);
+				fprintf(df, "\n=== %s frame=%u world_crc=0x%08X ===\n",
+					isPlayback ? "PLAYBACK" : "RECORD",
+					(unsigned)m_frame, (unsigned)m_CRC);
+				writeDesyncObjectManifest(df);
+				fclose(df);
+			}
+		}
 
 		GameMessage *msg = newInstance(GameMessage)(GameMessage::MSG_LOGIC_CRC);
 		msg->appendIntegerArgument(m_CRC);
