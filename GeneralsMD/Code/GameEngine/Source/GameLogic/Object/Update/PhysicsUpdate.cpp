@@ -1841,13 +1841,14 @@ void PhysicsBehavior::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 3: Added m_lastCollidee + m_forwardSpeed2D (silent state). */
 // ------------------------------------------------------------------------------------------------
 void PhysicsBehavior::xfer( Xfer *xfer )
 {
 
 	// version
-	const XferVersion currentVersion = 2;
+	const XferVersion currentVersion = 3;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -1915,6 +1916,15 @@ void PhysicsBehavior::xfer( Xfer *xfer )
 
 	// mag of current vel
 	xfer->xferReal( &m_velMag );
+
+	// last collidee — read by SlowDeathBehavior/JetSlowDeath/HelicopterSlowDeath
+	// to decide which tree to knock down when a vehicle dies. Silent state
+	// prior to v3: could persist across save/load or diverge under per-frame CRC.
+	if (version >= 3)
+	{
+		xfer->xferObjectID( &m_lastCollidee );
+		xfer->xferReal( &m_forwardSpeed2D );
+	}
 
 }
 

@@ -250,6 +250,23 @@ public:
   inline Bool oldFactionsOnly() const;
   inline void setOldFactionsOnly( Bool oldFactionsOnly );
 
+  // Shared-money team mode. When on, every player whose GameSlot team
+  // number is >= 0 shares a single credits pool with their teammates:
+  // earnings (income, sell refunds, bounties) all flow into the pool,
+  // and every build / purchase draws from it. Players with team = -1
+  // keep their individual Money object unchanged. Per-player income
+  // tracking (academy stats, cash-per-minute HUD) is preserved so
+  // individual contribution is still measurable.
+  //
+  // Sync path: the host sets this in the LAN/online lobby, it rides
+  // the GameInfo options string ("STM=Y/N") to every peer, and each
+  // peer's GameLogic::startNewGame binds every Player's Money to the
+  // per-team pool before the sim begins. Because all clients run the
+  // same deterministic commands in lockstep, the pool stays in sync
+  // naturally with no extra network traffic.
+  inline Bool isSharedTeamMoney() const;
+  inline void setSharedTeamMoney( Bool shared );
+
   Bool isClientServerMode() const { return m_clientServerMode; }
   void setClientServerMode(Bool cs) { m_clientServerMode = cs; }
 
@@ -285,6 +302,7 @@ protected:
   Bool m_oldFactionsOnly; // Only USA, China, GLA -- not USA Air Force General, GLA Toxic General, et al
   Bool m_clientServerMode; // Client-server networking mode (vs P2P lockstep)
   Int  m_gameFps;          // Logic / network frame rate in Hz, host-chosen via the LAN options dropdown
+  Bool m_sharedTeamMoney;  // Host-enabled "shared money" team mode — see isSharedTeamMoney comment
 };
 
 extern GameInfo *TheGameInfo;
@@ -306,6 +324,8 @@ const Money&GameInfo::getStartingCash() const         { return m_startingCash; }
 UnsignedShort GameInfo::getSuperweaponRestriction() const { return m_superweaponRestriction; }
 Bool        GameInfo::oldFactionsOnly() const           { return m_oldFactionsOnly; }
 void        GameInfo::setOldFactionsOnly( Bool oldFactionsOnly ) { m_oldFactionsOnly = oldFactionsOnly; }
+Bool        GameInfo::isSharedTeamMoney() const         { return m_sharedTeamMoney; }
+void        GameInfo::setSharedTeamMoney( Bool shared ) { m_sharedTeamMoney = shared; }
 
 AsciiString GameInfoToAsciiString( const GameInfo *game );
 Bool ParseAsciiStringToGameInfo( GameInfo *game, AsciiString options );

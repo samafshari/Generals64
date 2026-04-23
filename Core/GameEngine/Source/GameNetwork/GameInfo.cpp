@@ -35,6 +35,8 @@
 #include "GameClient/GameText.h"
 #include "GameClient/MapUtil.h"
 #include "Common/MultiplayerSettings.h"
+#include "Common/Player.h"
+#include "Common/PlayerList.h"
 #include "Common/PlayerTemplate.h"
 #include "Common/Xfer.h"
 #include "GameNetwork/FileTransfer.h"
@@ -321,6 +323,7 @@ void GameInfo::reset()
   m_oldFactionsOnly = FALSE;
   m_clientServerMode = FALSE;
   m_gameFps = 70; // Default skirmish/MP logic FPS — see GameInfo::getGameFps comment
+  m_sharedTeamMoney = FALSE; // Team-pooled credits mode; host toggles via lobby checkbox
 //	m_localIP = 0; // BGC - actually we don't want this to be reset since the m_localIP is
 										// set properly in the constructor of LANGameInfo which uses this as a base class.
 	m_mapCRC = 0;
@@ -954,6 +957,12 @@ AsciiString GameInfoToAsciiString( const GameInfo *game )
 		optionsString.concat(gfpsStr);
 	}
 
+	// Shared-money team mode flag. Only emit when on so joiners on an
+	// older build (that don't know the key) simply see the default-off
+	// behavior; a value-absent key is parsed as FALSE by the loop below.
+	if (game->isSharedTeamMoney())
+		optionsString.concat("STM=1;");
+
 	//add player info for each slot
 	optionsString.concat(slotListID);
 	optionsString.concat('=');
@@ -1186,6 +1195,10 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
 			if (fps < 5)   fps = 5;
 			if (fps > 240) fps = 240;
 			game->setGameFps(fps);
+		}
+		else if (key.compare("STM") == 0)
+		{
+			game->setSharedTeamMoney( atoi(val.str()) != 0 );
 		}
 		else if (key.getLength() == 1 && *key.str() == slotListID)
 		{
@@ -1591,6 +1604,10 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
 		game->setSuperweaponRestriction(restriction);
 		game->setStartingCash(startingCash);
 		game->setOldFactionsOnly(oldFactionsOnly);
+		// m_sharedTeamMoney was already applied via game->setSharedTeamMoney
+		// inside the STM= branch above (along with clientServerMode / gameFps),
+		// so no extra write needed here. Those three keys are applied in-line
+		// rather than cached into locals like the other options.
 
 		return true;
 	}
@@ -1620,7 +1637,11 @@ void SkirmishGameInfo::xfer( Xfer *xfer )
 #if RTS_GENERALS
 	const XferVersion currentVersion = 2;
 #else
-	const XferVersion currentVersion = 4;
+	// Version 5 adds the "shared money" team-pool flag + the per-team
+	// pool balances. Older saves default to sharedTeamMoney=FALSE and
+	// an all-zero pool, which is correct — without the flag there is
+	// nothing to restore.
+	const XferVersion currentVersion = 5;
 #endif
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
@@ -1719,6 +1740,33 @@ void SkirmishGameInfo::xfer( Xfer *xfer )
     m_startingCash = TheGlobalData->m_defaultStartingCash;
   }
 
+  // Version 5: shared-money team-pool flag + pool balances. The pool
+  // itself is a file-scope static array in Money.cpp (keyed by GameSlot
+  // team number). Iterating by slot count keeps the save format stable
+  // regardless of which players are currently alive — a dead player's
+  // team still owns its pool balance until the game ends.
+  if ( version >= 5 )
+  {
+    xfer->xferBool( &m_sharedTeamMoney );
+
+    Int poolCount = MAX_SLOTS;
+    xfer->xferInt( &poolCount );
+    DEBUG_ASSERTCRASH(poolCount == MAX_SLOTS, ("MAX_SLOTS changed — bump shared-money pool xfer version."));
+
+    for ( Int t = 0; t < MAX_SLOTS; ++t )
+    {
+      UnsignedInt pool = Money::getSharedPoolForTeam(t);
+      xfer->xferUnsignedInt( &pool );
+      if ( xfer->getXferMode() == XFER_LOAD )
+        Money::setSharedPoolForTeam(t, pool);
+    }
+  }
+  else if ( xfer->getXferMode() == XFER_LOAD )
+  {
+    // Pre-v5 save — no shared-money mode was possible.
+    m_sharedTeamMoney = FALSE;
+    Money::resetAllSharedPools();
+  }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1726,6 +1774,35 @@ void SkirmishGameInfo::xfer( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 void SkirmishGameInfo::loadPostProcess()
 {
+	// Rebind every loaded Player's Money to the per-team pool. Money's
+	// in-memory routing state (m_useSharedPool / m_sharedTeamIndex) is
+	// NOT persisted in Money::xfer on purpose — we reconstruct it from
+	// the slot team numbers we just loaded here, which keeps the Money
+	// save format backwards-compatible with pre-shared-money saves.
+	//
+	// Migration inside setSharedPoolBinding is a no-op in this path
+	// because shared-mode saves always have m_money == 0 (setStartingCash
+	// / deposit route into the pool, never into m_money, when bound).
+	if (!ThePlayerList)
+		return;
+
+	const Bool sharedMode = isSharedTeamMoney();
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+	{
+		const GameSlot *slot = getConstSlot(i);
+		if (!slot || !slot->isOccupied())
+			continue;
+		if (slot->getPlayerTemplate() == PLAYERTEMPLATE_OBSERVER)
+			continue;
+
+		AsciiString playerName;
+		playerName.format("player%d", i);
+		Player *p = ThePlayerList->findPlayerWithNameKey(NAMEKEY(playerName));
+		if (!p)
+			continue;
+
+		p->getMoney()->setSharedPoolBinding(sharedMode, slot->getTeamNumber());
+	}
 }
 
 

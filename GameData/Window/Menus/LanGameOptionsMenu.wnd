@@ -409,8 +409,8 @@ WINDOW
     CHILD
     WINDOW
       WINDOWTYPE = STATICTEXT;
-      SCREENRECT = UPPERLEFT: 456 332,
-                   BOTTOMRIGHT: 568 356,
+      SCREENRECT = UPPERLEFT: 384 332,
+                   BOTTOMRIGHT: 496 356,
                    CREATIONRESOLUTION: 800 600;
       NAME = "LanGameOptionsMenu.wnd:StaticTextSuperweaponLimit";
       STATUS = ENABLED+IMAGE;
@@ -459,8 +459,8 @@ WINDOW
     CHILD
     WINDOW
       WINDOWTYPE = COMBOBOX;
-      SCREENRECT = UPPERLEFT: 568 332,
-                   BOTTOMRIGHT: 672 356,
+      SCREENRECT = UPPERLEFT: 502 332,
+                   BOTTOMRIGHT: 567 356,
                    CREATIONRESOLUTION: 800 600;
       NAME = "LanGameOptionsMenu.wnd:ComboBoxSuperweaponLimit";
       STATUS = ENABLED+IMAGE;
@@ -700,6 +700,55 @@ WINDOW
     END
     CHILD
     WINDOW
+      WINDOWTYPE = CHECKBOX;
+      SCREENRECT = UPPERLEFT: 575 332,
+                   BOTTOMRIGHT: 790 356,
+                   CREATIONRESOLUTION: 800 600;
+      NAME = "LanGameOptionsMenu.wnd:CheckBoxSharedMoney";
+      STATUS = ENABLED+IMAGE;
+      STYLE = CHECKBOX+MOUSETRACK;
+      SYSTEMCALLBACK = "[None]";
+      INPUTCALLBACK = "[None]";
+      TOOLTIPCALLBACK = "[None]";
+      DRAWCALLBACK = "[None]";
+      FONT = NAME: "Arial", SIZE: 14, BOLD: 0;
+      HEADERTEMPLATE = "[NONE]";
+      TOOLTIPTEXT = "TOOLTIP:SharedMoney";
+      TOOLTIPDELAY = -1;
+      TEXT = "GUI:SharedMoney";
+      TEXTCOLOR = ENABLED:  255 255 255 255, ENABLEDBORDER:  0 0 0 255,
+                  DISABLED: 192 192 192 255, DISABLEDBORDER: 64 64 64 255,
+                  HILITE:   168 255 12 255, HILITEBORDER:   0 0 0 255;
+      ENABLEDDRAWDATA = IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                        IMAGE: Active-Unchecked, COLOR: 255 255 255 0, BORDERCOLOR: 128 128 255 255,
+                        IMAGE: Active-Checked, COLOR: 0 0 255 255, BORDERCOLOR: 128 128 255 255,
+                        IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                        IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                        IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                        IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                        IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                        IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0;
+      DISABLEDDRAWDATA = IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                         IMAGE: Disabled-Unchecked, COLOR: 255 255 255 0, BORDERCOLOR: 192 192 192 255,
+                         IMAGE: Disabled-Checked, COLOR: 64 64 64 255, BORDERCOLOR: 254 254 254 255,
+                         IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                         IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                         IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                         IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                         IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                         IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0;
+      HILITEDRAWDATA = IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                       IMAGE: Active-HiLighted, COLOR: 255 255 255 0, BORDERCOLOR: 128 128 255 255,
+                       IMAGE: Active-Checked, COLOR: 255 255 0 255, BORDERCOLOR: 254 254 254 255,
+                       IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                       IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                       IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                       IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                       IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0,
+                       IMAGE: NoImage, COLOR: 255 255 255 0, BORDERCOLOR: 255 255 255 0;
+    END
+    CHILD
+    WINDOW
       WINDOWTYPE = STATICTEXT;
       SCREENRECT = UPPERLEFT: 50 332,
                    BOTTOMRIGHT: 146 356,
@@ -752,7 +801,7 @@ WINDOW
     WINDOW
       WINDOWTYPE = COMBOBOX;
       SCREENRECT = UPPERLEFT: 146 332,
-                   BOTTOMRIGHT: 250 356,
+                   BOTTOMRIGHT: 211 356,
                    CREATIONRESOLUTION: 800 600;
       NAME = "LanGameOptionsMenu.wnd:ComboBoxStartingCash";
       STATUS = ENABLED+IMAGE;
@@ -993,8 +1042,8 @@ WINDOW
     CHILD
     WINDOW
       WINDOWTYPE = STATICTEXT;
-      SCREENRECT = UPPERLEFT: 256 332,
-                   BOTTOMRIGHT: 346 356,
+      SCREENRECT = UPPERLEFT: 217 332,
+                   BOTTOMRIGHT: 307 356,
                    CREATIONRESOLUTION: 800 600;
       NAME = "LanGameOptionsMenu.wnd:StaticTextGameSpeed";
       STATUS = ENABLED+IMAGE;
@@ -1043,8 +1092,8 @@ WINDOW
     CHILD
     WINDOW
       WINDOWTYPE = COMBOBOX;
-      SCREENRECT = UPPERLEFT: 346 332,
-                   BOTTOMRIGHT: 450 356,
+      SCREENRECT = UPPERLEFT: 313 332,
+                   BOTTOMRIGHT: 378 356,
                    CREATIONRESOLUTION: 800 600;
       NAME = "LanGameOptionsMenu.wnd:ComboBoxGameSpeed";
       STATUS = ENABLED+IMAGE;

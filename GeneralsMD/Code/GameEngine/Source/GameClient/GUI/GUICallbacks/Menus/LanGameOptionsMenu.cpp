@@ -115,6 +115,7 @@ static NameKeyType buttonSelectMapID = NAMEKEY_INVALID;
 static NameKeyType comboBoxSuperweaponLimitID = NAMEKEY_INVALID;
 static NameKeyType comboBoxStartingCashID = NAMEKEY_INVALID;
 static NameKeyType comboBoxGameSpeedID = NAMEKEY_INVALID;
+static NameKeyType checkBoxSharedMoneyID = NAMEKEY_INVALID;
 static NameKeyType windowMapID = NAMEKEY_INVALID;
 // Window Pointers ------------------------------------------------------------------------
 static GameWindow *parentLanGameOptions = nullptr;
@@ -128,6 +129,14 @@ static GameWindow *comboBoxSuperweaponLimit = nullptr;
 static GameWindow *comboBoxStartingCash = nullptr;
 static GameWindow *comboBoxGameSpeed = nullptr;
 static GameWindow *windowMap = nullptr;
+
+// "Shared Money" checkbox — declared in LanGameOptionsMenu.wnd
+// alongside the other host-side options (starting cash, game speed,
+// superweapon limit) and looked up here by NAMEKEY. Host-only;
+// disabled for joiners. When toggled, flips GameInfo::m_sharedTeamMoney
+// and re-broadcasts the game options string so every joiner picks up
+// the new value via the STM= key in ParseAsciiStringToGameInfo.
+static GameWindow *checkBoxSharedMoney = nullptr;
 
 // Preset values for the host's superweapon-limit combo. Counts are interpreted
 // PER TEAM, not per player — see Player::canBuildMoreOfType for the change.
@@ -768,6 +777,33 @@ static void handleGameSpeedSelection()
 	}
 }
 
+static void handleSharedMoneyToggle()
+{
+	LANGameInfo *myGame = TheLAN->GetMyGame();
+	if (!myGame || !checkBoxSharedMoney)
+		return;
+
+	// Joiners see this checkbox disabled, but if something ever calls
+	// into here off-host we still want to leave the authoritative
+	// GameInfo untouched.
+	if (!myGame->amIHost())
+		return;
+
+	const Bool newVal = GadgetCheckBoxIsChecked(checkBoxSharedMoney);
+	if (newVal == myGame->isSharedTeamMoney())
+		return;
+
+	myGame->setSharedTeamMoney(newVal);
+	myGame->resetAccepted();
+
+	if (!s_isIniting)
+	{
+		// Rebroadcast so every peer picks up STM=N via ParseAsciiStringToGameInfo.
+		TheLAN->RequestGameOptions(GenerateGameOptionsString(), true);
+		lanUpdateSlotList();
+	}
+}
+
 static void handleSuperweaponLimitSelection()
 {
 	LANGameInfo *myGame = TheLAN->GetMyGame();
@@ -867,6 +903,7 @@ void InitLanGameGadgets()
   comboBoxSuperweaponLimitID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:ComboBoxSuperweaponLimit" );
   comboBoxStartingCashID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:ComboBoxStartingCash" );
   comboBoxGameSpeedID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:ComboBoxGameSpeed" );
+  checkBoxSharedMoneyID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:CheckBoxSharedMoney" );
 	windowMapID = TheNameKeyGenerator->nameToKey( "LanGameOptionsMenu.wnd:MapWindow" );
 
 	// Initialize the pointers to our gadgets
@@ -895,6 +932,20 @@ void InitLanGameGadgets()
   comboBoxGameSpeed = TheWindowManager->winGetWindowFromId( parentLanGameOptions, comboBoxGameSpeedID );
   DEBUG_ASSERTCRASH(comboBoxGameSpeed, ("Could not find the comboBoxGameSpeed"));
 	PopulateGameSpeedComboBox(comboBoxGameSpeed, TheLAN->GetMyGame());
+
+  checkBoxSharedMoney = TheWindowManager->winGetWindowFromId( parentLanGameOptions, checkBoxSharedMoneyID );
+  DEBUG_ASSERTCRASH(checkBoxSharedMoney, ("Could not find the checkBoxSharedMoney"));
+	if (checkBoxSharedMoney)
+	{
+		// Override the .wnd's CSF key with a literal so we don't ship
+		// a new "GUI:SharedMoney" string key right now. If/when the
+		// CSF gets that entry, the .wnd's TEXT = "GUI:SharedMoney"
+		// will automatically take over and this override becomes a
+		// no-op for localized builds.
+		GadgetCheckBoxSetText(checkBoxSharedMoney, UnicodeString(L"Shared Money"));
+		GadgetCheckBoxSetChecked(checkBoxSharedMoney,
+			TheLAN->GetMyGame() ? TheLAN->GetMyGame()->isSharedTeamMoney() : FALSE);
+	}
 
 	windowMap = TheWindowManager->winGetWindowFromId( parentLanGameOptions,windowMapID  );
 	DEBUG_ASSERTCRASH(windowMap, ("Could not find the LanGameOptionsMenu.wnd:MapWindow" ));
@@ -1053,6 +1104,11 @@ void DeinitLanGameGadgets()
   comboBoxSuperweaponLimit = nullptr;
   comboBoxStartingCash = nullptr;
   comboBoxGameSpeed = nullptr;
+  // Shared-money checkbox: we created it via gogoGadgetCheckbox, so the
+  // window manager tear-down will destroy the widget itself when the
+  // parent menu window goes away. We only need to null our cached
+  // pointer so the next init starts clean.
+  checkBoxSharedMoney = nullptr;
 	if (windowMap)
 	{
 		windowMap->winSetUserData(nullptr);
@@ -1160,6 +1216,8 @@ void LanGameOptionsMenuInit( WindowLayout *layout, void *userData )
     comboBoxSuperweaponLimit->winEnable( FALSE ); // Can look but only host can touch
     comboBoxStartingCash->winEnable( FALSE );     // Ditto
     comboBoxGameSpeed->winEnable( FALSE );        // Host-only, see handleGameSpeedSelection
+    if (checkBoxSharedMoney)
+      checkBoxSharedMoney->winEnable( FALSE );    // Host-only, mirrors the other host-side options
 		TheLAN->GetMyGame()->setMapCRC( TheLAN->GetMyGame()->getMapCRC() );		// force a recheck
 		TheLAN->GetMyGame()->setMapSize( TheLAN->GetMyGame()->getMapSize() ); // of if we have the map
 		TheLAN->RequestHasMap();
@@ -1295,6 +1353,18 @@ void updateGameOptions()
     }
 
     DEBUG_ASSERTCRASH( index < itemCount, ("Could not find new starting cash amount %d in list", theGame->getStartingCash().countMoney() ) );
+
+    // Mirror the host's Shared Money state into the checkbox. The checkbox
+    // was created programmatically so there's no .wnd-driven refresh — we
+    // just poll each updateGameOptions tick. Hosts see their own clicks
+    // reflected immediately; joiners see the GameInfo value, which was
+    // just applied by ParseAsciiStringToGameInfo's STM= branch.
+    if (checkBoxSharedMoney)
+    {
+      Bool shouldBeChecked = theGame->isSharedTeamMoney();
+      if (GadgetCheckBoxIsChecked(checkBoxSharedMoney) != shouldBeChecked)
+        GadgetCheckBoxSetChecked(checkBoxSharedMoney, shouldBeChecked);
+    }
 
     // Mirror the host's chosen game speed into the combo. If the host picked a
     // value not in our preset list (manual override on their end), repopulate
@@ -1603,6 +1673,12 @@ WindowMsgHandledType LanGameOptionsMenuSystem( GameWindow *window, UnsignedInt m
 					break;
 				GameWindow *control = (GameWindow *)mData1;
 				Int controlID = control->winGetWindowId();
+
+				if ( controlID == checkBoxSharedMoneyID )
+				{
+					handleSharedMoneyToggle();
+					break;
+				}
 
 				if ( controlID == buttonBackID )
 				{

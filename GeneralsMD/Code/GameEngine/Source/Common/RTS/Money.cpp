@@ -52,6 +52,67 @@
 #include "Common/PlayerList.h"
 #include "Common/Xfer.h"
 #include "GameLogic/GameLogic.h"
+#include "GameNetwork/NetworkDefs.h"	// for MAX_SLOTS
+
+// Per-team shared credits pool for the host-enabled "shared money"
+// multiplayer mode. Indexed by GameSlot::getTeamNumber(); valid team
+// numbers are [0, MAX_SLOTS/2) per GameInfo's validation but the array
+// is sized to MAX_SLOTS for headroom. Entries are zeroed at game start
+// by PlayerList setup and (on save-load) by SkirmishGameInfo::xfer.
+//
+// Kept as a file-scope static rather than a member of GameInfo because
+// every Money instance needs cheap O(1) access on every withdraw /
+// deposit — a pointer hop per transaction would cost more than the
+// whole feature is worth. Lockstep determinism is preserved because
+// every peer applies the same command stream in the same order against
+// the same static array.
+static UnsignedInt s_sharedPool[MAX_SLOTS] = { 0 };
+
+void Money::resetAllSharedPools()
+{
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+		s_sharedPool[i] = 0u;
+}
+
+UnsignedInt Money::getSharedPoolForTeam(Int team)
+{
+	if (team < 0 || team >= MAX_SLOTS) return 0u;
+	return s_sharedPool[team];
+}
+
+void Money::setSharedPoolForTeam(Int team, UnsignedInt amount)
+{
+	if (team < 0 || team >= MAX_SLOTS) return;
+	s_sharedPool[team] = amount;
+}
+
+void Money::setSharedPoolBinding(Bool enabled, Int teamNumber)
+{
+	const Bool shouldUsePool = enabled && teamNumber >= 0 && teamNumber < MAX_SLOTS;
+
+	if (shouldUsePool)
+	{
+		// Migrate any cash already in m_money (e.g. starting cash that
+		// PlayerTemplate::init deposited before we bound) into the
+		// team pool, so call-order between this binding and the
+		// setStartingCash path doesn't matter.
+		if (!m_useSharedPool && m_money > 0)
+		{
+			s_sharedPool[teamNumber] += m_money;
+			m_money = 0;
+		}
+		m_useSharedPool = TRUE;
+		m_sharedTeamIndex = teamNumber;
+	}
+	else
+	{
+		// Solo player (team -1) or shared mode off. Leave m_money
+		// as-is; no migration out of the pool because the "on→off"
+		// transition doesn't happen mid-game in any supported flow.
+		m_useSharedPool = FALSE;
+		m_sharedTeamIndex = -1;
+	}
+}
 
 // ------------------------------------------------------------------------------------------------
 UnsignedInt Money::withdraw(UnsignedInt amountToWithdraw, Bool playSound)
@@ -62,8 +123,13 @@ UnsignedInt Money::withdraw(UnsignedInt amountToWithdraw, Bool playSound)
 		return 0;
 #endif
 
-	if (amountToWithdraw > m_money)
-		amountToWithdraw = m_money;
+	// In shared-money mode the spendable balance lives in the team pool.
+	// All call sites (build cost, AI purchase, unit repair, etc.) funnel
+	// through here so we only need to redirect in one place.
+	UnsignedInt &balance = m_useSharedPool ? s_sharedPool[m_sharedTeamIndex] : m_money;
+
+	if (amountToWithdraw > balance)
+		amountToWithdraw = balance;
 
 	if (amountToWithdraw == 0)
 		return amountToWithdraw;
@@ -73,7 +139,7 @@ UnsignedInt Money::withdraw(UnsignedInt amountToWithdraw, Bool playSound)
 		triggerAudioEvent(TheAudio->getMiscAudio()->m_moneyWithdrawSound);
 	}
 
-	m_money -= amountToWithdraw;
+	balance -= amountToWithdraw;
 
 	return amountToWithdraw;
 }
@@ -91,11 +157,16 @@ void Money::deposit(UnsignedInt amountToDeposit, Bool playSound, Bool trackIncom
 
 	if (trackIncome)
 	{
+		// Income tracking is PER-PLAYER regardless of pooling — so
+		// individual cash-per-minute HUD and AcademyStats::recordIncome
+		// still reflect this player's contribution even when the cash
+		// itself flows into the team pool.
 		m_incomeBuckets[m_currentBucket] += amountToDeposit;
 		m_cashPerMinute += amountToDeposit;
 	}
 
-	m_money += amountToDeposit;
+	UnsignedInt &balance = m_useSharedPool ? s_sharedPool[m_sharedTeamIndex] : m_money;
+	balance += amountToDeposit;
 
 	if( amountToDeposit > 0 )
 	{
@@ -108,12 +179,42 @@ void Money::deposit(UnsignedInt amountToDeposit, Bool playSound, Bool trackIncom
 }
 
 // ------------------------------------------------------------------------------------------------
+void Money::onPlayerKilled()
+{
+	if (m_useSharedPool)
+	{
+		// Shared pool stays — teammates keep spending. We leave
+		// m_money and the income buckets alone so the dead player's
+		// stat line still shows how much they contributed.
+		return;
+	}
+	// Solo: preserve retail behavior — drain to zero.
+	m_money = 0;
+}
+
+// ------------------------------------------------------------------------------------------------
 void Money::setStartingCash(UnsignedInt amount)
 {
-	m_money = amount;
+	// Per-player income trackers always reset — they're per-player even
+	// in shared mode so individual stats start from zero each game.
 	std::fill(m_incomeBuckets, m_incomeBuckets + ARRAY_SIZE(m_incomeBuckets), 0u);
 	m_currentBucket = 0u;
 	m_cashPerMinute = 0u;
+
+	if (m_useSharedPool)
+	{
+		// Each teammate contributes their starting cash into the team
+		// pool, so a team of N players starts with N × startingCash.
+		// This matches the "pooled economy" feel of comparable modes
+		// in other RTS titles — a 3-player alliance should have a real
+		// advantage at game start, not share one player's allowance.
+		s_sharedPool[m_sharedTeamIndex] += amount;
+		m_money = 0;
+	}
+	else
+	{
+		m_money = amount;
+	}
 }
 
 // ------------------------------------------------------------------------------------------------

@@ -1733,6 +1733,45 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	TheTeamFactory->reset();
 	ThePlayerList->newGame();
 
+	// Shared-money team binding. Every peer runs this block with the
+	// same TheGameInfo (synced via the lobby options string), so every
+	// peer binds the same Players to the same team pool indices — no
+	// additional network traffic required. Observers, open/closed
+	// slots, and solo players (team == -1) keep their individual
+	// Money object behavior: setSharedPoolBinding explicitly no-ops
+	// for teamNumber < 0, which is the correct exclusion for "players
+	// with no team" per the feature spec.
+	if (TheGameInfo)
+	{
+		// Reset the pool first so a replay or a re-entered lobby starts
+		// from zero balances. setSharedPoolBinding below will fold each
+		// player's starting-cash deposit (already applied by PlayerTemplate::init
+		// during the PlayerList->newGame() call above) into the pool.
+		Money::resetAllSharedPools();
+
+		const Bool sharedMode = TheGameInfo->isSharedTeamMoney();
+		for (Int i = 0; i < MAX_SLOTS; ++i)
+		{
+			const GameSlot *slot = TheGameInfo->getConstSlot(i);
+			if (!slot || !slot->isOccupied())
+				continue;
+			if (slot->getPlayerTemplate() == PLAYERTEMPLATE_OBSERVER)
+				continue;
+
+			AsciiString playerName;
+			playerName.format("player%d", i);
+			Player *p = ThePlayerList->findPlayerWithNameKey(NAMEKEY(playerName));
+			if (!p)
+				continue;
+
+			// teamNumber < 0 (== "no team") always routes to the solo
+			// branch inside setSharedPoolBinding, regardless of
+			// sharedMode. Players with a real team number only share
+			// when sharedMode is TRUE.
+			p->getMoney()->setSharedPoolBinding(sharedMode, slot->getTeamNumber());
+		}
+	}
+
 	// update the loadscreen
 	updateLoadProgress(LOAD_PROGRESS_POST_PLAYER_LIST_RESET);
 	appendShellMapTrace("GameLogic: post player list reset progress=%d", LOAD_PROGRESS_POST_PLAYER_LIST_RESET);

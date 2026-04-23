@@ -2091,7 +2091,11 @@ void Player::killPlayer()
 
 	}
 
-	m_money.withdraw(m_money.countMoney()); // force $$$ to 0 on death
+	// Force $$$ to 0 on death — in solo mode this drains the player's
+	// own balance; in shared-money mode Money::onPlayerKilled is a
+	// no-op so surviving teammates keep the full team pool (their
+	// shared bank doesn't evaporate when one ally dies).
+	m_money.onPlayerKilled();
 }
 
 //=============================================================================
