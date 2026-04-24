@@ -144,6 +144,23 @@ Int Energy::getProduction() const
 }
 
 //-----------------------------------------------------------------------------
+Int Energy::getConsumption() const
+{
+	// In shared-power mode, consumption is the team-wide sum — every
+	// teammate's load counts against the shared pool. Was previously
+	// inline in Energy.h returning m_energyConsumption directly, which
+	// was the source of the "my bar green but friend's units offline"
+	// bug: the HUD power bar was computing a per-player supply ratio
+	// while hasSufficientPower was computing the team-wide one, so
+	// teammates with more load than local production got stranded in
+	// brownout state until their OWN reactor was upgraded.
+	if (m_useSharedPool)
+		return getTeamTotalConsumption();
+
+	return m_energyConsumption;
+}
+
+//-----------------------------------------------------------------------------
 Real Energy::getEnergySupplyRatio() const
 {
 	DEBUG_ASSERTCRASH(m_energyProduction >= 0 && m_energyConsumption >= 0, ("neg Energy numbers"));

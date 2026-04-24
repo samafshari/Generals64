@@ -80,8 +80,13 @@ public:
 	/// return current energy production in kilowatts
 	Int getProduction() const;
 
-	/// return current energy consumption in kilowatts
-	Int getConsumption() const { return m_energyConsumption; }
+	/// return current energy consumption in kilowatts.
+	/// In shared-power team mode this returns the team-wide total,
+	/// mirroring getProduction(); the inline "just return m_energyConsumption"
+	/// used to leak per-player state into every consumer — HUD power bar,
+	/// AI skirmish under-power check, script conditions, etc. Now out-of-line
+	/// so the pool sum happens in one place.
+	Int getConsumption() const;
 
 	Bool hasSufficientPower() const;
 

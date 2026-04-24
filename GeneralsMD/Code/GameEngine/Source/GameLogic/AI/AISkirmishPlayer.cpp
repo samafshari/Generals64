@@ -58,6 +58,9 @@
 #include "GameClient/TerrainVisual.h"	
 
 #include "Common/LivePerf.h"
+
+// Forward decl — definition after findDozer; used by processBaseBuilding.
+static Bool isRebuildHoleForCCNearby_skirmish(const Player *player, const Coord3D *loc);
 #ifdef _INTERNAL
 // for occasional debugging...
 //#pragma optimize("", off)
@@ -327,7 +330,8 @@ void AISkirmishPlayer::processBaseBuilding( void )
 				&& TheGameInfo
 				&& TheGameInfo->isAiRebuildsCC()
 				&& bldgPlan->isKindOf(KINDOF_COMMANDCENTER)
-				&& findDozer(bldgInfo->getLocation()) == NULL)
+				&& findDozer(bldgInfo->getLocation()) == NULL
+				&& !isRebuildHoleForCCNearby_skirmish(m_player, bldgInfo->getLocation()))
 			{
 				Bool proceed = TRUE;
 				if (TheGameInfo->isAiChecksMoney())
@@ -1218,6 +1222,41 @@ void AISkirmishPlayer::queueDozer( void )
 Object * AISkirmishPlayer::findDozer( const Coord3D *pos )
 {
 	return AIPlayer::findDozer(pos);
+}
+
+//----------------------------------------------------------------------------------------------------------
+// Mirror of AIPlayer::isRebuildHoleForCCNearby (file-static there).
+// Used to skip the AI-Rebuilds-CC thin-air rebuild when a GLA Hole
+// belonging to us is already on the job. See AIPlayer.cpp for the
+// full rationale.
+static Bool isRebuildHoleForCCNearby_skirmish(const Player *player, const Coord3D *loc)
+{
+	if (!loc || !player)
+		return FALSE;
+	const Real kRadius   = 200.0f;
+	const Real kRadiusSq = kRadius * kRadius;
+	for (Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject())
+	{
+		if (!obj->isKindOf(KINDOF_REBUILD_HOLE))
+			continue;
+		if (obj->getControllingPlayer() != player)
+			continue;
+		const Coord3D *opos = obj->getPosition();
+		if (!opos)
+			continue;
+		const Real dx = opos->x - loc->x;
+		const Real dy = opos->y - loc->y;
+		if (dx*dx + dy*dy > kRadiusSq)
+			continue;
+		RebuildHoleBehaviorInterface *rhbi =
+			RebuildHoleBehavior::getRebuildHoleBehaviorInterfaceFromObject(obj);
+		if (!rhbi)
+			continue;
+		const ThingTemplate *rt = rhbi->getRebuildTemplate();
+		if (rt && rt->isKindOf(KINDOF_COMMANDCENTER))
+			return TRUE;
+	}
+	return FALSE;
 }
 
 

@@ -74,6 +74,9 @@
 
 #define USE_DOZER 1
 
+// Forward decl — definition further down, used by processBaseBuilding.
+static Bool isRebuildHoleForCCNearby(const Player *player, const Coord3D *loc);
+
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 AIPlayer::AIPlayer( Player *p ) :
@@ -884,7 +887,8 @@ void AIPlayer::processBaseBuilding( void )
 						&& TheGameInfo
 						&& TheGameInfo->isAiRebuildsCC()
 						&& bldgPlan->isKindOf(KINDOF_COMMANDCENTER)
-						&& findDozer(info->getLocation()) == NULL)
+						&& findDozer(info->getLocation()) == NULL
+						&& !isRebuildHoleForCCNearby(m_player, info->getLocation()))
 					{
 						Bool proceed = TRUE;
 						if (TheGameInfo->isAiChecksMoney())
@@ -3325,6 +3329,51 @@ enum GameDifficulty AIPlayer::getAIDifficulty(void) const
 
 
 //----------------------------------------------------------------------------------------------------------
+/**
+ * Is there already a GLA-style REBUILD_HOLE belonging to 'player' within
+ * a small radius of 'loc' that will respawn into a Command Center?
+ *
+ * Used by the "AI Rebuilds CC" decapitation-recovery path to avoid
+ * conjuring a second CC via the thin-air build while a hole is still on
+ * the job. The hole-scan at processBaseBuilding's "check for hole"
+ * section runs only on the frame the CC dies; if the hole spawns a
+ * frame later, info->getObjectID stays at INVALID_ID and the rebuild
+ * path would otherwise double up. This helper bridges that gap.
+ *
+ * Radius is intentionally generous — the hole spawns at the CC's death
+ * position which typically coincides with the info location, but we
+ * allow some slop for off-center destruction.
+ */
+static Bool isRebuildHoleForCCNearby(const Player *player, const Coord3D *loc)
+{
+	if (!loc || !player)
+		return FALSE;
+	const Real kRadius   = 200.0f;
+	const Real kRadiusSq = kRadius * kRadius;
+	for (Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject())
+	{
+		if (!obj->isKindOf(KINDOF_REBUILD_HOLE))
+			continue;
+		if (obj->getControllingPlayer() != player)
+			continue;
+		const Coord3D *opos = obj->getPosition();
+		if (!opos)
+			continue;
+		const Real dx = opos->x - loc->x;
+		const Real dy = opos->y - loc->y;
+		if (dx*dx + dy*dy > kRadiusSq)
+			continue;
+		RebuildHoleBehaviorInterface *rhbi =
+			RebuildHoleBehavior::getRebuildHoleBehaviorInterfaceFromObject(obj);
+		if (!rhbi)
+			continue;
+		const ThingTemplate *rt = rhbi->getRebuildTemplate();
+		if (rt && rt->isKindOf(KINDOF_COMMANDCENTER))
+			return TRUE;
+	}
+	return FALSE;
+}
+
 /**
  * Finds a dozer that isn't building or collecting resources.
  */
