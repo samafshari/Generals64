@@ -32,6 +32,8 @@
 #include "Common/PlayerList.h"
 #include "Common/Player.h"
 
+#include "GameNetwork/GameInfo.h"
+
 #include "GameClient/SelectionInfo.h"
 #include "GameClient/CommandXlat.h"
 #include "GameClient/ControlBar.h"
@@ -54,12 +56,14 @@ SelectionInfo::SelectionInfo() :
 	newCountMine(0),
 	newCountMineBuildings(0),
 	newCountFriends(0),
+	newCountFriendBuildings(0),
 	newCountGarrisonableBuildings(0),
 	selectEnemies(FALSE),
 	selectCivilians(FALSE),
 	selectMine(FALSE),
 	selectMineBuildings(FALSE),
-	selectFriends(FALSE)
+	selectFriends(FALSE),
+	selectFriendBuildings(FALSE)
 { }
 
 //-------------------------------------------------------------------------------------------------
@@ -90,10 +94,15 @@ extern Bool contextCommandForNewSelection(const DrawableList *currentlySelectedD
 	Bool forceFire = TheInGameUI->isInForceAttackMode();
 	Bool forceMove = TheInGameUI->isInForceMoveToMode();
 
-	if (forceFire || forceMove) {
-		return FALSE;
-	}
-
+	// NOTE: we USED to early-return here when force-attack / force-move mode
+	// was on. That correctly prevented context-sensitive commands firing,
+	// but it ALSO skipped the counting loops below, so the SelectionInfo
+	// the caller reads back had zeroed newCount*/currentCount* fields.
+	// For Shared Control's CTRL-drag path, CTRL is bound to BEGIN_FORCEATTACK
+	// so force-attack mode is on during the drag — the caller needs the
+	// counts populated to decide whether to select friends. We now always
+	// run the counting loops; the forceFire/forceMove early-return happens
+	// AFTER counting, preserving the "no context command" outcome.
 
 	Player *localPlayer = ThePlayerList->getLocalPlayer();
 	DrawableListCIt it;
@@ -159,6 +168,9 @@ extern Bool contextCommandForNewSelection(const DrawableList *currentlySelectedD
 			if (rel == ALLIES) {
 				newFriendly = *it;
 				++outSelectionInfo->newCountFriends;
+				if (obj->isKindOf(KINDOF_STRUCTURE)) {
+					++outSelectionInfo->newCountFriendBuildings;
+				}
 			} else if (rel == ENEMIES) {
 				newEnemy = *it;
 				++outSelectionInfo->newCountEnemies;
@@ -173,12 +185,26 @@ extern Bool contextCommandForNewSelection(const DrawableList *currentlySelectedD
 	DEBUG_ASSERTCRASH(outSelectionInfo->currentCountFriends <= 1, ("Selection bug. jkmcd"));
 	DEBUG_ASSERTCRASH(outSelectionInfo->currentCountCivilians <= 1, ("Selection bug. jkmcd"));
 
+	// Force-attack / force-move mode suppresses context-sensitive commands.
+	// Moved here after the counting loops so the caller still gets populated
+	// SelectionInfo counts (important for CTRL-drag-select under Shared
+	// Control, where CTRL = force-attack mode).
+	if (forceFire || forceMove) {
+		return FALSE;
+	}
+
 	if (outSelectionInfo->currentCountEnemies > 0) {
 		// If we have an enemy selected, there are no context sensitive commands
 		return FALSE;
 	}
 
-	if (outSelectionInfo->currentCountFriends > 0) {
+	// Shared Control: teammate units count as "commandable" for context-command
+	// purposes. Retail returned FALSE here because friends weren't commandable,
+	// but under SC the local player CAN issue commands to allied units — so
+	// click-on-enemy with teammates selected must fire the attack context.
+	const Bool sharedControlActive =
+		(TheGameInfo && TheGameInfo->isSharedTeamControlEffective());
+	if (outSelectionInfo->currentCountFriends > 0 && !sharedControlActive) {
 		return FALSE;
 	}
 
@@ -191,7 +217,13 @@ extern Bool contextCommandForNewSelection(const DrawableList *currentlySelectedD
 		return FALSE;
 	}
 
-	if (outSelectionInfo->currentCountMine > 0) {
+	// Under SC, treat teammates as commandable just like own units for the
+	// context-command decision block below.
+	const Bool hasCommandableSelection =
+		(outSelectionInfo->currentCountMine > 0) ||
+		(sharedControlActive && outSelectionInfo->currentCountFriends > 0);
+
+	if (hasCommandableSelection) {
 		if (outSelectionInfo->newCountEnemies > 0) {
 			if (outSelectionInfo->newCountEnemies == 1 && selectionIsPoint) {
 				return TheGameClient->evaluateContextCommand(newEnemy, newEnemy->getPosition(), CommandTranslator::EVALUATE_ONLY) != GameMessage::MSG_INVALID;
@@ -231,7 +263,7 @@ extern Bool contextCommandForNewSelection(const DrawableList *currentlySelectedD
 		}
 	}
 
-	if (outSelectionInfo->currentCountMine == 0) {
+	if (!hasCommandableSelection) {
 		return FALSE;
 	}
 

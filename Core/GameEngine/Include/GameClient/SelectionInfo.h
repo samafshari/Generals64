@@ -46,6 +46,7 @@ struct SelectionInfo
 	Int newCountMine;
 	Int newCountMineBuildings;
 	Int newCountFriends;
+	Int newCountFriendBuildings;
 	Int newCountGarrisonableBuildings;
 	Int newCountCrates;
 
@@ -54,6 +55,11 @@ struct SelectionInfo
 	Bool selectMine;
 	Bool selectMineBuildings;
 	Bool selectFriends;
+	// Mirrors selectMineBuildings for allied drawables under Shared Control.
+	// When FALSE, the selection loop skips ally structures even if
+	// selectFriends is TRUE — so a CTRL-drag that contains ally units
+	// doesn't sweep up their barracks / factories along for the ride.
+	Bool selectFriendBuildings;
 
 
 	SelectionInfo();

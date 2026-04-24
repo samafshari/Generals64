@@ -714,6 +714,75 @@ void AIPlayer::processBaseBuilding( void )
 	if (m_readyToBuildStructure)
 	{
 
+		// "AI Rebuilds CC" priority pass. When the host flag is on,
+		// the Command Center is the highest-priority rebuild — it
+		// gates the entire economy (no CC → no dozers → no rebuilds
+		// of anything). Scan the build list once looking for a
+		// destroyed CC entry whose rebuild delay has elapsed; if
+		// found, try to rebuild it before anything else. If the
+		// rebuild succeeds we're done for this tick; otherwise fall
+		// through to the normal per-entry loop.
+		if (TheGameInfo && TheGameInfo->isAiRebuildsCC())
+		{
+			for( BuildListInfo *ccInfo = m_player->getBuildList(); ccInfo; ccInfo = ccInfo->getNext() )
+			{
+				const ThingTemplate *ccPlan =
+					TheThingFactory->findTemplate( ccInfo->getTemplateName() );
+				if (!ccPlan || !ccPlan->isKindOf(KINDOF_COMMANDCENTER))
+					continue;
+
+				// Still alive? Nothing to do here.
+				Object *existing = TheGameLogic->findObjectByID(ccInfo->getObjectID());
+				if (existing)
+					continue;
+
+				// Honor the rebuild-delay window — don't ignore it
+				// just because we're prioritizing CC. Respects the
+				// retail "wait N seconds after destruction" pause.
+				UnsignedInt ts = ccInfo->getObjectTimestamp();
+				if (ts != 0
+					&& ts + TheAI->getAiData()->m_rebuildDelaySeconds * LOGICFRAMES_PER_SECOND > TheGameLogic->getFrame())
+					continue;
+
+				if (!ccInfo->isBuildable())
+					continue;
+
+				Object *bldg = buildStructureWithDozer(ccPlan, ccInfo);
+
+				// Same decapitation fallback as the main-loop path.
+				if (!bldg && findDozer(ccInfo->getLocation()) == NULL)
+				{
+					Bool proceed = TRUE;
+					if (TheGameInfo->isAiChecksMoney())
+					{
+						Money *aiMoney = m_player->getMoney();
+						const Int cost = ccPlan->calcCostToBuild(m_player);
+						if (!aiMoney || (Int)aiMoney->countMoney() < cost)
+							proceed = FALSE;
+						else
+							aiMoney->withdraw(cost);
+					}
+					if (proceed)
+						bldg = buildStructureNow(ccPlan, ccInfo);
+				}
+
+				if (bldg)
+				{
+					ccInfo->setObjectID(bldg->getID());
+					ccInfo->decrementNumRebuilds();
+					m_readyToBuildStructure = false;
+					m_frameLastBuildingBuilt = TheGameLogic->getFrame();
+					return; // CC is placed this tick; other entries wait
+				}
+
+				// If this CC couldn't rebuild (e.g. bad timestamp
+				// set, location blocked), break — the normal loop
+				// below will still try. Don't keep searching for
+				// another CC entry; priority pass is one-shot.
+				break;
+			}
+		}
+
 		for( BuildListInfo *info = m_player->getBuildList(); info; info = info->getNext() )
 		{
 			AsciiString name = info->getTemplateName();

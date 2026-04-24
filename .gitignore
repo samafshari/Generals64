@@ -100,3 +100,6 @@ AppxPackages
 /GameData/Shaders/spirv/*.spv
 /Tests/DesyncSim/test_unordered_map_iteration.exe
 /Tests/DesyncSim/test_unordered_map_iteration.obj
+/Tests/ReplayDeterminism/run_replay_tests.ps1
+/Tests/ReplayDeterminism/run_skirmish_matrix.ps1
+/Tests/ReplayDeterminism/SK1_session/SK1.rep

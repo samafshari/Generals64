@@ -2312,9 +2312,51 @@ void sellBuildings( Object *obj, void *userData )
   }
 }
 
+//-------------------------------------------------------------------------------
+// Walks a player's objects looking for any "recovery asset" — something
+// that still lets the player come back if a teammate funnels cash via
+// the shared-money pool. Stops as soon as it finds one.
+struct RecoveryAssetScan { Bool found; };
+static void scanForRecoveryAsset( Object *obj, void *userData )
+{
+  if( !obj ) return;
+  RecoveryAssetScan *scan = (RecoveryAssetScan *)userData;
+  if( scan->found ) return;
+  // Command center, dozer/worker (KINDOF_DOZER covers both — GLA
+  // workers are typed as dozers), or any production structure
+  // (factory / barracks / airfield). Supply / power don't count —
+  // the user's spec was "production buildings, dozer, worker, or
+  // command center" as the continue-the-game criteria.
+  if( obj->isKindOf( KINDOF_COMMANDCENTER )
+      || obj->isKindOf( KINDOF_DOZER )
+      || obj->isKindOf( KINDOF_FS_FACTORY )
+      || obj->isKindOf( KINDOF_FS_BARRACKS )
+      || obj->isKindOf( KINDOF_FS_AIRFIELD ) )
+  {
+    scan->found = TRUE;
+  }
+}
+
 //=============================================================================
 void Player::sellEverythingUnderTheSun()
 {
+  // In shared-money team games, a "broke" player isn't actually
+  // defeated — their teammates can still funnel credits into the
+  // shared pool and bankroll the recovery. Only fire the retail
+  // liquidation script-action if the player has no way left to
+  // USE that shared cash (no CC, no dozer/worker, no production
+  // structure). Retail behavior is unchanged when shared-money
+  // is off or this player isn't pool-bound (team = -1).
+  if( TheGameInfo && TheGameInfo->isSharedTeamMoney()
+      && m_money.isSharedPoolBound() )
+  {
+    RecoveryAssetScan scan;
+    scan.found = FALSE;
+    iterateObjects( scanForRecoveryAsset, &scan );
+    if( scan.found )
+      return;
+  }
+
   iterateObjects( sellBuildings, nullptr );
 }
 

@@ -192,12 +192,40 @@ void SpyVisionUpdate::doActivationWork( Player *playerToSetFor, Bool setting )
 	if( playerToSetFor == nullptr  ||  ThePlayerList == nullptr )
 		return;
 
-	for (Int i=0; i < ThePlayerList->getPlayerCount(); ++i)
+	// Build the set of player indices who should BENEFIT from this spy
+	// vision reveal. Retail only granted vision to the caster; we
+	// extend to the caster's allies so a Spy Drone / Radar Van Scan /
+	// Intelligence Center upgrade shares its intel team-wide, matching
+	// how normal line-of-sight already propagates via Object::look's
+	// ally loop.
+	const Int casterIndex = playerToSetFor->getPlayerIndex();
+	Int viewerIndices[MAX_PLAYER_COUNT];
+	Int numViewers = 0;
+	viewerIndices[numViewers++] = casterIndex;
+	for (Int i = 0; i < ThePlayerList->getPlayerCount(); ++i)
+	{
+		if (i == casterIndex) continue;
+		Player *ally = ThePlayerList->getNthPlayer(i);
+		if (!ally) continue;
+		if (playerToSetFor->getRelationship(ally->getDefaultTeam()) == ALLIES)
+			viewerIndices[numViewers++] = i;
+	}
+
+	// For each enemy player, mark their units as spied for each
+	// viewer index. setUnitsVisionSpied maintains a per-player
+	// ref-count (m_visionSpiedBy[byWhom]), so calling it multiple
+	// times with different byWhom values cleanly registers each
+	// ally independently — both for the setting=TRUE activation
+	// and the setting=FALSE deactivation.
+	for (Int i = 0; i < ThePlayerList->getPlayerCount(); ++i)
 	{
 		Player *player = ThePlayerList->getNthPlayer(i);
 		if( playerToSetFor->getRelationship(player->getDefaultTeam()) == ENEMIES )
 		{
-			player->setUnitsVisionSpied( setting, data->m_spyOnKindof, playerToSetFor->getPlayerIndex() );
+			for (Int v = 0; v < numViewers; ++v)
+			{
+				player->setUnitsVisionSpied( setting, data->m_spyOnKindof, viewerIndices[v] );
+			}
 		}
 	}
 

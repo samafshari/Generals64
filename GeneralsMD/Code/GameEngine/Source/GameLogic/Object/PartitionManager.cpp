@@ -3033,47 +3033,99 @@ void PartitionManager::unRegisterGhostObject( GhostObject* object )
 	deleteInstance(mod);
 }
 
+// Build the list of player indices that should receive an ally-shared
+// whole-map reveal on behalf of `playerIndex`. Includes the player
+// itself plus every live player whose default-team relationship with
+// them is ALLIES. Observers and solo (team = -1) players naturally
+// end up with a single-element list because they have no allies.
+//
+// Used by revealMapForPlayer / revealMapForPlayerPermanently /
+// undoRevealMapForPlayerPermanently so a scripted reveal, a shroud
+// crate pickup, or any other direct whole-map reveal propagates to
+// teammates — matches the ally logic the normal look() path at
+// Object::look() already uses on per-tick vision.
+static void collectAlliedRevealIndices( Int playerIndex, std::vector<Int> &out )
+{
+	out.clear();
+	out.push_back( playerIndex );
+	if (!ThePlayerList) return;
+	const Player *caster = ThePlayerList->getNthPlayer( playerIndex );
+	if (!caster) return;
+	const Int count = ThePlayerList->getPlayerCount();
+	for (Int i = 0; i < count; ++i)
+	{
+		if (i == playerIndex) continue;
+		Player *other = ThePlayerList->getNthPlayer( i );
+		if (!other) continue;
+		if (caster->getRelationship( other->getDefaultTeam() ) == ALLIES)
+			out.push_back( i );
+	}
+}
+
 /**
 	Reveals the map for the given player, but does not override Shroud generation.  (Script)
+	Now also reveals for every allied player so teammates benefit from crate
+	pickups and scripted reveals, matching the spec "when map reveal is used,
+	all friendlies get that reveal".
 */
 void PartitionManager::revealMapForPlayer( Int playerIndex )
 {
-	// By looking and then stopping on every cell, I clear all Passive Shroud
-	// By adding a looker directly I don't hit the Ally logic of the normal look/doShroudReveal
+	std::vector<Int> indices;
+	collectAlliedRevealIndices( playerIndex, indices );
+
+	// By looking and then stopping on every cell, we clear all Passive Shroud
+	// for each indicated player. The old code bypassed the Ally logic of the
+	// normal look/doShroudReveal path on purpose; we reintroduce ally
+	// sharing here explicitly so team-wide intel matches the design intent.
 	for (int i = 0; i < m_totalCellCount; ++i)
 	{
-		m_cells[i].addLooker( playerIndex );
-		m_cells[i].removeLooker( playerIndex );
+		for (size_t p = 0; p < indices.size(); ++p)
+		{
+			m_cells[i].addLooker( indices[p] );
+			m_cells[i].removeLooker( indices[p] );
+		}
 	}
 }
 
 /**
 	Reveals the map for the given player, AND permanently disables all Shroud generation (Observer Mode).
+	Teammates share the permanent reveal so a team-wide intel upgrade (e.g. Spy
+	Satellite unlock) covers the whole alliance. Observers are naturally
+	unaffected by the ally loop — they have no teammates.
 	*/
 void PartitionManager::revealMapForPlayerPermanently( Int playerIndex )
 {
-	// By skipping the removeLooker, I consider myself as actively looking at everything,
-	// so Shroud generation will no longer function
-	// By adding a looker directly I don't hit the Ally logic of the normal look/doShroudReveal
+	std::vector<Int> indices;
+	collectAlliedRevealIndices( playerIndex, indices );
+
+	// By skipping the removeLooker we consider ourselves as actively looking at everything,
+	// so Shroud generation will no longer function for any player in the reveal set.
 	for (int i = 0; i < m_totalCellCount; ++i)
 	{
-		m_cells[i].addLooker( playerIndex );
+		for (size_t p = 0; p < indices.size(); ++p)
+			m_cells[i].addLooker( indices[p] );
 	}
 }
 
 /**
-		Adds a layer of permanent blindness.  Used solely to undo the permanent reveal for debugging
+		Adds a layer of permanent blindness.  Used solely to undo the permanent reveal for debugging.
+		Mirrors the ally-extension in revealMapForPlayerPermanently so the undo
+		removes the same lookers that were added.
 	*/
 void PartitionManager::undoRevealMapForPlayerPermanently( Int playerIndex )
 {
 	//First make sure no lingering looks will leave holes when they aren't wanted.
 	processEntirePendingUndoShroudRevealQueue();
 
+	std::vector<Int> indices;
+	collectAlliedRevealIndices( playerIndex, indices );
+
 	// This will have amusing consequences if done without a preceding revealMapForPlayerPermanently.
 	// Everything you own can become shrouded.
 	for (int i = 0; i < m_totalCellCount; ++i)
 	{
-		m_cells[i].removeLooker( playerIndex );
+		for (size_t p = 0; p < indices.size(); ++p)
+			m_cells[i].removeLooker( indices[p] );
 	}
 }
 

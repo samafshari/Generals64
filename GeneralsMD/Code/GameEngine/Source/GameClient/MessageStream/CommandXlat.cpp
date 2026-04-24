@@ -4082,6 +4082,20 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 			Bool controllable = TheInGameUI->areSelectedObjectsControllable()
 													|| (command && command->getCommandType() == GUI_COMMAND_SPECIAL_POWER_FROM_SHORTCUT);
+			// ==== SC-CMD DIAG ============================================
+			{
+				FILE *df = fopen("sc_drag_diag.log", "a");
+				if (df)
+				{
+					fprintf(df, "  [cmdxlat LEFT_CLICK] isPoint=%d controllable=%d "
+					            "forceAttack=%d useAlt=%d\n",
+						(int)isPoint, (int)controllable,
+						(int)TheInGameUI->isInForceAttackMode(),
+						(int)TheGlobalData->m_useAlternateMouse);
+					fclose(df);
+				}
+			}
+			// ==== END DIAG ===============================================
 			if (isPoint && controllable)
 			{
 				UnsignedInt pickType = getPickTypesForContext( TheInGameUI->isInForceAttackMode() );
@@ -4094,6 +4108,18 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				{
 					draw = nullptr;
 				}
+				// ==== SC-CMD DIAG =========================================
+				{
+					FILE *df = fopen("sc_drag_diag.log", "a");
+					if (df)
+					{
+						const char *tname = (obj && obj->getTemplate()) ? obj->getTemplate()->getName().str() : "(null)";
+						fprintf(df, "  [cmdxlat isPoint&&controllable] picked='%s' draw=%p\n",
+							tname, (void*)draw);
+						fclose(df);
+					}
+				}
+				// ==== END DIAG ============================================
 
 				if (TheInGameUI->isInForceAttackMode()) {
 					evaluateForceAttack( draw, &pos, DO_COMMAND );

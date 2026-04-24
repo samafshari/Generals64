@@ -106,6 +106,63 @@ void AISkirmishPlayer::processBaseBuilding( void )
 	//
 	if (m_readyToBuildStructure)
 	{
+		// "AI Rebuilds CC" priority pass — mirrors AIPlayer::processBaseBuilding.
+		// Command Center gates the skirmish AI's entire economy (only
+		// factory for dozers); when the host flag is on we try to
+		// rebuild it first, before the normal per-entry selection loop
+		// below picks anything else. Decapitation fallback and the ACM
+		// money gate match the post-loop logic further down.
+		if (TheGameInfo && TheGameInfo->isAiRebuildsCC())
+		{
+			for( BuildListInfo *ccInfo = m_player->getBuildList(); ccInfo; ccInfo = ccInfo->getNext() )
+			{
+				const ThingTemplate *ccPlan =
+					TheThingFactory->findTemplate( ccInfo->getTemplateName() );
+				if (!ccPlan || !ccPlan->isKindOf(KINDOF_COMMANDCENTER))
+					continue;
+
+				Object *existing = TheGameLogic->findObjectByID(ccInfo->getObjectID());
+				if (existing)
+					continue;
+
+				UnsignedInt ts = ccInfo->getObjectTimestamp();
+				if (ts != 0
+					&& ts + TheAI->getAiData()->m_rebuildDelaySeconds * LOGICFRAMES_PER_SECOND > TheGameLogic->getFrame())
+					continue;
+
+				if (!ccInfo->isBuildable())
+					continue;
+
+				Object *bldg = buildStructureWithDozer(ccPlan, ccInfo);
+
+				if (!bldg && findDozer(ccInfo->getLocation()) == NULL)
+				{
+					Bool proceed = TRUE;
+					if (TheGameInfo->isAiChecksMoney())
+					{
+						Money *aiMoney = m_player->getMoney();
+						const Int cost = ccPlan->calcCostToBuild(m_player);
+						if (!aiMoney || (Int)aiMoney->countMoney() < cost)
+							proceed = FALSE;
+						else
+							aiMoney->withdraw(cost);
+					}
+					if (proceed)
+						bldg = buildStructureNow(ccPlan, ccInfo);
+				}
+
+				if (bldg)
+				{
+					ccInfo->setObjectID(bldg->getID());
+					ccInfo->decrementNumRebuilds();
+					m_readyToBuildStructure = false;
+					m_frameLastBuildingBuilt = TheGameLogic->getFrame();
+					return; // CC rebuilt — skip normal selection this tick
+				}
+				break;
+			}
+		}
+
 		const ThingTemplate *bldgPlan=NULL;
 		BuildListInfo	*bldgInfo = NULL;
 		Bool isPriority = false;	

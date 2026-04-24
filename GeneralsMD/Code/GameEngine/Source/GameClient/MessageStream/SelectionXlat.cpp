@@ -637,6 +637,17 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 				break;
 			}
 
+			// CTRL+CLICK (point, not drag) on an object should fall through to
+			// CommandTranslator so it can issue a force-attack. Without this
+			// passthrough, the selection code below would swallow the click
+			// (e.g. selecting a friendly with newCountFriends==1). Drags still
+			// proceed to selection — that's where CTRL-includes-teammates
+			// lives.
+			if (isPoint && TheInGameUI->isInForceAttackMode())
+			{
+				break;
+			}
+
 			// if there were drawables in the region, then we should determine if there is a context
 			// sensitive command that should take place. If there is, then this isn't a selection thing
 			const DrawableList *currentList = TheInGameUI->getAllSelectedDrawables();
@@ -656,35 +667,65 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			// group.
 
 			Bool addToGroup = TheInGameUI->isInPreferSelectionMode();
+			// SHIFT-additive workaround: when CTRL is pressed first, the
+			// MetaEventTranslator's mods-only-transition dispatch fires
+			// BEGIN_FORCEATTACK and then doesn't fire BEGIN_PREFER_SELECTION
+			// when SHIFT is subsequently pressed (the CTRL+SHIFT combined
+			// state has no matching meta-map record, so the transition is
+			// lost). This means isInPreferSelectionMode() returns FALSE
+			// even if SHIFT is actually held alongside CTRL. For
+			// Shared-Control drag-select we want SHIFT+CTRL to be additive,
+			// so poll the raw SHIFT state directly.
+			if (TheKeyboard && TheKeyboard->isShift())
+				addToGroup = TRUE;
+
+			// Shared Control + CTRL held: teammate drawables get folded into
+			// the "mine" counts for the rest of the decision logic. That way
+			// CTRL-drag of teammate units behaves exactly the same as drag
+			// of own units — same building filter, same single-drag-one-
+			// building handling, same SHIFT-additive semantics. The original
+			// newCountFriends / selectFriends paths below only fire for
+			// single-click on a friendly (retail behavior preserved).
+			const Bool sharedCtrlDragExpand =
+				(TheGameInfo && TheGameInfo->isSharedTeamControlEffective() &&
+				 TheKeyboard && TheKeyboard->isCtrl());
+
+			Int effMine          = si.newCountMine;
+			Int effMineBuildings = si.newCountMineBuildings;
+			Int effFriends       = si.newCountFriends;
+			if (sharedCtrlDragExpand)
+			{
+				effMine          += si.newCountFriends;
+				effMineBuildings += si.newCountFriendBuildings;
+				effFriends        = 0;
+			}
 
 			if (si.currentCountEnemies > 0 ||
 					si.currentCountCivilians > 0 ||
-					si.currentCountFriends > 0 ||
+					(si.currentCountFriends > 0 && !sharedCtrlDragExpand) ||
 					si.currentCountMineBuildings > 0)
 			{
-				// force a new group creation
+				// force a new group creation.
+				// Under Shared Control + CTRL we want SHIFT+CTRL+drag to add
+				// to an existing mixed selection, so the currentCountFriends
+				// guard is relaxed when the expand modifier is on.
 				addToGroup = FALSE;
 			}
 
-			// If there are any of my units, then select those.
-			if (si.newCountMine > 0)
+			// If there are any commandable units in the drag (own, or ally
+			// under CTRL+SC), select them.
+			if (effMine > 0)
 			{
 				si.selectMine = TRUE;
 
         // EXACTLY ONE CLICKED OR DRAGGED BUILDING
-				if ( si.newCountMineBuildings == 1 && si.newCountMine == 1 )
+				if ( effMineBuildings == 1 && effMine == 1 )
 				{
 					addToGroup = FALSE;
 					si.selectMineBuildings = TRUE;
         }
-        else if ( si.newCountMineBuildings > 0 )////////////// SO SORRY, I KNOW THIS IS MICKEY MOUSE ///////////////////
-        { // What we are after here is to allow the drag select to get the building,
-          // if the other things in the list are going to be ignored anyway
-          // so we find out whether the other things are not selectible
-          // this came up with the new AmericaBuildingFireBase, which shows its contained
-          // but does not let you select them. The selection is propagated to the container
-          // in new code in SelectionInfo.cpp, in the static addDrawableToList();
-          // -Mark Lorenzen, 6/12/03
+        else if ( effMineBuildings > 0 )
+        {
           Bool onlyTheOneBuildingIsSelectableAnyway = TRUE;
           DrawableID buildingID = INVALID_DRAWABLE_ID;
           for (DrawableListIt it = drawablesThatWillSelect.begin(); it != drawablesThatWillSelect.end(); ++it)
@@ -712,7 +753,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 				}
 
 			}
-			else if (si.newCountEnemies > 0 && si.newCountCivilians > 0 && si.newCountFriends > 0)
+			else if (si.newCountEnemies > 0 && si.newCountCivilians > 0 && effFriends > 0)
 			{
 				// No go here
 				break;
@@ -727,11 +768,61 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 				addToGroup = FALSE;
 				si.selectCivilians = TRUE;
 			}
-			else if (si.newCountFriends == 1)
+			else if (effFriends == 1)
 			{
+				// Single-click on a non-CTRL'd friendly — retail behavior.
+				// (Under CTRL+SC, friend drawables have been folded into
+				// effMine above, so this branch only fires for retail clicks
+				// on allied units without the CTRL expand modifier.)
 				addToGroup = FALSE;
 				si.selectFriends = TRUE;
 			}
+
+			// ==== SC-DRAG DIAG ========================================
+			// Print a one-line summary + per-drawable detail every click.
+			{
+				FILE *df = fopen("sc_drag_diag.log", "a");
+				if (df)
+				{
+					const Bool hasInfo = (TheGameInfo != nullptr);
+					const Bool effSC   = hasInfo ? TheGameInfo->isSharedTeamControlEffective(): FALSE;
+					const Bool kb      = (TheKeyboard != nullptr);
+					const Bool ctrl    = kb ? TheKeyboard->isCtrl() : FALSE;
+					const Bool shift   = kb ? TheKeyboard->isShift(): FALSE;
+					fprintf(df, "[%u] isPoint=%d listSize=%zu "
+					            "mine=%d friends=%d friendBld=%d enem=%d civ=%d "
+					            "effSC=%d CTRL=%d SHIFT=%d expand=%d addToGroup=%d "
+					            "-> selMine=%d selMineBld=%d selFriends=%d selFriendBld=%d\n",
+						(unsigned)TheGameClient->getFrame(),
+						(int)isPoint,
+						drawablesThatWillSelect.size(),
+						si.newCountMine, si.newCountFriends, si.newCountFriendBuildings,
+						si.newCountEnemies, si.newCountCivilians,
+						(int)effSC, (int)ctrl, (int)shift,
+						(int)sharedCtrlDragExpand, (int)addToGroup,
+						(int)si.selectMine, (int)si.selectMineBuildings,
+						(int)si.selectFriends, (int)si.selectFriendBuildings);
+					// Per-drawable classification so we can see exactly what each
+					// drawable is and why it does / doesn't count as a friend unit.
+					Player *lp = ThePlayerList ? ThePlayerList->getLocalPlayer() : nullptr;
+					int idx = 0;
+					for (DrawableListIt dit = drawablesThatWillSelect.begin();
+					     dit != drawablesThatWillSelect.end(); ++dit, ++idx)
+					{
+						Drawable *ddr = *dit;
+						Object *dob = ddr ? ddr->getObject() : nullptr;
+						const char *tname = (dob && dob->getTemplate()) ? dob->getTemplate()->getName().str() : "(null)";
+						int local = dob ? (int)dob->isLocallyControlled() : -1;
+						int relv  = (dob && lp) ? (int)lp->getRelationship(dob->getTeam()) : -1;
+						int isStruct = dob ? (int)dob->isKindOf(KINDOF_STRUCTURE) : -1;
+						int contained = dob ? (dob->getContainedBy() ? 1 : 0) : -1;
+						fprintf(df, "  [%d] %-28s local=%d rel=%d isStruct=%d contained=%d\n",
+						        idx, tname, local, relv, isStruct, contained);
+					}
+					fclose(df);
+				}
+			}
+			// ==== END DIAG =============================================
 
 			// If we're not going to select anything, just bail now.
 			if (!(si.selectMine || si.selectEnemies || si.selectCivilians || si.selectFriends))
@@ -807,7 +898,18 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 
 					Drawable *drawToSelect = nullptr;
 					ObjectID objToAppend = INVALID_ID;
-					if (si.selectMine && obj->isLocallyControlled())
+
+					// Under CTRL+SC, ally drawables are treated as own for
+					// the selectMine / selectMineBuildings branch. This
+					// mirrors the count folding above and gives teammate
+					// units the same selection semantics as your own.
+					const Bool treatAsMine =
+						obj->isLocallyControlled() ||
+						(sharedCtrlDragExpand &&
+						 localPlayer &&
+						 localPlayer->getRelationship(obj->getTeam()) == ALLIES);
+
+					if (si.selectMine && treatAsMine)
 					{
 						if (!obj->isKindOf(KINDOF_STRUCTURE) || si.selectMineBuildings)
 						{
@@ -815,7 +917,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 							objToAppend = obj->getID();
 						}
 					}
-					else
+					else if (!obj->isLocallyControlled())
 					{
 						Relationship rel = localPlayer->getRelationship(obj->getTeam());
 						if (si.selectEnemies && rel == ENEMIES)
@@ -830,6 +932,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 						}
 						else if (si.selectFriends && rel == ALLIES)
 						{
+							// Retail single-click on friendly (non-CTRL).
 							drawToSelect = draw;
 							objToAppend = obj->getID();
 						}
