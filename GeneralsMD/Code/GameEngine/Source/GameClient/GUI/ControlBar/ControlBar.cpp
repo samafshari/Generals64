@@ -1500,12 +1500,59 @@ void ControlBar::reset()
 /** Update phase, we can track if our selected object is destroyed, update button
 	* percentages, status, enabled status etc */
 //-------------------------------------------------------------------------------------------------
+// Repaint the PowerWindow's background each frame from the current
+// player's Energy ratio, so shared-power team games reflect ANY
+// teammate's production / consumption change (not just local events).
+// Without this the bar's red/yellow/green color wasn't reliably
+// updating when a teammate built or consumed — broadcastBrownOutToTeam
+// refreshes per-player DISABLED_UNDERPOWERED, but the HUD widget's
+// visual color was only being driven when the LOCAL player's own
+// Energy changed. Polling each frame makes the bar always reflect
+// the current Energy::getEnergySupplyRatio (team-wide in shared mode).
+static void refreshPowerBarColor()
+{
+	if (!TheControlBar || !ThePlayerList || !TheWindowManager)
+		return;
+	static NameKeyType powerKey = NAMEKEY("ControlBar.wnd:PowerWindow");
+	GameWindow *win = TheWindowManager->winGetWindowFromId(nullptr, powerKey);
+	if (!win)
+		return;
+
+	Player *p = TheControlBar->getCurrentlyViewedPlayer();
+	if (!p)
+		return;
+	Energy *e = p->getEnergy();
+	if (!e)
+		return;
+
+	// getEnergySupplyRatio returns production/consumption. When
+	// consumption is 0 it returns the raw production value (could be
+	// 0 or much larger than 1), so treat anything >= 1.0 as green.
+	const Int prod = e->getProduction();
+	const Int cons = e->getConsumption();
+
+	Color bar;
+	if (cons <= 0 || prod >= cons)
+		bar = GameMakeColor(0, 200, 0, 255);          // green — surplus or no load
+	else if (prod * 10 >= cons * 8)
+		bar = GameMakeColor(255, 215, 0, 255);        // yellow — within 20% of shortfall
+	else
+		bar = GameMakeColor(220, 40, 40, 255);        // red — underpowered
+
+	// State 0 is the widget's background fill. Setting the enabled
+	// color here overrides whatever the .wnd declared and updates
+	// each frame — cheap since GameWindow stores the color in a
+	// small struct.
+	win->winSetEnabledColor(0, bar);
+}
+
 void ControlBar::update()
 {
 	if (TheGlobalData->m_headless)
 		return;
 	getStarImage();
 	updateRadarAttackGlow();
+	refreshPowerBarColor();
 	if(m_controlBarSchemeManager)
 		m_controlBarSchemeManager->update();
 
