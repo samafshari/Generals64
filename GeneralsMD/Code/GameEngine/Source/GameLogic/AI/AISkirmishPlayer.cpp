@@ -59,8 +59,6 @@
 
 #include "Common/LivePerf.h"
 
-// Forward decl — definition after findDozer; used by processBaseBuilding.
-static Bool isRebuildHoleForCCNearby_skirmish(const Player *player, const Coord3D *loc);
 #ifdef _INTERNAL
 // for occasional debugging...
 //#pragma optimize("", off)
@@ -110,11 +108,14 @@ void AISkirmishPlayer::processBaseBuilding( void )
 	if (m_readyToBuildStructure)
 	{
 		// "AI Rebuilds CC" priority pass — mirrors AIPlayer::processBaseBuilding.
-		// Command Center gates the skirmish AI's entire economy (only
-		// factory for dozers); when the host flag is on we try to
-		// rebuild it first, before the normal per-entry selection loop
-		// below picks anything else. Decapitation fallback and the ACM
-		// money gate match the post-loop logic further down.
+		// When the host flag is on the Command Center jumps to the
+		// front of the rebuild queue, but it still has to be built the
+		// legal way (dozer/worker walks over and constructs it). USA /
+		// China without a surviving Dozer stay decapitated; GLA's
+		// Supply Stash spawns a Worker so they recover naturally. The
+		// earlier "thin-air" fallback was removed — it conjured a CC
+		// out of nothing whenever the AI had no dozer, which players
+		// (rightly) called cheating.
 		if (TheGameInfo && TheGameInfo->isAiRebuildsCC())
 		{
 			for( BuildListInfo *ccInfo = m_player->getBuildList(); ccInfo; ccInfo = ccInfo->getNext() )
@@ -137,23 +138,6 @@ void AISkirmishPlayer::processBaseBuilding( void )
 					continue;
 
 				Object *bldg = buildStructureWithDozer(ccPlan, ccInfo);
-
-				if (!bldg && findDozer(ccInfo->getLocation()) == NULL)
-				{
-					Bool proceed = TRUE;
-					if (TheGameInfo->isAiChecksMoney())
-					{
-						Money *aiMoney = m_player->getMoney();
-						const Int cost = ccPlan->calcCostToBuild(m_player);
-						if (!aiMoney || (Int)aiMoney->countMoney() < cost)
-							proceed = FALSE;
-						else
-							aiMoney->withdraw(cost);
-					}
-					if (proceed)
-						bldg = buildStructureNow(ccPlan, ccInfo);
-				}
-
 				if (bldg)
 				{
 					ccInfo->setObjectID(bldg->getID());
@@ -162,6 +146,8 @@ void AISkirmishPlayer::processBaseBuilding( void )
 					m_frameLastBuildingBuilt = TheGameLogic->getFrame();
 					return; // CC rebuilt — skip normal selection this tick
 				}
+				// No dozer available — let the normal loop retry on a
+				// later tick. Priority pass is one-shot.
 				break;
 			}
 		}
@@ -317,39 +303,6 @@ void AISkirmishPlayer::processBaseBuilding( void )
 #ifdef USE_DOZER
 			// dozer-construct the building
 			bldg = buildStructureWithDozer(bldgPlan, bldgInfo);
-
-			// Decapitation recovery — same as AIPlayer::processBaseBuilding.
-			// When the host has "AI Rebuilds CC" on and the AI has
-			// lost every CC and dozer, use the thin-air build path so
-			// the AI can restart its economy.
-			//
-			// Money interaction: if "AI Checks Money" is ALSO on, the
-			// AI must pay the cost (and is denied if broke). With ACM
-			// off, the AI gets a free CC.
-			if (!bldg
-				&& TheGameInfo
-				&& TheGameInfo->isAiRebuildsCC()
-				&& bldgPlan->isKindOf(KINDOF_COMMANDCENTER)
-				&& findDozer(bldgInfo->getLocation()) == NULL
-				&& !isRebuildHoleForCCNearby_skirmish(m_player, bldgInfo->getLocation()))
-			{
-				Bool proceed = TRUE;
-				if (TheGameInfo->isAiChecksMoney())
-				{
-					Money *aiMoney = m_player->getMoney();
-					const Int cost = bldgPlan->calcCostToBuild(m_player);
-					if (!aiMoney || (Int)aiMoney->countMoney() < cost)
-					{
-						proceed = FALSE;
-					}
-					else
-					{
-						aiMoney->withdraw(cost);
-					}
-				}
-				if (proceed)
-					bldg = buildStructureNow(bldgPlan, bldgInfo);
-			}
 
 			// store the object with the build order
 			if (bldg)
@@ -1223,42 +1176,6 @@ Object * AISkirmishPlayer::findDozer( const Coord3D *pos )
 {
 	return AIPlayer::findDozer(pos);
 }
-
-//----------------------------------------------------------------------------------------------------------
-// Mirror of AIPlayer::isRebuildHoleForCCNearby (file-static there).
-// Used to skip the AI-Rebuilds-CC thin-air rebuild when a GLA Hole
-// belonging to us is already on the job. See AIPlayer.cpp for the
-// full rationale.
-static Bool isRebuildHoleForCCNearby_skirmish(const Player *player, const Coord3D *loc)
-{
-	if (!loc || !player)
-		return FALSE;
-	const Real kRadius   = 200.0f;
-	const Real kRadiusSq = kRadius * kRadius;
-	for (Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject())
-	{
-		if (!obj->isKindOf(KINDOF_REBUILD_HOLE))
-			continue;
-		if (obj->getControllingPlayer() != player)
-			continue;
-		const Coord3D *opos = obj->getPosition();
-		if (!opos)
-			continue;
-		const Real dx = opos->x - loc->x;
-		const Real dy = opos->y - loc->y;
-		if (dx*dx + dy*dy > kRadiusSq)
-			continue;
-		RebuildHoleBehaviorInterface *rhbi =
-			RebuildHoleBehavior::getRebuildHoleBehaviorInterfaceFromObject(obj);
-		if (!rhbi)
-			continue;
-		const ThingTemplate *rt = rhbi->getRebuildTemplate();
-		if (rt && rt->isKindOf(KINDOF_COMMANDCENTER))
-			return TRUE;
-	}
-	return FALSE;
-}
-
 
 //----------------------------------------------------------------------------------------------------------
 /**

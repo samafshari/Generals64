@@ -91,7 +91,6 @@ static inline Bool IS_IMPASSABLE(PathfindCell::CellType type) {
 	return false;
 }
 
-
 struct TCheckMovementInfo
 {
 	// Input
@@ -1102,7 +1101,13 @@ Real Path::computeFlightDistToGoal( const Coord3D *pos, Coord3D& goalPos )
 //-----------------------------------------------------------------------------------
 
 enum { PATHFIND_CELLS_PER_FRAME=5000}; // Number of cells we will search pathfinding per frame.
-enum {CELL_INFOS_TO_ALLOCATE = 30000};
+// Originally 30000 (~1.9 MB at sizeof(PathfindCellInfo)~=64 on x64) — sized
+// for 32-bit hardware. On 64-bit we have plenty of headroom. 2,000,000 ≈
+// 128 MB up-front, which is trivial against the multi-GB process budget and
+// gives ~67x more concurrent in-flight pathfind cells. Pool exhaustion is
+// the trigger for the orphan-list corruption we just fixed; raising the
+// ceiling is the cheapest way to keep that path off the rails entirely.
+enum {CELL_INFOS_TO_ALLOCATE = 2000000};
 PathfindCellInfo *PathfindCellInfo::s_infoArray = NULL;
 PathfindCellInfo *PathfindCellInfo::s_firstFree = NULL;						
 /**
@@ -1198,8 +1203,8 @@ PathfindCell::PathfindCell( void ) :m_info(NULL)
 /**
  * Destructor
  */
-PathfindCell::~PathfindCell( void ) 
-{ 	
+PathfindCell::~PathfindCell( void )
+{
 	if (m_info) PathfindCellInfo::releaseACellInfo(m_info);
 	m_info = NULL;
 	static Bool warn = true;
@@ -1212,9 +1217,9 @@ PathfindCell::~PathfindCell( void )
 /**
  * Reset the cell to default values
  */
-void PathfindCell::reset( ) 
-{ 
-	m_type = PathfindCell::CELL_CLEAR; 
+void PathfindCell::reset( )
+{
+	m_type = PathfindCell::CELL_CLEAR;
 	m_flags = PathfindCell::NO_UNITS;
 	m_zone = 0;
 	m_aircraftGoal = false;
@@ -3253,7 +3258,7 @@ void PathfindLayer::reset(void)
 /**
  * Returns true if the layer is avaialble for use.
  */
-Bool PathfindLayer::isUnused(void) 
+Bool PathfindLayer::isUnused(void)
 {
 	// Special case - wall layer is built from not a bridge.  jba.
 	if (m_layer == LAYER_WALL && m_width>0) return false;
@@ -4815,11 +4820,11 @@ void Pathfinder::cleanOpenAndClosedLists(void) {
 	if (m_openList) {
 		count += PathfindCell::releaseOpenList(m_openList);
 		m_openList = NULL;
-	}		 
+	}
 	if (m_closedList) {
 		count += PathfindCell::releaseClosedList(m_closedList);
 		m_closedList = NULL;
-	}		 
+	}
 	m_cumulativeCellsAllocated += count;
 //#ifdef _DEBUG
 #if 0
@@ -8347,19 +8352,24 @@ Bool Pathfinder::pathDestination( 	Object *obj, const LocomotorSet& locomotorSet
 			neighborFlags[i] = true;
 
 			if (!newCell->allocateInfo(newCellCoord)) {
-				// Out of cells for pathing...
- 				return cellCount;
-			}								
+				// Out of cells for pathing... must clean lists before
+				// returning, otherwise the populated open/closed lists
+				// leak into the next pathfind, where orphan cells with
+				// stale m_closed/m_open flags eventually corrupt the
+				// real list and crash a later cleanup pass.
+				cleanOpenAndClosedLists();
+				return cellCount;
+			}
 			cellCount++;
 
 			newCostSoFar = newCell->costSoFar( parentCell );
 			newCell->setBlockedByAlly(false);
 
-			// check if this neighbor cell is already on the open (waiting to be tried) 
+			// check if this neighbor cell is already on the open (waiting to be tried)
 			// or closed (already tried) lists
 			if (onList)
 			{
-				// already on one of the lists - if existing costSoFar is less, 
+				// already on one of the lists - if existing costSoFar is less,
 				// the new cell is on a longer path, so skip it
 				if (newCell->getCostSoFar() <= newCostSoFar)
 					continue;
@@ -8600,19 +8610,24 @@ Int Pathfinder::checkPathCost(Object *obj, const LocomotorSet& locomotorSet, con
 			neighborFlags[i] = true;
 
 			if (!newCell->allocateInfo(newCellCoord)) {
-				// Out of cells for pathing...
- 				return cellCount;
-			}								
+				// Out of cells for pathing... must clean lists before
+				// returning, otherwise the populated open/closed lists
+				// leak into the next pathfind, where orphan cells with
+				// stale m_closed/m_open flags eventually corrupt the
+				// real list and crash a later cleanup pass.
+				cleanOpenAndClosedLists();
+				return cellCount;
+			}
 			cellCount++;
 
 			newCostSoFar = newCell->costSoFar( parentCell );
 			newCell->setBlockedByAlly(false);
 
-			// check if this neighbor cell is already on the open (waiting to be tried) 
+			// check if this neighbor cell is already on the open (waiting to be tried)
 			// or closed (already tried) lists
 			if (onList)
 			{
-				// already on one of the lists - if existing costSoFar is less, 
+				// already on one of the lists - if existing costSoFar is less,
 				// the new cell is on a longer path, so skip it
 				if (newCell->getCostSoFar() <= newCostSoFar)
 					continue;

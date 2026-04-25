@@ -1139,7 +1139,11 @@ void StealthUpdate::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 2;
+	// 3: drop m_pulsePhaseRate / m_pulsePhase from the wire. They are
+	//    purely cosmetic (drive opacity oscillation) and m_pulsePhase is
+	//    seeded from the unsynchronized client RNG, which made every
+	//    StealthUpdate module mismatch the lockstep CRC from frame 1.
+	XferVersion currentVersion = 3;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -1155,11 +1159,13 @@ void StealthUpdate::xfer( Xfer *xfer )
 	// enabled
 	xfer->xferBool( &m_enabled );
 
-	// pulse phase rate
-	xfer->xferReal( &m_pulsePhaseRate );
-
-	// pulse phase
-	xfer->xferReal( &m_pulsePhase );
+	if( version < 3 )
+	{
+		Real legacyPulsePhaseRate = 0.0f;
+		Real legacyPulsePhase = 0.0f;
+		xfer->xferReal( &legacyPulsePhaseRate );
+		xfer->xferReal( &legacyPulsePhase );
+	}
 
 	// disguise as player index
 	xfer->xferInt( &m_disguiseAsPlayerIndex );

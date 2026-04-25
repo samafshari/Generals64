@@ -49,6 +49,8 @@
 #include "GameClient/GameText.h"
 #include "GameClient/InGameUI.h"
 
+#include "GameNetwork/GameInfo.h"
+
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/Locomotor.h"
 #include "GameLogic/PartitionManager.h"
@@ -355,6 +357,22 @@ Object *WorkerAIUpdate::construct( const ThingTemplate *what,
 		Bool dozerIsAI = owningPlayer->getPlayerType() == PLAYER_COMPUTER;
 		if( dozerIsAI )
 		{
+
+			// Opt-in host flag: when TheGameInfo->isAiChecksMoney() is
+			// TRUE, hold the AI to the same cost check a human pays.
+			// Mirrors DozerAIUpdate::construct so the GLA Worker honors
+			// the same lobby option as Coalition/China Dozers — without
+			// this branch the GLA AI builds for free regardless.
+			if( TheGameInfo && TheGameInfo->isAiChecksMoney() )
+			{
+				Money *aiMoney = owningPlayer->getMoney();
+				if( aiMoney )
+				{
+					const Int cost = what->calcCostToBuild( owningPlayer );
+					if( (Int)aiMoney->countMoney() < cost )
+						return nullptr;
+				}
+			}
 
 			// validate the the position to build at is valid
 			if( TheBuildAssistant->isLocationLegalToBuild( pos, what, angle,
