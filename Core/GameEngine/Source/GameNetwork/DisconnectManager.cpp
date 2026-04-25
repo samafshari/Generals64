@@ -29,6 +29,7 @@
 #include "GameClient/DisconnectMenu.h"
 #include "GameClient/InGameUI.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/GameTelemetry.h"
 #include "GameNetwork/DisconnectManager.h"
 #include "GameNetwork/NetworkInterface.h"
 #include "GameNetwork/networkutil.h"
@@ -233,6 +234,12 @@ void DisconnectManager::updateDisconnectStatus(ConnectionManager *conMgr) {
 						if (isLocalPlayerNextPacketRouter(conMgr) == TRUE) {
 							DEBUG_LOG(("DisconnectManager::updateDisconnectStatus - local player is next packet router"));
 							DEBUG_LOG(("DisconnectManager::updateDisconnectStatus - about to do the disconnect procedure for player %d", i));
+							// Multi-reporter telemetry: snapshot the
+							// dropped peer's scene-state from this peer's
+							// view BEFORE the destruct path mutates the
+							// object list. Best-effort.
+							if (TheGameTelemetry)
+								TheGameTelemetry->snapshotPositions("client_disconnected", i);
 							sendDisconnectCommand(i, conMgr);
 							disconnectPlayer(i, conMgr);
 							sendPlayerDestruct(i, conMgr);

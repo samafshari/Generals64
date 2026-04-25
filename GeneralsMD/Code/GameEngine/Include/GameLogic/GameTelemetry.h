@@ -33,9 +33,11 @@
 #include "Common/SubsystemInterface.h"
 
 // Per-player score numbers read from ScoreKeeper. Under lockstep /
-// CRC-validated sim every peer's numbers agree, so the first report
-// the server receives wins. Reused as the "last sent" watermark so
-// the periodic SCORE_EVENTS packet can ship deltas instead of totals.
+// CRC-validated sim every peer's numbers agree, so the server collates
+// reports from every peer and trusts the canonical (self) report for
+// display while keeping the cross-peer ones for audit. Absolute totals
+// only — the watermark/delta machinery is gone (server computes deltas
+// at ingest).
 struct PerPlayerScore
 {
 	Int unitsBuilt;
@@ -88,17 +90,69 @@ public:
 
 	/// Periodic score-events hook. Called from GameLogic::update once
 	/// per logic frame; throttles itself to one send every
-	/// SCORE_EVENTS_EVERY_FRAMES (~3 s at 30 Hz). Builds a fixed-width
-	/// binary RELAY_TYPE_SCORE_EVENTS packet from the local player's
-	/// ScoreKeeper carrying per-field DELTAS since the last send, plus
-	/// a wall-clock UTC-ms timestamp and the current logic frame so
-	/// the server can reconstruct a per-game timeline. Updates
-	/// m_lastSent to the new totals after enqueueing. No-ops unless
-	/// the session is active, we haven't already shipped a terminal
-	/// GAMERESULT, and LAN/GameLogic/PlayerList are live.
+	/// SCORE_EVENTS_EVERY_FRAMES (~3 s at 30 Hz). Builds a variable-
+	/// length RELAY_TYPE_SCORE_EVENTS packet carrying ABSOLUTE totals
+	/// for every observable player in the match (lockstep sim → every
+	/// peer's ScoreKeeper has authoritative-quality numbers for every
+	/// player). Server keeps every report; the canonical (self-)
+	/// report is what drives display. No-ops unless the session is
+	/// active, we haven't already shipped a terminal GAMERESULT, and
+	/// LAN / GameLogic / PlayerList are live.
 	void onLogicFrame();
 
 	Bool isActive() const { return m_active; }
+
+	/// 32-char hex session GUID assigned by the relay's
+	/// RELAY_TYPE_SESSION_ASSIGN packet (the <c>Game.ExternalKey</c> on
+	/// the server). Empty until telemetry is armed AND the relay's
+	/// assign packet has landed. RecorderClass uses this as the
+	/// replay filename so each game's <c>.rep</c> file is uniquely
+	/// addressable on disk and the launcher's uploader can correlate
+	/// the file straight to the server-side game row.
+	const AsciiString &getSessionId() const { return m_sessionId; }
+
+	/// Detailed in-game event hook. Called from anywhere in the engine
+	/// where an interesting event fires (object created / destroyed,
+	/// upgrade complete, science purchased, superpower fired, …).
+	/// Best-effort: failures never propagate to the caller, the sim
+	/// thread is never blocked, and the event is silently dropped if
+	/// the per-tick batch is full or the session isn't armed.
+	///
+	/// <paramref name="eventType"/> is an open string interned at the
+	/// server (no enum). Up to 32 chars; longer strings are clipped.
+	/// Slot params are 0xFF when "no actor / target". <paramref name="thingTemplateId"/>
+	/// is -1 when not bound to a thing template. <paramref name="x"/>
+	/// / <paramref name="y"/> are engine world units (INT_MIN = none).
+	/// <paramref name="extraJson"/> is an optional JSON OBJECT
+	/// (with surrounding braces — the helper pastes it verbatim
+	/// after <c>"extra":</c>, so a key-value fragment would produce
+	/// malformed JSON and the relay would drop the whole batch).
+	/// Pass nullptr / empty when there's nothing to attach. The
+	/// helper validates the first non-whitespace char is <c>{</c>
+	/// and silently strips the field if not — defensive backstop
+	/// against a future hook author mis-formatting.
+	void emitEvent(const char *eventType,
+		Int actorSlot, Int targetSlot, Int thingTemplateId,
+		Int x, Int y, Int cash, const char *extraJson);
+
+	/// Capture a sim-object position snapshot and ship it through the
+	/// telemetry sender. Called from <see cref="onLogicFrame"/> on the
+	/// per-minute periodic cadence and from event-trigger sites
+	/// (<c>onGameWon/Lost/Surrendered/Exited</c>, victory-conditions
+	/// player-defeated detection, netcode timeout handler, CRC-mismatch
+	/// detection).
+	///
+	/// <paramref name="triggerKind"/> is an open string identifying the
+	/// trigger ("periodic", "player_defeated", "player_exited",
+	/// "client_disconnected", "desync", "game_end"). New values surface
+	/// new analytics with no schema change. <paramref name="triggerSlot"/>
+	/// is the slot whose state caused the trigger when applicable
+	/// (-1 = none — periodic / desync / game_end).
+	///
+	/// Best-effort: failures don't propagate. Wraps per-object reads
+	/// in try/catch (the desync trigger may capture mid-mutation
+	/// state).
+	void snapshotPositions(const char *triggerKind, Int triggerSlot);
 
 private:
 	/// Build the GAMERESULT JSON and POST it through LANAPI::relaySendGameResult.
@@ -130,6 +184,30 @@ private:
 	void enqueuePacket(const UnsignedByte *buf, Int len);
 	void senderThreadFn();
 
+	// Pack the in-flight event batch as RELAY_TYPE_GAME_EVENTS and
+	// hand it to the sender thread. Called from onLogicFrame on the
+	// SCORE_EVENTS cadence so events ride the same packet rhythm.
+	void shipPendingEventsBatch();
+
+	// Pending event batch buffer — events accumulated since the last
+	// shipPendingEventsBatch flush. Lives on the sim thread; not
+	// shared with the sender thread (the flush copies into a new
+	// vector before enqueueing).
+	struct PendingEvent
+	{
+		Int frame;
+		AsciiString type;          // open string, ≤32 chars
+		Int actorSlot;             // 0xFF = none
+		Int targetSlot;            // 0xFF = none
+		Int thingTemplateId;       // -1 = none
+		Int x;                     // INT_MIN = none
+		Int y;                     // INT_MIN = none
+		Int cash;                  // INT_MIN = none
+		AsciiString extraJson;     // optional inner-JSON body
+	};
+	std::vector<PendingEvent> m_pendingEvents;
+	std::mutex                m_pendingEventsMutex;
+
 	Bool         m_active;
 	AsciiString  m_sessionId;       ///< stamped at game start — becomes Game.ExternalKey
 
@@ -148,11 +226,11 @@ private:
 	Bool         m_resultSent;      ///< guards against double-send (win + exit in the same frame)
 	Int          m_lastSnapshotFrame; ///< frame of most recent onLogicFrame snapshot send; 0 = none yet
 
-	// Watermark: totals the engine has already reported to the relay.
-	// Each onLogicFrame ships current - m_lastSent and then assigns
-	// current into m_lastSent. Reset to zero in init/onGameStart/reset
-	// so a fresh game starts fresh.
-	PerPlayerScore m_lastSent;
+	// Periodic position-snapshot bucket. Increments every
+	// SNAPSHOT_EVERY_FRAMES of game time; a snapshot is taken when
+	// the bucket index advances, so paused games don't roll the
+	// cadence forward.
+	Int          m_lastPositionSnapshotBucket;
 
 	// ── Per-minute FPS bucketing ──────────────────────────────────
 	//

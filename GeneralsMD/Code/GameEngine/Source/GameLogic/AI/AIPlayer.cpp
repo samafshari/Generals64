@@ -74,9 +74,6 @@
 
 #define USE_DOZER 1
 
-// Forward decl — definition further down, used by processBaseBuilding.
-static Bool isRebuildHoleForCCNearby(const Player *player, const Coord3D *loc);
-
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 AIPlayer::AIPlayer( Player *p ) :
@@ -718,13 +715,15 @@ void AIPlayer::processBaseBuilding( void )
 	{
 
 		// "AI Rebuilds CC" priority pass. When the host flag is on,
-		// the Command Center is the highest-priority rebuild — it
-		// gates the entire economy (no CC → no dozers → no rebuilds
-		// of anything). Scan the build list once looking for a
-		// destroyed CC entry whose rebuild delay has elapsed; if
-		// found, try to rebuild it before anything else. If the
-		// rebuild succeeds we're done for this tick; otherwise fall
-		// through to the normal per-entry loop.
+		// the Command Center jumps to the front of the rebuild queue
+		// so the AI restores its economy before anything else — but
+		// it still has to do it the legal way (a Dozer/Worker walks
+		// over and constructs it). USA/China without a surviving
+		// Dozer stay decapitated; GLA's Supply Stash can spawn a
+		// Worker so they recover naturally. Earlier "thin-air"
+		// fallback was removed because it conjured a CC out of
+		// nothing whenever the AI had no dozer, which players
+		// (rightly) called cheating.
 		if (TheGameInfo && TheGameInfo->isAiRebuildsCC())
 		{
 			for( BuildListInfo *ccInfo = m_player->getBuildList(); ccInfo; ccInfo = ccInfo->getNext() )
@@ -751,24 +750,6 @@ void AIPlayer::processBaseBuilding( void )
 					continue;
 
 				Object *bldg = buildStructureWithDozer(ccPlan, ccInfo);
-
-				// Same decapitation fallback as the main-loop path.
-				if (!bldg && findDozer(ccInfo->getLocation()) == NULL)
-				{
-					Bool proceed = TRUE;
-					if (TheGameInfo->isAiChecksMoney())
-					{
-						Money *aiMoney = m_player->getMoney();
-						const Int cost = ccPlan->calcCostToBuild(m_player);
-						if (!aiMoney || (Int)aiMoney->countMoney() < cost)
-							proceed = FALSE;
-						else
-							aiMoney->withdraw(cost);
-					}
-					if (proceed)
-						bldg = buildStructureNow(ccPlan, ccInfo);
-				}
-
 				if (bldg)
 				{
 					ccInfo->setObjectID(bldg->getID());
@@ -778,10 +759,10 @@ void AIPlayer::processBaseBuilding( void )
 					return; // CC is placed this tick; other entries wait
 				}
 
-				// If this CC couldn't rebuild (e.g. bad timestamp
-				// set, location blocked), break — the normal loop
-				// below will still try. Don't keep searching for
-				// another CC entry; priority pass is one-shot.
+				// No dozer (or location blocked). Fall through to
+				// the normal loop — it'll try again on a later tick
+				// once a dozer becomes available. Priority pass is
+				// one-shot: don't scan for a second CC entry.
 				break;
 			}
 		}
@@ -867,52 +848,6 @@ void AIPlayer::processBaseBuilding( void )
 #ifdef USE_DOZER
 					// dozer-construct the building
 					bldg = buildStructureWithDozer(bldgPlan, info);
-
-					// Decapitation recovery: if we're trying to rebuild
-					// a Command Center but have no dozer (because the
-					// CC — the only dozer factory — was destroyed), we
-					// would be permanently stuck. When the host has
-					// the "AI Rebuilds CC" option on, fall through to
-					// the thin-air build path so the AI can recover.
-					// Narrow cheat: only fires for CCs, only when no
-					// dozer exists; other buildings still require a
-					// live dozer.
-					//
-					// Money interaction: if "AI Checks Money" is ALSO
-					// on, the AI must pay the full cost (and is denied
-					// if broke) — otherwise the decapitated AI gets a
-					// free CC. This combination keeps the two toggles
-					// composable without needing a third flag.
-					if (!bldg
-						&& TheGameInfo
-						&& TheGameInfo->isAiRebuildsCC()
-						&& bldgPlan->isKindOf(KINDOF_COMMANDCENTER)
-						&& findDozer(info->getLocation()) == NULL
-						&& !isRebuildHoleForCCNearby(m_player, info->getLocation()))
-					{
-						Bool proceed = TRUE;
-						if (TheGameInfo->isAiChecksMoney())
-						{
-							Money *aiMoney = m_player->getMoney();
-							const Int cost = bldgPlan->calcCostToBuild(m_player);
-							if (!aiMoney || (Int)aiMoney->countMoney() < cost)
-							{
-								proceed = FALSE;
-							}
-							else
-							{
-								// Pay now. buildStructureNow itself
-								// doesn't charge (it uses the
-								// BuildAssistant thin-air path), so we
-								// manually deduct to match the "fair
-								// play" invariant ACM is enforcing
-								// everywhere else.
-								aiMoney->withdraw(cost);
-							}
-						}
-						if (proceed)
-							bldg = buildStructureNow(bldgPlan, info);
-					}
 
 					// store the object with the build order
 					if (bldg)
@@ -3327,52 +3262,6 @@ enum GameDifficulty AIPlayer::getAIDifficulty(void) const
 	return m_difficulty;
 }
 
-
-//----------------------------------------------------------------------------------------------------------
-/**
- * Is there already a GLA-style REBUILD_HOLE belonging to 'player' within
- * a small radius of 'loc' that will respawn into a Command Center?
- *
- * Used by the "AI Rebuilds CC" decapitation-recovery path to avoid
- * conjuring a second CC via the thin-air build while a hole is still on
- * the job. The hole-scan at processBaseBuilding's "check for hole"
- * section runs only on the frame the CC dies; if the hole spawns a
- * frame later, info->getObjectID stays at INVALID_ID and the rebuild
- * path would otherwise double up. This helper bridges that gap.
- *
- * Radius is intentionally generous — the hole spawns at the CC's death
- * position which typically coincides with the info location, but we
- * allow some slop for off-center destruction.
- */
-static Bool isRebuildHoleForCCNearby(const Player *player, const Coord3D *loc)
-{
-	if (!loc || !player)
-		return FALSE;
-	const Real kRadius   = 200.0f;
-	const Real kRadiusSq = kRadius * kRadius;
-	for (Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject())
-	{
-		if (!obj->isKindOf(KINDOF_REBUILD_HOLE))
-			continue;
-		if (obj->getControllingPlayer() != player)
-			continue;
-		const Coord3D *opos = obj->getPosition();
-		if (!opos)
-			continue;
-		const Real dx = opos->x - loc->x;
-		const Real dy = opos->y - loc->y;
-		if (dx*dx + dy*dy > kRadiusSq)
-			continue;
-		RebuildHoleBehaviorInterface *rhbi =
-			RebuildHoleBehavior::getRebuildHoleBehaviorInterfaceFromObject(obj);
-		if (!rhbi)
-			continue;
-		const ThingTemplate *rt = rhbi->getRebuildTemplate();
-		if (rt && rt->isKindOf(KINDOF_COMMANDCENTER))
-			return TRUE;
-	}
-	return FALSE;
-}
 
 /**
  * Finds a dozer that isn't building or collecting resources.

@@ -2938,6 +2938,14 @@ void GameLogic::processCommandList( CommandList *list )
 					player?player->getPlayerDisplayName().str():L"<NONE>", crcIt->second));
 			}
 #endif // DEBUG_LOGGING
+			// Multi-reporter telemetry: capture each peer's view of the
+			// scene at the divergence frame. This is the highest-value
+			// snapshot trigger — comparing the captured states across
+			// peers later isolates *which* objects the sims disagree
+			// about. The encoder is steeled for partial / mid-mutation
+			// state because desync state is, by definition, dirty.
+			if (TheGameTelemetry)
+				TheGameTelemetry->snapshotPositions("desync", -1);
 			TheNetwork->setSawCRCMismatch();
 		}
 	}

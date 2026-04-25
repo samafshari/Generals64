@@ -293,14 +293,18 @@ public:
   inline void setAiChecksMoney( Bool enabled );
 
   // "AI Rebuilds Command Center" mode. Default FALSE (retail
-  // behavior: if the AI's CC and dozers are all destroyed, the AI is
-  // permanently decapitated since the CC is the only building that
-  // produces dozers and dozers are the only units that build CCs).
-  // When TRUE, the AI's base-building loop treats a destroyed
-  // Command-Center build-list entry as a special case: if no dozer
-  // can be found, the CC is rebuilt via the existing thin-air build
-  // path (AIPlayer::buildStructureNow) so the AI has a chance to
-  // recover. Narrow cheat — only fires for CCs, not other buildings.
+  // behavior: if the AI's CC and all of its dozers are destroyed,
+  // the AI is permanently decapitated since the CC is the only
+  // building that produces dozers and dozers are the only units
+  // that build CCs).
+  // When TRUE, the AI's base-building loop simply prioritizes the
+  // CC over every other rebuild — it gets pulled to the front of
+  // the queue so the AI restores its economy first. The rebuild
+  // still has to happen the legal way (a dozer/worker walks over
+  // and constructs it). USA / China without a surviving dozer stay
+  // decapitated; GLA's Supply Stash spawns Workers and recovers
+  // naturally. The earlier "thin-air" fallback (CC conjured for
+  // free when no dozer existed) was removed as cheating.
   inline Bool isAiRebuildsCC() const;
   inline void setAiRebuildsCC( Bool enabled );
 
@@ -368,7 +372,7 @@ protected:
   Bool m_sharedTeamMoney;  // Host-enabled "shared money" team mode — see isSharedTeamMoney comment
   Bool m_sharedTeamPower;  // Host-enabled "shared power" team mode — see isSharedTeamPower comment
   Bool m_aiChecksMoney;    // When TRUE, AI respects the normal cost check — see isAiChecksMoney comment
-  Bool m_aiRebuildsCC;     // When TRUE, AI conjures a new CC if all its CCs + dozers are destroyed — see isAiRebuildsCC comment
+  Bool m_aiRebuildsCC;     // When TRUE, AI puts a destroyed CC at the head of its rebuild queue — see isAiRebuildsCC comment
   Bool m_sharedTeamControl;// Host-enabled "shared control" team mode — see isSharedTeamControl comment. Requires m_sharedTeamMoney && m_sharedTeamPower.
 };
 

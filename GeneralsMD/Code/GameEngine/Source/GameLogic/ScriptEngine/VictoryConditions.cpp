@@ -215,6 +215,29 @@ void VictoryConditions::update()
 		if (p && !m_isDefeated[i] && hasSinglePlayerBeenDefeated(p))
 		{
 			m_isDefeated[i] = true;
+
+			// Multi-reporter telemetry: every peer's lockstep
+			// sim flips m_isDefeated on the same frame, so each
+			// peer fires both a position snapshot (for the
+			// minimap replay) and a discrete GameEvent row that
+			// the server uses as authoritative ground-truth for
+			// outcome resolution. Every reporter's row is kept
+			// for audit; under lockstep they all agree on which
+			// frame the defeat happened.
+			if (TheGameTelemetry)
+			{
+				TheGameTelemetry->snapshotPositions("player_defeated", p->getPlayerIndex());
+				TheGameTelemetry->emitEvent(
+					"player_defeated",
+					/*actorSlot*/   p->getPlayerIndex(),
+					/*targetSlot*/  -1,
+					/*tid*/         -1,
+					/*x*/           INT_MIN,
+					/*y*/           INT_MIN,
+					/*cash*/        INT_MIN,
+					/*extraJson*/   nullptr);
+			}
+
 			if (TheGameLogic->getFrame() > 1)
 			{
 				ThePartitionManager->revealMapForPlayerPermanently( p->getPlayerIndex() );

@@ -326,7 +326,12 @@ void GameInfo::reset()
   m_gameFps = 70; // Default skirmish/MP logic FPS — see GameInfo::getGameFps comment
   m_sharedTeamMoney = FALSE; // Team-pooled credits mode; host toggles via lobby checkbox
   m_sharedTeamPower = FALSE; // Team-pooled energy mode; host toggles via lobby checkbox
-  m_aiChecksMoney   = FALSE; // Retail default: AI dozer construction skips the money check. Host toggles via lobby.
+  m_aiChecksMoney   = TRUE;  // Default ON: AI must pay for construction like a human. Host can toggle off in
+                             // the lobby to restore retail "AI builds for free" cheat. NOTE: because default
+                             // flipped, ACM= is now emitted unconditionally in GameInfoToAsciiString — same
+                             // reasoning as ARC below: emit-only-when-on would silently break the
+                             // host-unchecks case (joiners' reset-initialized TRUE never gets overwritten
+                             // because the absent key wouldn't trigger the setter).
   m_aiRebuildsCC    = TRUE;  // New default: let the AI recover from decapitation. Host can toggle off via lobby.
                              // NOTE: because default flipped, ARC= is emitted unconditionally in
                              // GameInfoToAsciiString (can't rely on emit-only-when-on any more).
@@ -974,12 +979,16 @@ AsciiString GameInfoToAsciiString( const GameInfo *game )
 	if (game->isSharedTeamPower())
 		optionsString.concat("STP=1;");
 
-	// AI Checks Money flag. Same convention — only emitted when on.
-	// Goes to GameSpy staging room / LAN broadcast / replay header
-	// alongside the other options so the server-side match record
-	// captures which rules the host picked.
-	if (game->isAiChecksMoney())
-		optionsString.concat("ACM=1;");
+	// AI Checks Money flag. Default flipped from FALSE to TRUE, so we
+	// always emit 0/1 — same reasoning as ARC below. Emit-only-when-on
+	// would silently break the host-unchecks case because the absent
+	// key wouldn't trigger the setter on joiners and they'd stay at
+	// their reset-initialized TRUE.
+	{
+		AsciiString acmStr;
+		acmStr.format("ACM=%d;", game->isAiChecksMoney() ? 1 : 0);
+		optionsString.concat(acmStr);
+	}
 
 	// AI Rebuilds CC flag. The default flipped from FALSE to TRUE, so
 	// "emit only when on" would silently break when the host unchecks —

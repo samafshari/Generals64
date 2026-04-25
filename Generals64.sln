@@ -11,6 +11,7 @@ Global
 		DebugOG|x64 = DebugOG|x64
 		Release|x64 = Release|x64
 		ReleasePublic|x64 = ReleasePublic|x64
+		ReleaseDev|x64 = ReleaseDev|x64
 		ReleaseOG|x64 = ReleaseOG|x64
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
@@ -24,6 +25,8 @@ Global
 		{50E945EA-84B2-33BB-844C-E90CD967192E}.Release|x64.Build.0 = Release|x64
 		{50E945EA-84B2-33BB-844C-E90CD967192E}.ReleasePublic|x64.ActiveCfg = ReleasePublic|x64
 		{50E945EA-84B2-33BB-844C-E90CD967192E}.ReleasePublic|x64.Build.0 = ReleasePublic|x64
+		{50E945EA-84B2-33BB-844C-E90CD967192E}.ReleaseDev|x64.ActiveCfg = ReleaseDev|x64
+		{50E945EA-84B2-33BB-844C-E90CD967192E}.ReleaseDev|x64.Build.0 = ReleaseDev|x64
 		{50E945EA-84B2-33BB-844C-E90CD967192E}.ReleaseOG|x64.ActiveCfg = ReleaseOG|x64
 		{50E945EA-84B2-33BB-844C-E90CD967192E}.ReleaseOG|x64.Build.0 = ReleaseOG|x64
 	EndGlobalSection

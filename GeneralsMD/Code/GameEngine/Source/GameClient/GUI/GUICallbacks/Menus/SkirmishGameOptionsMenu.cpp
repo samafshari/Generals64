@@ -333,6 +333,14 @@ static NameKeyType staticTextGameSpeedID = NAMEKEY_INVALID;
 static NameKeyType comboBoxSuperweaponLimitID = NAMEKEY_INVALID;
 static NameKeyType comboBoxGameSpeedID        = NAMEKEY_INVALID;
 static NameKeyType comboBoxStartingCashID     = NAMEKEY_INVALID;
+// Skirmish lobby host-toggle flag IDs — mirrors the LAN equivalents.
+// In skirmish the local player is always the host, so these never need
+// the joiner-disabled treatment that LAN does.
+static NameKeyType checkBoxSharedMoneyID      = NAMEKEY_INVALID;
+static NameKeyType checkBoxSharedPowerID      = NAMEKEY_INVALID;
+static NameKeyType checkBoxAiChecksMoneyID    = NAMEKEY_INVALID;
+static NameKeyType checkBoxAiRebuildsCCID     = NAMEKEY_INVALID;
+static NameKeyType checkBoxSharedControlID    = NAMEKEY_INVALID;
 
 // Window Pointers ------------------------------------------------------------------------
 static GameWindow *staticTextGameSpeed = nullptr;
@@ -347,6 +355,15 @@ static GameWindow *textEntryPlayerName = nullptr;
 static GameWindow *comboBoxSuperweaponLimit = nullptr;
 static GameWindow *comboBoxGameSpeed        = nullptr;
 static GameWindow *comboBoxStartingCash     = nullptr;
+// Skirmish lobby host-toggle flag widgets — see LanGameOptionsMenu.cpp
+// for the design rationale (label rendered by sibling STATICTEXT, etc.).
+// Skirmish has no remote peers, so we don't have to disable for joiners
+// and there is no GenerateGameOptionsString rebroadcast on toggle.
+static GameWindow *checkBoxSharedMoney      = nullptr;
+static GameWindow *checkBoxSharedPower      = nullptr;
+static GameWindow *checkBoxAiChecksMoney    = nullptr;
+static GameWindow *checkBoxAiRebuildsCC     = nullptr;
+static GameWindow *checkBoxSharedControl    = nullptr;
 static GameWindow *comboBoxPlayer[MAX_SLOTS] = {0};
 
 static GameWindow *comboBoxColor[MAX_SLOTS] = {0};
@@ -1357,6 +1374,131 @@ static void handleGameSpeedSelection()
   myGame->setGameFps(newFps);
 }
 
+// -----------------------------------------------------------------------------
+// Skirmish lobby host-toggle handlers. Mirrors the LAN versions in
+// LanGameOptionsMenu.cpp but without the host check (skirmish player is
+// always the host) and without the GenerateGameOptionsString / lan slot-
+// list rebroadcast (no remote peers).
+// -----------------------------------------------------------------------------
+static void handleSkirmishSharedMoneyToggle()
+{
+  SkirmishGameInfo *myGame = TheSkirmishGameInfo;
+  if (!myGame || !checkBoxSharedMoney)
+    return;
+
+  const Bool newVal = GadgetCheckBoxIsChecked(checkBoxSharedMoney);
+  if (newVal == myGame->isSharedTeamMoney())
+    return;
+
+  myGame->setSharedTeamMoney(newVal);
+
+  // Shared Control requires Shared Money — turning Money off forces
+  // Control off too. Mirror the LAN behavior exactly.
+  if (!newVal && myGame->isSharedTeamControl())
+  {
+    myGame->setSharedTeamControl(FALSE);
+    if (checkBoxSharedControl && GadgetCheckBoxIsChecked(checkBoxSharedControl))
+      GadgetCheckBoxSetChecked(checkBoxSharedControl, FALSE);
+  }
+
+  // Soft link: enabling Shared Money auto-enables AI Checks Money so
+  // the AI doesn't secretly drain the team pool via its free-dozer-
+  // construction shortcut.
+  if (newVal && !myGame->isAiChecksMoney())
+  {
+    myGame->setAiChecksMoney(TRUE);
+    if (checkBoxAiChecksMoney && !GadgetCheckBoxIsChecked(checkBoxAiChecksMoney))
+      GadgetCheckBoxSetChecked(checkBoxAiChecksMoney, TRUE);
+  }
+}
+
+static void handleSkirmishSharedPowerToggle()
+{
+  SkirmishGameInfo *myGame = TheSkirmishGameInfo;
+  if (!myGame || !checkBoxSharedPower)
+    return;
+
+  const Bool newVal = GadgetCheckBoxIsChecked(checkBoxSharedPower);
+  if (newVal == myGame->isSharedTeamPower())
+    return;
+
+  myGame->setSharedTeamPower(newVal);
+
+  // Shared Control requires Shared Power — same rule as Shared Money.
+  if (!newVal && myGame->isSharedTeamControl())
+  {
+    myGame->setSharedTeamControl(FALSE);
+    if (checkBoxSharedControl && GadgetCheckBoxIsChecked(checkBoxSharedControl))
+      GadgetCheckBoxSetChecked(checkBoxSharedControl, FALSE);
+  }
+}
+
+static void handleSkirmishAiChecksMoneyToggle()
+{
+  SkirmishGameInfo *myGame = TheSkirmishGameInfo;
+  if (!myGame || !checkBoxAiChecksMoney)
+    return;
+
+  const Bool newVal = GadgetCheckBoxIsChecked(checkBoxAiChecksMoney);
+  if (newVal == myGame->isAiChecksMoney())
+    return;
+
+  myGame->setAiChecksMoney(newVal);
+}
+
+static void handleSkirmishAiRebuildsCCToggle()
+{
+  SkirmishGameInfo *myGame = TheSkirmishGameInfo;
+  if (!myGame || !checkBoxAiRebuildsCC)
+    return;
+
+  const Bool newVal = GadgetCheckBoxIsChecked(checkBoxAiRebuildsCC);
+  if (newVal == myGame->isAiRebuildsCC())
+    return;
+
+  myGame->setAiRebuildsCC(newVal);
+}
+
+static void handleSkirmishSharedControlToggle()
+{
+  SkirmishGameInfo *myGame = TheSkirmishGameInfo;
+  if (!myGame || !checkBoxSharedControl)
+    return;
+
+  // isSharedTeamControl() returns the raw flag (Effective variant
+  // ANDs in both prereqs and is for sim reads), so we use it directly
+  // here for the "no change" early-return.
+  const Bool newVal = GadgetCheckBoxIsChecked(checkBoxSharedControl);
+  if (newVal == myGame->isSharedTeamControl())
+    return;
+
+  // Enabling Shared Control auto-enables its two prerequisites and
+  // the cascading AI Checks Money soft link, mirroring LAN exactly.
+  if (newVal)
+  {
+    if (!myGame->isSharedTeamMoney())
+    {
+      myGame->setSharedTeamMoney(TRUE);
+      if (checkBoxSharedMoney && !GadgetCheckBoxIsChecked(checkBoxSharedMoney))
+        GadgetCheckBoxSetChecked(checkBoxSharedMoney, TRUE);
+      if (!myGame->isAiChecksMoney())
+      {
+        myGame->setAiChecksMoney(TRUE);
+        if (checkBoxAiChecksMoney && !GadgetCheckBoxIsChecked(checkBoxAiChecksMoney))
+          GadgetCheckBoxSetChecked(checkBoxAiChecksMoney, TRUE);
+      }
+    }
+    if (!myGame->isSharedTeamPower())
+    {
+      myGame->setSharedTeamPower(TRUE);
+      if (checkBoxSharedPower && !GadgetCheckBoxIsChecked(checkBoxSharedPower))
+        GadgetCheckBoxSetChecked(checkBoxSharedPower, TRUE);
+    }
+  }
+
+  myGame->setSharedTeamControl(newVal);
+}
+
 
 //-------------------------------------------------------------------------------------------------
 /** Initialize the Gadgets Options Menu */
@@ -1375,6 +1517,11 @@ void InitSkirmishGameGadgets()
   comboBoxSuperweaponLimitID = TheNameKeyGenerator->nameToKey( "SkirmishGameOptionsMenu.wnd:ComboBoxSuperweaponLimit" );
   comboBoxGameSpeedID        = TheNameKeyGenerator->nameToKey( "SkirmishGameOptionsMenu.wnd:ComboBoxGameSpeed" );
   comboBoxStartingCashID     = TheNameKeyGenerator->nameToKey( "SkirmishGameOptionsMenu.wnd:ComboBoxStartingCash" );
+  checkBoxSharedMoneyID      = TheNameKeyGenerator->nameToKey( "SkirmishGameOptionsMenu.wnd:CheckBoxSharedMoney" );
+  checkBoxSharedPowerID      = TheNameKeyGenerator->nameToKey( "SkirmishGameOptionsMenu.wnd:CheckBoxSharedPower" );
+  checkBoxAiChecksMoneyID    = TheNameKeyGenerator->nameToKey( "SkirmishGameOptionsMenu.wnd:CheckBoxAiChecksMoney" );
+  checkBoxAiRebuildsCCID     = TheNameKeyGenerator->nameToKey( "SkirmishGameOptionsMenu.wnd:CheckBoxAiRebuildsCC" );
+  checkBoxSharedControlID    = TheNameKeyGenerator->nameToKey( "SkirmishGameOptionsMenu.wnd:CheckBoxSharedControl" );
 
 	// Initialize the pointers to our gadgets
 	parentSkirmishGameOptions = TheWindowManager->winGetWindowFromId( nullptr, parentSkirmishGameOptionsID );
@@ -1409,6 +1556,85 @@ void InitSkirmishGameGadgets()
 	PopulateStartingCashComboBox(comboBoxStartingCash, TheSkirmishGameInfo);
 	PopulateSkirmishSuperweaponLimitComboBox(comboBoxSuperweaponLimit, TheSkirmishGameInfo);
 	PopulateSkirmishGameSpeedComboBox(comboBoxGameSpeed, TheSkirmishGameInfo);
+
+	// Host-toggle flag checkboxes — same design as LAN. Each box is just
+	// a tick (label rendered by the sibling STATICTEXT widget); we clear
+	// the .wnd's "GUI:..." TEXT to avoid the "MISSING:" placeholder that
+	// the gadget renderer would otherwise show in tiny font.
+	checkBoxSharedMoney = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, checkBoxSharedMoneyID );
+	DEBUG_ASSERTCRASH(checkBoxSharedMoney, ("Could not find the checkBoxSharedMoney"));
+	if (checkBoxSharedMoney)
+	{
+		GadgetCheckBoxSetText(checkBoxSharedMoney, UnicodeString::TheEmptyString);
+		GadgetCheckBoxSetChecked(checkBoxSharedMoney,
+			TheSkirmishGameInfo ? TheSkirmishGameInfo->isSharedTeamMoney() : FALSE);
+	}
+
+	checkBoxSharedPower = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, checkBoxSharedPowerID );
+	DEBUG_ASSERTCRASH(checkBoxSharedPower, ("Could not find the checkBoxSharedPower"));
+	if (checkBoxSharedPower)
+	{
+		GadgetCheckBoxSetText(checkBoxSharedPower, UnicodeString::TheEmptyString);
+		GadgetCheckBoxSetChecked(checkBoxSharedPower,
+			TheSkirmishGameInfo ? TheSkirmishGameInfo->isSharedTeamPower() : FALSE);
+	}
+
+	checkBoxAiChecksMoney = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, checkBoxAiChecksMoneyID );
+	DEBUG_ASSERTCRASH(checkBoxAiChecksMoney, ("Could not find the checkBoxAiChecksMoney"));
+	if (checkBoxAiChecksMoney)
+	{
+		GadgetCheckBoxSetText(checkBoxAiChecksMoney, UnicodeString::TheEmptyString);
+		GadgetCheckBoxSetChecked(checkBoxAiChecksMoney,
+			TheSkirmishGameInfo ? TheSkirmishGameInfo->isAiChecksMoney() : FALSE);
+	}
+
+	checkBoxAiRebuildsCC = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, checkBoxAiRebuildsCCID );
+	DEBUG_ASSERTCRASH(checkBoxAiRebuildsCC, ("Could not find the checkBoxAiRebuildsCC"));
+	if (checkBoxAiRebuildsCC)
+	{
+		GadgetCheckBoxSetText(checkBoxAiRebuildsCC, UnicodeString::TheEmptyString);
+		GadgetCheckBoxSetChecked(checkBoxAiRebuildsCC,
+			TheSkirmishGameInfo ? TheSkirmishGameInfo->isAiRebuildsCC() : FALSE);
+	}
+
+	checkBoxSharedControl = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, checkBoxSharedControlID );
+	DEBUG_ASSERTCRASH(checkBoxSharedControl, ("Could not find the checkBoxSharedControl"));
+	if (checkBoxSharedControl)
+	{
+		GadgetCheckBoxSetText(checkBoxSharedControl, UnicodeString::TheEmptyString);
+		GadgetCheckBoxSetChecked(checkBoxSharedControl,
+			TheSkirmishGameInfo ? TheSkirmishGameInfo->isSharedTeamControl() : FALSE);
+	}
+
+	// Override the option labels at runtime — same approach as the LAN menu
+	// (the .wnd "GUI:..." keys aren't shipped in CSF so we set the visible
+	// text directly here).
+	{
+		GameWindow *lblSM = TheWindowManager->winGetWindowFromId(
+			parentSkirmishGameOptions,
+			TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:StaticTextSharedMoney"));
+		if (lblSM) GadgetStaticTextSetText(lblSM, UnicodeString(L"Shared Money"));
+
+		GameWindow *lblSP = TheWindowManager->winGetWindowFromId(
+			parentSkirmishGameOptions,
+			TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:StaticTextSharedPower"));
+		if (lblSP) GadgetStaticTextSetText(lblSP, UnicodeString(L"Shared Power"));
+
+		GameWindow *lblACM = TheWindowManager->winGetWindowFromId(
+			parentSkirmishGameOptions,
+			TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:StaticTextAiChecksMoney"));
+		if (lblACM) GadgetStaticTextSetText(lblACM, UnicodeString(L"AI Checks Money"));
+
+		GameWindow *lblARC = TheWindowManager->winGetWindowFromId(
+			parentSkirmishGameOptions,
+			TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:StaticTextAiRebuildsCC"));
+		if (lblARC) GadgetStaticTextSetText(lblARC, UnicodeString(L"AI Rebuilds CC"));
+
+		GameWindow *lblSC = TheWindowManager->winGetWindowFromId(
+			parentSkirmishGameOptions,
+			TheNameKeyGenerator->nameToKey("SkirmishGameOptionsMenu.wnd:StaticTextSharedControl"));
+		if (lblSC) GadgetStaticTextSetText(lblSC, UnicodeString(L"Shared Control (requires Shared Money + Power)"));
+	}
 
 	// Hide LAN-only widgets inherited from LanGameOptionsMenu.wnd. These
 	// don't exist in Skirmish semantically (no remote peers, no per-slot
@@ -1619,6 +1845,46 @@ void updateSkirmishGameOptions()
   // loading skirmish prefs that set a specific numeric limit).
   if (comboBoxSuperweaponLimit)
     PopulateSkirmishSuperweaponLimitComboBox(comboBoxSuperweaponLimit, TheSkirmishGameInfo);
+
+  // Mirror the host-toggle flag GameInfo state into each checkbox.
+  // Skirmish has no peers so this is mostly defensive — kept so
+  // anywhere that mutates GameInfo from outside the toggle handlers
+  // (e.g. SkirmishPreferences re-load) gets reflected in the UI.
+  if (TheSkirmishGameInfo)
+  {
+    if (checkBoxSharedMoney)
+    {
+      Bool shouldBeChecked = TheSkirmishGameInfo->isSharedTeamMoney();
+      if (GadgetCheckBoxIsChecked(checkBoxSharedMoney) != shouldBeChecked)
+        GadgetCheckBoxSetChecked(checkBoxSharedMoney, shouldBeChecked);
+    }
+    if (checkBoxSharedPower)
+    {
+      Bool shouldBeChecked = TheSkirmishGameInfo->isSharedTeamPower();
+      if (GadgetCheckBoxIsChecked(checkBoxSharedPower) != shouldBeChecked)
+        GadgetCheckBoxSetChecked(checkBoxSharedPower, shouldBeChecked);
+    }
+    if (checkBoxAiChecksMoney)
+    {
+      Bool shouldBeChecked = TheSkirmishGameInfo->isAiChecksMoney();
+      if (GadgetCheckBoxIsChecked(checkBoxAiChecksMoney) != shouldBeChecked)
+        GadgetCheckBoxSetChecked(checkBoxAiChecksMoney, shouldBeChecked);
+    }
+    if (checkBoxAiRebuildsCC)
+    {
+      Bool shouldBeChecked = TheSkirmishGameInfo->isAiRebuildsCC();
+      if (GadgetCheckBoxIsChecked(checkBoxAiRebuildsCC) != shouldBeChecked)
+        GadgetCheckBoxSetChecked(checkBoxAiRebuildsCC, shouldBeChecked);
+    }
+    if (checkBoxSharedControl)
+    {
+      // Raw flag (Effective ANDs in both prereqs and is for sim reads).
+      Bool shouldBeChecked = TheSkirmishGameInfo->isSharedTeamControl();
+      if (GadgetCheckBoxIsChecked(checkBoxSharedControl) != shouldBeChecked)
+        GadgetCheckBoxSetChecked(checkBoxSharedControl, shouldBeChecked);
+    }
+  }
+
   Int itemCount = GadgetComboBoxGetLength(comboBoxStartingCash);
   Int index = 0;
   for ( ; index < itemCount; index++ )
@@ -1993,6 +2259,37 @@ WindowMsgHandledType SkirmishGameOptionsMenuSystem( GameWindow *window, Unsigned
 ///				static NameKeyType buttonResetFPSID = TheNameKeyGenerator->nameToKey( "SkirmishGameOptionsMenu.wnd:ButtonResetFPS" );
 				if(buttonPushed)
 					break;
+
+				// Host-toggle flag checkboxes. Each flips the corresponding
+				// GameInfo flag; the soft-link rules (Shared Control =>
+				// Money + Power, etc.) live in the helpers — same shape as
+				// the LAN menu.
+				if ( controlID == checkBoxSharedMoneyID )
+				{
+					handleSkirmishSharedMoneyToggle();
+					break;
+				}
+				if ( controlID == checkBoxSharedPowerID )
+				{
+					handleSkirmishSharedPowerToggle();
+					break;
+				}
+				if ( controlID == checkBoxAiChecksMoneyID )
+				{
+					handleSkirmishAiChecksMoneyToggle();
+					break;
+				}
+				if ( controlID == checkBoxAiRebuildsCCID )
+				{
+					handleSkirmishAiRebuildsCCToggle();
+					break;
+				}
+				if ( controlID == checkBoxSharedControlID )
+				{
+					handleSkirmishSharedControlToggle();
+					break;
+				}
+
 				if ( controlID == buttonExitID )
 				{
 					buttonPushed = TRUE;

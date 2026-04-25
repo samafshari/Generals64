@@ -43,6 +43,7 @@
 #include "Common/Xfer.h"
 
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/GameTelemetry.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/DeletionUpdate.h"
 #include "GameLogic/Module/UpdateModule.h"
@@ -546,6 +547,42 @@ void SpecialPowerModule::aboutToDoSpecialPower( const Coord3D *location )
 		getObject()->getControllingPlayer()->getPlayerIndex(),
 		getSpecialPowerModuleData()->m_specialPowerTemplate->getName(),
 		getObject()->getID());
+
+	// Multi-reporter telemetry: every peer's lockstep sim fires this
+	// for every special-power activation, so each peer ships an
+	// "superpower_fired" event with the actor and target coords. The
+	// canonical reporter (the firing player themselves) is the row
+	// the dashboard surfaces; peer rows are audit data.
+	if (TheGameTelemetry)
+	{
+		const SpecialPowerTemplate *tmpl = getSpecialPowerModuleData()->m_specialPowerTemplate;
+		Int actorSlot = getObject()->getControllingPlayer()->getPlayerIndex();
+		// Target position: provided location wins, else the caster's
+		// own position (self-targeted powers like rebel ambush).
+		const Coord3D *pos = location ? location : getObject()->getPosition();
+		Int x = pos ? (Int)pos->x : INT_MIN;
+		Int y = pos ? (Int)pos->y : INT_MIN;
+		// extraJson must be a complete JSON object — emitEvent
+		// pastes it verbatim after `"extra":`, so a key-value
+		// fragment would produce double-colon malformed JSON the
+		// relay would reject. Wrap in `{...}`.
+		AsciiString extra;
+		if (tmpl)
+		{
+			extra.concat("{\"power\":\"");
+			extra.concat(tmpl->getName().str());
+			extra.concat("\"}");
+		}
+		TheGameTelemetry->emitEvent(
+			"superpower_fired",
+			/*actorSlot*/   actorSlot,
+			/*targetSlot*/  -1,
+			/*tid*/         -1,
+			/*x*/           x,
+			/*y*/           y,
+			/*cash*/        INT_MIN,
+			/*extraJson*/   extra.isEmpty() ? nullptr : extra.str());
+	}
 
 	// Let EVA do her thing
 	SpecialPowerType type = getSpecialPowerModuleData()->m_specialPowerTemplate->getSpecialPowerType();

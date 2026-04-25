@@ -219,7 +219,13 @@ static const UnsignedShort GENERALS_MAGIC_NUMBER = 0xF00D;
 
 // The base port number used for the transport socket.  A players slot number is added to this
 // value to get their actual port number.
+// ReleaseDev shifts the whole 289xx → 279xx so a dev game client can
+// run alongside a prod one on the same machine without UDP collisions.
+#if defined(RELEASE_DEV) && RELEASE_DEV
+static const Int NETWORK_BASE_PORT_NUMBER = 27911;
+#else
 static const Int NETWORK_BASE_PORT_NUMBER = 28911;
+#endif
 
 // the singleton
 class NetworkInterface;

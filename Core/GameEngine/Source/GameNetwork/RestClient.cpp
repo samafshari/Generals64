@@ -20,7 +20,15 @@ namespace RestClient
 {
 
 static const DWORD kTimeoutMs = 5000;
+// ReleasePublic targets server.generals64.com:28912; ReleaseDev (gated by
+// RELEASE_DEV in z_generals.vcxproj) targets dev-server.generals64.com:27912.
+// Host comes in via the launcher's -relayserver argument; only the port
+// is baked in here.
+#if defined(RELEASE_DEV) && RELEASE_DEV
+static const INTERNET_PORT kRelayHttpPort = 27912;
+#else
 static const INTERNET_PORT kRelayHttpPort = 28912;
+#endif
 
 AsciiString defaultBaseUrl()
 {

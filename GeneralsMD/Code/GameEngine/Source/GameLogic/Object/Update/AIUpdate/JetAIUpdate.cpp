@@ -2122,13 +2122,29 @@ UpdateSleepTime JetAIUpdate::update()
 
 	positionLockon();
 
-	if (m_attackLocoExpireFrame != 0)
+	// Don't fight the slow-death locomotor settings.
+	// JetSlowDeathBehavior / HelicopterSlowDeathBehavior::beginSlowDeath
+	// sets the current locomotor's MaxLift to -gravity (so the wreck
+	// falls) and MaxTurnRate to 0 (so it can't steer). If we call
+	// chooseLocomotorSet(...) here with a type that differs from the
+	// current set, AIUpdateInterface::chooseLocomotorSetExplicit calls
+	// m_locomotorSet.clear() — every Locomotor instance gets deleted
+	// and rebuilt with default BIGNUM clamps, wiping the death state.
+	// Result: dead jets / Comanches stay in the air, JetSlowDeath's
+	// height check never hits ground, destroyObject() never fires,
+	// and the corpses accumulate every match (drawViews scaled with
+	// scene-graph size). Skipping these calls when dead lets the
+	// wreck fall like the original engine intended.
+	if (!jet->isEffectivelyDead())
 	{
-		chooseLocomotorSet(d->m_attackingLoco);
-	}
-	else if (getFlag(USE_SPECIAL_RETURN_LOCO))
-	{
-		chooseLocomotorSet(d->m_returningLoco);
+		if (m_attackLocoExpireFrame != 0)
+		{
+			chooseLocomotorSet(d->m_attackingLoco);
+		}
+		else if (getFlag(USE_SPECIAL_RETURN_LOCO))
+		{
+			chooseLocomotorSet(d->m_returningLoco);
+		}
 	}
 
 

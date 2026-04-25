@@ -79,6 +79,7 @@
 
 #include "GameLogic/AI.h"
 #include "GameLogic/AIPathfind.h"
+#include "GameLogic/GameTelemetry.h"
 #include "GameLogic/AISkirmishPlayer.h"
 #include "GameLogic/ExperienceTracker.h"
 #include "GameLogic/Object.h"
@@ -2659,6 +2660,32 @@ Bool Player::attemptToPurchaseScience(ScienceType science)
 		TheControlBar->markUIDirty();
 	}
 
+	// Multi-reporter telemetry hook for science purchases. Lockstep
+	// sim → every peer fires this for every player. extraJson must
+	// be a complete JSON object — see the upgrade hook above for
+	// rationale on the brace wrapping.
+	if (TheGameTelemetry)
+	{
+		AsciiString extra;
+		extra.concat("{\"science\":\"");
+		extra.concat(TheScienceStore->getInternalNameForScience(science).str());
+		extra.concat("\",\"cost\":");
+		char numBuf[16];
+		_snprintf(numBuf, sizeof(numBuf), "%d", cost);
+		numBuf[sizeof(numBuf) - 1] = '\0';
+		extra.concat(numBuf);
+		extra.concat("}");
+		TheGameTelemetry->emitEvent(
+			"science_purchased",
+			/*actorSlot*/   getPlayerIndex(),
+			/*targetSlot*/  -1,
+			/*tid*/         -1,
+			/*x*/           INT_MIN,
+			/*y*/           INT_MIN,
+			/*cash*/        INT_MIN,
+			/*extraJson*/   extra.str());
+	}
+
 	return true;
 }
 
@@ -3126,6 +3153,34 @@ Upgrade *Player::addUpgrade( const UpgradeTemplate *upgradeTemplate, UpgradeStat
 		m_upgradesInProgress.clear( newMask );
 		m_upgradesCompleted.set( newMask );
 		onUpgradeCompleted( upgradeTemplate );
+
+		// Multi-reporter telemetry — every peer's lockstep sim
+		// fires this hook for every player's upgrade. Best-effort.
+		// extraJson must be a complete JSON object: emitEvent
+		// pastes it verbatim after `"extra":` so a fragment like
+		// `"upgrade":"name"` would produce `"extra":"upgrade":"name"`
+		// and the relay's JSON parser would reject the whole batch.
+		if (TheGameTelemetry && upgradeTemplate)
+		{
+			AsciiString extra;
+			extra.concat("{\"upgrade\":\"");
+			// Upgrade names are ascii-clean engine identifiers
+			// (alphanum + underscore). If a mod ever ships one
+			// with quotes or backslashes the relay's parser will
+			// drop that single batch — we accept the loss rather
+			// than pulling in a json-escape helper here.
+			extra.concat(upgradeTemplate->getUpgradeName().str());
+			extra.concat("\"}");
+			TheGameTelemetry->emitEvent(
+				"upgrade_purchased",
+				/*actorSlot*/   getPlayerIndex(),
+				/*targetSlot*/  -1,
+				/*tid*/         -1,
+				/*x*/           INT_MIN,
+				/*y*/           INT_MIN,
+				/*cash*/        getMoney() ? (Int)getMoney()->countMoney() : INT_MIN,
+				/*extraJson*/   extra.str());
+		}
 	}
 
 	if( ThePlayerList->getLocalPlayer() == this )
