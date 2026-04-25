@@ -443,6 +443,15 @@ protected:
 	// Per-minute FPS aggregate shipped by GameTelemetry at every
 	// minute roll. Fixed 37-byte payload; see packFpsBucketPacket.
 	static const char RELAY_TYPE_FPS_BUCKET = 11;
+	// Detailed in-game event batch (object created/destroyed,
+	// upgrade / science purchased, superpower fired, …). Variable-
+	// length JSON body framed by a small fixed prefix; see
+	// packGameEventsPacket. Up to 16 KB body, capped relay-side.
+	static const char RELAY_TYPE_GAME_EVENTS = 12;
+	// Per-trigger sim-object position snapshot. Variable-length
+	// payload carrying a per-object record array. See
+	// packPositionSnapshotPacket and GameTelemetry::snapshotPositions.
+	static const char RELAY_TYPE_POSITION_SNAPSHOT = 13;
 
 public:
 	Bool relayConnect();
@@ -471,6 +480,8 @@ public:
 	void packGameResultPacket(const char *json, int len, std::vector<UnsignedByte> &out);
 	void packScoreEventPacket(const UnsignedByte *payload, Int len, std::vector<UnsignedByte> &out);
 	void packFpsBucketPacket (const UnsignedByte *payload, Int len, std::vector<UnsignedByte> &out);
+	void packGameEventsPacket(const UnsignedByte *payload, Int len, std::vector<UnsignedByte> &out);
+	void packPositionSnapshotPacket(const UnsignedByte *payload, Int len, std::vector<UnsignedByte> &out);
 
 protected:
 	void sendMessage(LANMessage *msg, UnsignedInt ip = 0); // Convenience function

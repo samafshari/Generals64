@@ -65,6 +65,7 @@
 
 #include "GameLogic/Object.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/GameTelemetry.h"
 
 //-----------------------------------------------------------------------------
 // DEFINES ////////////////////////////////////////////////////////////////////
@@ -149,6 +150,29 @@ void ScoreKeeper::addObjectBuilt( const Object *o)
 		if (it != m_objectsBuilt.end())
 			existingCount = it->second;
 		m_objectsBuilt[o->getTemplate()] = existingCount + 1;
+
+		// Multi-reporter telemetry hook. Every peer's lockstep sim
+		// fires this for every player that builds an object, so the
+		// event lands in every peer's GameTelemetry queue and ships
+		// to the relay. The server keeps each reporter's view; the
+		// canonical (actor's own) report is the one used for display.
+		// Best-effort — telemetry never propagates failures back to
+		// the sim path.
+		if (TheGameTelemetry && o->getTemplate() && o->getTemplate()->getTemplateID() != 0)
+		{
+			const Coord3D *pos = o->getPosition();
+			Int x = pos ? (Int)pos->x : INT_MIN;
+			Int y = pos ? (Int)pos->y : INT_MIN;
+			TheGameTelemetry->emitEvent(
+				"object_created",
+				/*actorSlot*/   m_myPlayerIdx,
+				/*targetSlot*/  -1,
+				/*tid*/         (Int)o->getTemplate()->getTemplateID(),
+				/*x*/           x,
+				/*y*/           y,
+				/*cash*/        INT_MIN,
+				/*extraJson*/   nullptr);
+		}
 	}
 }
 
@@ -288,6 +312,26 @@ void ScoreKeeper::addObjectDestroyed( const Object *o)
 		if (it != m_objectsDestroyed[playerIdx].end())
 			existingCount = it->second;
 		m_objectsDestroyed[playerIdx][o->getTemplate()] = existingCount + 1;
+
+		// Multi-reporter telemetry: actor = killer (this ScoreKeeper's
+		// owning player), target = victim's player. Position is the
+		// victim's last position so the event surfaces on a future
+		// minimap heatmap. Best-effort.
+		if (TheGameTelemetry && o->getTemplate() && o->getTemplate()->getTemplateID() != 0)
+		{
+			const Coord3D *pos = o->getPosition();
+			Int x = pos ? (Int)pos->x : INT_MIN;
+			Int y = pos ? (Int)pos->y : INT_MIN;
+			TheGameTelemetry->emitEvent(
+				"object_destroyed",
+				/*actorSlot*/   m_myPlayerIdx,
+				/*targetSlot*/  playerIdx,
+				/*tid*/         (Int)o->getTemplate()->getTemplateID(),
+				/*x*/           x,
+				/*y*/           y,
+				/*cash*/        INT_MIN,
+				/*extraJson*/   nullptr);
+		}
 	}
 }
 

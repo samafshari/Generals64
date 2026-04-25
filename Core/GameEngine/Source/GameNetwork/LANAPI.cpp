@@ -43,7 +43,14 @@
 #include "GameLogic/GameLogic.h"
 
 
-static const UnsignedShort lobbyPort = 28910; ///< TCP port for relay server lobby communication
+// TCP port for relay server lobby communication. ReleaseDev shifts to
+// 27910 so a dev relay can co-exist with prod on the same host (also
+// see RestClient.cpp:kRelayHttpPort and MainMenu.cpp:RELAY_PORT).
+#if defined(RELEASE_DEV) && RELEASE_DEV
+static const UnsignedShort lobbyPort = 27910;
+#else
+static const UnsignedShort lobbyPort = 28910;
+#endif
 
 // Relay server host. Empty by default — the launcher (Discombobulator)
 // is the single hardcoded gateway to the server and must pass the host
@@ -418,6 +425,33 @@ void LANAPI::packFpsBucketPacket(const UnsignedByte *payload, Int len, std::vect
 	memcpy(out.data(),     &packetSize, 4);
 	memcpy(out.data() + 4, &m_sessionId, 4);
 	out[8] = (UnsignedByte)RELAY_TYPE_FPS_BUCKET;
+	if (len > 0)
+		memcpy(out.data() + 9, payload, len);
+}
+
+// Pack the framed RELAY_TYPE_GAME_EVENTS bytes — variable-length JSON
+// event batch. Same header shape as the other telemetry packets.
+void LANAPI::packGameEventsPacket(const UnsignedByte *payload, Int len, std::vector<UnsignedByte> &out)
+{
+	int packetSize = 4 + 4 + 1 + len;
+	out.resize((size_t)packetSize);
+	memcpy(out.data(),     &packetSize, 4);
+	memcpy(out.data() + 4, &m_sessionId, 4);
+	out[8] = (UnsignedByte)RELAY_TYPE_GAME_EVENTS;
+	if (len > 0)
+		memcpy(out.data() + 9, payload, len);
+}
+
+// Pack the framed RELAY_TYPE_POSITION_SNAPSHOT bytes — per-object
+// position records emitted on periodic + event triggers. Same header
+// shape as the other telemetry packets.
+void LANAPI::packPositionSnapshotPacket(const UnsignedByte *payload, Int len, std::vector<UnsignedByte> &out)
+{
+	int packetSize = 4 + 4 + 1 + len;
+	out.resize((size_t)packetSize);
+	memcpy(out.data(),     &packetSize, 4);
+	memcpy(out.data() + 4, &m_sessionId, 4);
+	out[8] = (UnsignedByte)RELAY_TYPE_POSITION_SNAPSHOT;
 	if (len > 0)
 		memcpy(out.data() + 9, payload, len);
 }

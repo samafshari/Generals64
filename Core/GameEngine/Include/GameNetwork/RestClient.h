@@ -25,9 +25,10 @@ namespace RestClient
 		Bool        ok() const { return httpStatus >= 200 && httpStatus < 300; }
 	};
 
-	/// Build a base URL of the form "http://<relay-host>:28912" from the
-	/// launcher-supplied g_relayServerHost. Returns empty string if the
-	/// relay host isn't configured.
+	/// Build a base URL of the form "http://<relay-host>:28912" (or
+	/// :27912 in ReleaseDev) from the launcher-supplied
+	/// g_relayServerHost. Returns empty string if the relay host isn't
+	/// configured.
 	AsciiString defaultBaseUrl();
 
 	/// Sends POST <baseUrl><path> with the given JSON body and an optional

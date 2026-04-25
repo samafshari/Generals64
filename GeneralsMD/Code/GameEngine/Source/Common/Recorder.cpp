@@ -43,6 +43,7 @@
 #include "GameNetwork/GameSpy/PeerDefs.h"
 #include "GameNetwork/networkutil.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/GameTelemetry.h"
 #include "Common/RandomValue.h"
 #include "Common/CRCDebug.h"
 #include "Common/OptionPreferences.h"
@@ -1729,6 +1730,21 @@ AsciiString RecorderClass::getLastReplayFileName()
 #endif
 
 	AsciiString filename;
+
+	// When telemetry is armed and the relay has assigned a session
+	// GUID, use it as the replay filename. That makes every
+	// authenticated MP match's .rep uniquely addressable on disk
+	// (one file per match instead of LastReplay.rep being clobbered
+	// each game) and lets the launcher's uploader correlate
+	// filename → server-side Game row by stripping the extension.
+	// Sandbox / campaign / pre-assign games keep the legacy
+	// "LastReplay" name so the in-game replay browser still finds them.
+	if (TheGameTelemetry && !TheGameTelemetry->getSessionId().isEmpty())
+	{
+		filename = TheGameTelemetry->getSessionId();
+		return filename;
+	}
+
 	if (rts::ClientInstance::getInstanceId() > 1u)
 	{
 		filename.format("%s_Instance%.2u", lastReplayFileName, rts::ClientInstance::getInstanceId());

@@ -279,7 +279,11 @@ static GameWindow *spawnConnectingPopup(UnicodeString title, UnicodeString body)
 static Bool relayPreflight(char *outErr, size_t errLen)
 {
 	extern char g_relayServerHost[256];
+#if defined(RELEASE_DEV) && RELEASE_DEV
+	static const unsigned short RELAY_PORT = 27910;
+#else
 	static const unsigned short RELAY_PORT = 28910;
+#endif
 
 	if (g_relayServerHost[0] == '\0')
 	{

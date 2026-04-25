@@ -16,6 +16,10 @@
       <Configuration>ReleasePublic</Configuration>
       <Platform>x64</Platform>
     </ProjectConfiguration>
+    <ProjectConfiguration Include="ReleaseDev|x64">
+      <Configuration>ReleaseDev</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
     <ProjectConfiguration Include="DebugVK|x64">
       <Configuration>DebugVK</Configuration>
       <Platform>x64</Platform>
@@ -56,6 +60,11 @@
     <CharacterSet>MultiByte</CharacterSet>
     <PlatformToolset>v145</PlatformToolset>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDev|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugVK|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <CharacterSet>MultiByte</CharacterSet>
@@ -90,6 +99,7 @@
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</LinkIncremental>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='ReleasePublic|x64'">false</LinkIncremental>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='ReleaseDev|x64'">false</LinkIncremental>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='DebugVK|x64'">true</LinkIncremental>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='ReleaseVK|x64'">false</LinkIncremental>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='DebugOG|x64'">true</LinkIncremental>
@@ -105,6 +115,7 @@
     <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)build\obj\Debug\</IntDir>
     <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)build\obj\Release\</IntDir>
     <IntDir Condition="'$(Configuration)|$(Platform)'=='ReleasePublic|x64'">$(SolutionDir)build\obj\ReleasePublic\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='ReleaseDev|x64'">$(SolutionDir)build\obj\ReleaseDev\</IntDir>
     <!-- OG (original Generals, non-Zero Hour) build target. Outputs generals.exe to OGGameData/.
          Compiles with RTS_GENERALS=1 instead of RTS_ZEROHOUR=1, which flips the
          legacy EA dual-source-tree gates inherited from the original codebase
@@ -225,6 +236,46 @@ xcopy /Y /D "$(SolutionDir)extern\sdl3\bin\*.dll" "$(OutDir)"</Command>
            mask the recursion bug we're still hunting. StackOverflowHandler
            (installed via AddVectoredExceptionHandler) uses _resetstkoflw to
            recover enough stack to write crash.log before the process dies. -->
+    </Link>
+    <PostBuildEvent>
+      <Command>xcopy /Y /D "$(SolutionDir)extern\ffmpeg\bin\*.dll" "$(OutDir)"
+xcopy /Y /D "$(SolutionDir)extern\sdl3\bin\*.dll" "$(OutDir)"</Command>
+      <Message>Copying FFmpeg and SDL3 DLLs...</Message>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <!-- ReleaseDev: same shipping config as ReleasePublic, but routed to the
+       dev backend (dev-server.generals64.com on port 27910/27912 and
+       dev-www.generals64.com for the web app). RELEASE_DEV=1 is the gate
+       picked up by RestClient.cpp / MainMenu.cpp to flip the relay ports
+       at compile time; the host itself still flows in from the launcher's
+       -relayserver argument. -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDev|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)GeneralsMD\Code\Main;$(SolutionDir)GeneralsMD\Code\Libraries\Source\WWVegas\WW3D2;$(SolutionDir)GeneralsMD\Code\GameEngineDevice\Include\Stubs;$(SolutionDir)Core\Libraries\Source\debug;$(SolutionDir)Core\Libraries\Source\WWVegas;$(SolutionDir)Core\Libraries\Source\WWVegas\WW3D2;$(SolutionDir)Core\Libraries\Source\WWVegas\WWAudio;$(SolutionDir)Core\Libraries\Source\WWVegas\WWDebug;$(SolutionDir)Core\Libraries\Source\WWVegas\WWLib;$(SolutionDir)Core\Libraries\Source\WWVegas\WWMath;$(SolutionDir)Core\Libraries\Source\WWVegas\WWSaveLoad;$(SolutionDir)extern\d3d11;$(SolutionDir)GeneralsMD\Code\GameEngineDevice\Include\Stubs\mss;$(SolutionDir)Core\Libraries\Include;$(SolutionDir)resources\gitinfo;$(SolutionDir)Core\Libraries\Source\profile;$(SolutionDir)Renderer;$(SolutionDir)Renderer\Core;$(SolutionDir)GeneralsMD\Code\GameEngine\Include;$(SolutionDir)GeneralsMD\Code\GameEngine\Include\Precompiled;$(SolutionDir)Core\GameEngine\Include;$(SolutionDir)Core\Libraries\Source\Compression;$(SolutionDir)extern\lzhl_wrapper\CompLibHeader;$(SolutionDir)extern\lzhl_wrapper;$(SolutionDir)extern\zlib;$(SolutionDir)extern\sqlite3;$(SolutionDir)Core\Libraries\Source\EABrowserDispatch\stub;$(SolutionDir)GeneralsMD\Code\Libraries\Source\WWVegas;$(SolutionDir)Core\GameEngineDevice\Include;$(SolutionDir)GeneralsMD\Code\GameEngineDevice\Include;$(SolutionDir)extern\bink;$(SolutionDir)Core\Libraries\Source\EABrowserEngine\stub;$(SolutionDir)Core\Main;$(SolutionDir)extern\ffmpeg\include;$(SolutionDir)extern\json;$(SolutionDir)Platform;$(SolutionDir)extern\sdl3\include;$(SolutionDir)extern\imgui;$(SolutionDir)extern\imgui\backends;$(SolutionDir)Inspector;$(VCToolsInstallDir)atlmfc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/Zc:__cplusplus /Zf %(AdditionalOptions)</AdditionalOptions>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <ForcedIncludeFiles>pch.h</ForcedIncludeFiles>
+      <PreprocessorDefinitions>BUILD_WITH_D3D11;USE_SDL;_SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS;_CRT_NONSTDC_NO_WARNINGS;_CRT_SECURE_NO_WARNINGS;RTS_RELEASE;RTS_PUBLIC=1;RELEASE_DEV=1;GENERALS_TELEMETRY=0;DISABLE_DEBUG_LOGGING=1;NDEBUG;DISABLE_DEBUG_CRASHING=1;DISABLE_DEBUG_STACKTRACE=1;DISABLE_MEMORYPOOL_CHECKPOINTING=1;DISABLE_MEMORYPOOL_STACKTRACE=1;RTS_ENABLE_CRASHDUMP=1;IG_DEBUG_STACKTRACE;RTS_ZEROHOUR=1;Z_PREFIX;RTS_HAS_FFMPEG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <ObjectFileName>$(IntDir)%(RelativeDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>WIN32;BUILD_WITH_D3D11;USE_SDL;_SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS;_CRT_NONSTDC_NO_WARNINGS;_CRT_SECURE_NO_WARNINGS;RTS_RELEASE;RTS_PUBLIC=1;RELEASE_DEV=1;GENERALS_TELEMETRY=0;DISABLE_DEBUG_LOGGING=1;NDEBUG;DISABLE_DEBUG_CRASHING=1;DISABLE_DEBUG_STACKTRACE=1;DISABLE_MEMORYPOOL_CHECKPOINTING=1;DISABLE_MEMORYPOOL_STACKTRACE=1;RTS_ENABLE_CRASHDUMP=1;IG_DEBUG_STACKTRACE;RTS_ZEROHOUR=1;Z_PREFIX;RTS_HAS_FFMPEG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)GeneralsMD\Code\Main;$(SolutionDir)GeneralsMD\Code\Libraries\Source\WWVegas\WW3D2;$(SolutionDir)GeneralsMD\Code\GameEngineDevice\Include\Stubs;$(SolutionDir)Core\Libraries\Source\debug;$(SolutionDir)Core\Libraries\Source\WWVegas;$(SolutionDir)Core\Libraries\Source\WWVegas\WW3D2;$(SolutionDir)Core\Libraries\Source\WWVegas\WWAudio;$(SolutionDir)Core\Libraries\Source\WWVegas\WWDebug;$(SolutionDir)Core\Libraries\Source\WWVegas\WWLib;$(SolutionDir)Core\Libraries\Source\WWVegas\WWMath;$(SolutionDir)Core\Libraries\Source\WWVegas\WWSaveLoad;$(SolutionDir)extern\d3d11;$(SolutionDir)GeneralsMD\Code\GameEngineDevice\Include\Stubs\mss;$(SolutionDir)Core\Libraries\Include;$(SolutionDir)resources\gitinfo;$(SolutionDir)Core\Libraries\Source\profile;$(SolutionDir)Renderer;$(SolutionDir)Renderer\Core;$(SolutionDir)GeneralsMD\Code\GameEngine\Include;$(SolutionDir)GeneralsMD\Code\GameEngine\Include\Precompiled;$(SolutionDir)Core\GameEngine\Include;$(SolutionDir)Core\Libraries\Source\Compression;$(SolutionDir)extern\lzhl_wrapper\CompLibHeader;$(SolutionDir)extern\lzhl_wrapper;$(SolutionDir)extern\zlib;$(SolutionDir)extern\sqlite3;$(SolutionDir)Core\Libraries\Source\EABrowserDispatch\stub;$(SolutionDir)GeneralsMD\Code\Libraries\Source\WWVegas;$(SolutionDir)Core\GameEngineDevice\Include;$(SolutionDir)GeneralsMD\Code\GameEngineDevice\Include;$(SolutionDir)extern\bink;$(SolutionDir)Core\Libraries\Source\EABrowserEngine\stub;$(SolutionDir)Core\Main;$(SolutionDir)extern\ffmpeg\include;$(SolutionDir)extern\json;$(SolutionDir)Platform;$(SolutionDir)extern\sdl3\include;$(SolutionDir)extern\imgui;$(SolutionDir)extern\imgui\backends;$(SolutionDir)Inspector;$(VCToolsInstallDir)atlmfc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Link>
+      <AdditionalDependencies>comctl32.lib;imm32.lib;vfw32.lib;winmm.lib;version.lib;xaudio2.lib;comsuppw.lib;ws2_32.lib;avcodec.lib;avformat.lib;avutil.lib;swscale.lib;swresample.lib;d3d11.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;SDL3.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)extern\ffmpeg\lib;$(SolutionDir)extern\sdl3\lib;$(VCToolsInstallDir)atlmfc\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>/machine:x64 %(AdditionalOptions)</AdditionalOptions>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>libci.lib;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <SubSystem>Windows</SubSystem>
+      <ProgramDataBaseFile>$(OutDir)$(TargetName).pdb</ProgramDataBaseFile>
     </Link>
     <PostBuildEvent>
       <Command>xcopy /Y /D "$(SolutionDir)extern\ffmpeg\bin\*.dll" "$(OutDir)"
