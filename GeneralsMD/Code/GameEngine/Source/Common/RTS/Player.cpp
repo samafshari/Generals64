@@ -3604,6 +3604,39 @@ void Player::changeBattlePlan( BattlePlanStatus plan, Int delta, BattlePlanBonus
 
 		applyBattlePlanBonusesForPlayerObjects( bonus );
 	}
+
+	// Telemetry — count each Strategy Center activation (delta > 0).
+	// One emit per activation, not per active-plan tick, so the
+	// dashboard's BUILDS-style aggregate counts how many times the
+	// community SELECTED a given plan rather than how long they held
+	// it. Deactivations (delta < 0) are noise here and skipped.
+	if (delta > 0 && TheGameTelemetry)
+	{
+		const char *planName = nullptr;
+		switch (plan)
+		{
+			case PLANSTATUS_BOMBARDMENT:       planName = "bombardment";        break;
+			case PLANSTATUS_HOLDTHELINE:       planName = "hold_the_line";      break;
+			case PLANSTATUS_SEARCHANDDESTROY:  planName = "search_and_destroy"; break;
+			default: break;
+		}
+		if (planName)
+		{
+			AsciiString extra;
+			extra.concat("{\"plan\":\"");
+			extra.concat(planName);
+			extra.concat("\"}");
+			TheGameTelemetry->emitEvent(
+				"battle_plan_changed",
+				/*actorSlot*/   getPlayerIndex(),
+				/*targetSlot*/  -1,
+				/*tid*/         -1,
+				/*x*/           INT_MIN,
+				/*y*/           INT_MIN,
+				/*cash*/        INT_MIN,
+				/*extraJson*/   extra.str());
+		}
+	}
 }
 
 //-------------------------------------------------------------------------------------------------

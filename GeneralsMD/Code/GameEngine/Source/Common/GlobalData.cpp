@@ -631,6 +631,7 @@ GlobalData::GlobalData()
 	m_framesPerSecondLimit = 0;
 	m_chipSetType = 0;
 	m_headless = FALSE;
+	m_potatoMode = FALSE;
 	m_clientServerMode = TRUE;	// Default to client-server topology; host is the packet router.
 	// Default to bordered (titled) windowed-maximized on first run. SDLPlatform
 	// still applies SDL_WINDOW_MAXIMIZED by default, so the effective state is

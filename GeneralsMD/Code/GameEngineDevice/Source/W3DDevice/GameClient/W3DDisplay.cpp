@@ -432,6 +432,12 @@ void W3DDisplay::init()
 	// Bring up the in-process inspector overlay. Hidden by default — F10
 	// toggles. Failure to init is non-fatal: log and keep going so a
 	// broken inspector can never block normal gameplay.
+	//
+	// Potato Graphics (-potato CLI flag) skips Init entirely so every
+	// Inspector entry point hits its !s_initialized early-return — F10
+	// becomes a dead key and the per-frame BeginFrame/Render/ProcessEvent
+	// calls cost effectively nothing.
+	if (!TheGlobalData->m_potatoMode)
 	{
 		SDL_Window* sdlWindow = Platform::SDLPlatform::Instance().GetWindow();
 		auto& dev = Render::Renderer::Instance().GetDevice();
@@ -443,7 +449,24 @@ void W3DDisplay::init()
 				DEBUG_LOG(("Inspector ready — press F10 to toggle"));
 		}
 	}
+	else
+	{
+		DEBUG_LOG(("Potato Graphics on — Inspector skipped, F10 disabled"));
+	}
 #endif
+
+	// Potato Graphics: flip on the engine's lo-fi rendering path once,
+	// during init. ToggleLoFiMode disables every modern enhancement
+	// (bloom, god rays, sun shadow map, volumetric particles, color
+	// grading, lens flare, reflection, distance fog, ...) and clamps
+	// shadow volumes / cloud map / light map / max particle count back
+	// to original-DX8 values, so the game looks like the original.
+	if (TheGlobalData->m_potatoMode)
+	{
+		extern void ToggleLoFiMode();
+		ToggleLoFiMode();
+		DEBUG_LOG(("Potato Graphics on — lo-fi rendering path engaged"));
+	}
 
 #ifdef _WIN32
 	// In windowed mode, if a specific resolution was requested, resize the window to match

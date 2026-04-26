@@ -146,6 +146,20 @@ Int parseNoMusic(char *args[], int)
 	return 1;
 }
 
+//=============================================================================
+// "Potato Graphics" mode set by the launcher's Options checkbox. Only
+// records the flag on TheGlobalData here — W3DDisplay::init reads it to
+// skip Inspector::Init and to flip on the engine's lo-fi rendering path
+// (extern ToggleLoFiMode in W3DDisplay.cpp). Registered in the startup
+// parameter table so the flag is set before any rendering subsystem
+// initializes.
+//=============================================================================
+Int parsePotato(char *args[], int)
+{
+	TheWritableGlobalData->m_potatoMode = TRUE;
+	return 1;
+}
+
 
 //=============================================================================
 //=============================================================================
@@ -1464,6 +1478,12 @@ static CommandLineParam paramsForStartup[] =
 	// When supplied, SearchPaths ignores paths.txt entirely and uses only
 	// the order given on the command line.
 	{ "-path", parsePath },
+
+	// "Potato Graphics" — launcher-set flag that tells W3DDisplay::init
+	// to skip Inspector::Init and force-enable the lo-fi rendering path.
+	// Parsed at startup so the flag is on TheGlobalData before any
+	// renderer or device subsystem initializes.
+	{ "-potato", parsePotato },
 };
 
 // These Params are parsed during Engine Init AFTER INI/Options loading.

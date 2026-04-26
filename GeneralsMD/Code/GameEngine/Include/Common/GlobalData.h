@@ -121,6 +121,13 @@ public:
 	// Run game without graphics, input or audio.
 	Bool m_headless;
 
+	// "Potato Graphics" mode (-potato CLI flag from the launcher).
+	// When TRUE, W3DDisplay::init skips Inspector::Init entirely (zero
+	// per-frame cost — every Inspector entry point early-returns on the
+	// uninitialized state) and force-enables the engine's lo-fi
+	// rendering path so the game looks like the original DX8 build.
+	Bool m_potatoMode;
+
 	// Use client-server networking mode instead of P2P lockstep.
 	Bool m_clientServerMode;
 
