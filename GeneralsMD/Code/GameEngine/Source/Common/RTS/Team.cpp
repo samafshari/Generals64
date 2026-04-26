@@ -1150,7 +1150,9 @@ Bool TeamPrototype::evaluateProductionCondition()
 	}
 	const Script *pScript = TheScriptEngine->findScriptByName(m_teamTemplate.m_productionCondition);
 	if (pScript) {
-		// Check difficulty.
+		// Check difficulty. Brutal/Insane/Nightmare fall through to Hard
+		// for production conditions defined by map scripts (those scripts
+		// only know Easy/Normal/Hard flags).
 		switch (getControllingPlayer()->getPlayerDifficulty() ) {
 			case DIFFICULTY_EASY:
 				if (!pScript->isEasy()) {
@@ -1165,6 +1167,9 @@ Bool TeamPrototype::evaluateProductionCondition()
 				}
 				break;
 			case DIFFICULTY_HARD:
+			case DIFFICULTY_BRUTAL:
+			case DIFFICULTY_INSANE:
+			case DIFFICULTY_NIGHTMARE:
 				if (!pScript->isHard()) {
 					m_productionConditionAlwaysFalse = true;
 					return false;

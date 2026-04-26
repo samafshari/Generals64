@@ -172,6 +172,21 @@ void RefreshGameInfoWindow(GameInfo *gameInfo, UnicodeString gameName)
 					addedRow = GadgetListBoxAddEntryText(listBoxPlayers,TheGameText->fetch("GUI:HardAI"),playerColor,-1, 1);
 					break;
 				}
+				case SLOT_BRUTAL_REAL_AI:
+				{
+					addedRow = GadgetListBoxAddEntryText(listBoxPlayers,UnicodeString(L"Brutal Army"),playerColor,-1, 1);
+					break;
+				}
+				case SLOT_INSANE_AI:
+				{
+					addedRow = GadgetListBoxAddEntryText(listBoxPlayers,UnicodeString(L"Insane Army"),playerColor,-1, 1);
+					break;
+				}
+				case SLOT_NIGHTMARE_AI:
+				{
+					addedRow = GadgetListBoxAddEntryText(listBoxPlayers,UnicodeString(L"Nightmare Army"),playerColor,-1, 1);
+					break;
+				}
 				default:
 					break;
 			}

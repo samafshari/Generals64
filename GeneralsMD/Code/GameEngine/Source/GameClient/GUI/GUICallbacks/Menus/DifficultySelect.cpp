@@ -106,9 +106,15 @@ static void SetDifficultyRadioButton()
 				break;
 			}
 			case DIFFICULTY_HARD:
+			case DIFFICULTY_BRUTAL:
+			case DIFFICULTY_INSANE:
+			case DIFFICULTY_NIGHTMARE:
 			{
+				// Campaign UI keeps the existing 3 radio buttons; harder tiers
+				// (only reachable via skirmish/LAN slot picker) fall back to
+				// the Hard radio visually but preserve the underlying value.
 				GadgetRadioSetSelection(radioButtonHardAI, FALSE);
-				s_AIDiff = DIFFICULTY_HARD;
+				s_AIDiff = static_cast<GameDifficulty>(pref.getCampaignDifficulty());
 				break;
 			}
 

@@ -1670,6 +1670,9 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 					case SLOT_EASY_AI : d.setInt(TheKey_skirmishDifficulty, DIFFICULTY_EASY); break;
 					case SLOT_MED_AI : d.setInt(TheKey_skirmishDifficulty, DIFFICULTY_NORMAL); break;
 					case SLOT_BRUTAL_AI : d.setInt(TheKey_skirmishDifficulty, DIFFICULTY_HARD); break;
+					case SLOT_BRUTAL_REAL_AI : d.setInt(TheKey_skirmishDifficulty, DIFFICULTY_BRUTAL); break;
+					case SLOT_INSANE_AI : d.setInt(TheKey_skirmishDifficulty, DIFFICULTY_INSANE); break;
+					case SLOT_NIGHTMARE_AI : d.setInt(TheKey_skirmishDifficulty, DIFFICULTY_NIGHTMARE); break;
 					default: break;	 // no setting.
 				}
 			}

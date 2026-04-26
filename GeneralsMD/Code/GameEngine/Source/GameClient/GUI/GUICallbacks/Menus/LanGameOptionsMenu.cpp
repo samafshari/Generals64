@@ -1238,6 +1238,9 @@ void InitLanGameGadgets()
 			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:EasyAI"),white);
 			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:MediumAI"),white);
 			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:HardAI"),white);
+			GadgetComboBoxAddEntry(comboBoxPlayer[i],UnicodeString(L"Brutal Army"),white);
+			GadgetComboBoxAddEntry(comboBoxPlayer[i],UnicodeString(L"Insane Army"),white);
+			GadgetComboBoxAddEntry(comboBoxPlayer[i],UnicodeString(L"Nightmare Army"),white);
 			GadgetComboBoxSetSelectedPos(comboBoxPlayer[i],0);
 		}
 		/*

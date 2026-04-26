@@ -6008,10 +6008,13 @@ Object *AIAttackSquadState::chooseVictim(void)
 		}
 
 		case DIFFICULTY_HARD:
+		case DIFFICULTY_BRUTAL:
+		case DIFFICULTY_INSANE:
+		case DIFFICULTY_NIGHTMARE:
 		{
 			// everyone picks the same unit
 			VecObjectPtr objects = victimSquad->getLiveObjects();
-			if (objects.size() > 0) 
+			if (objects.size() > 0)
 			{
 				return objects[0];
 			}

@@ -276,6 +276,11 @@ protected:
 
 	GameDifficulty m_difficulty;
 
+	// Nightmare-tier flag: tracks whether we've already issued the
+	// permanent map reveal for this AI player. Not serialized — recomputed
+	// each game start since reveal state lives in the PartitionManager.
+	Bool		m_nightmareRevealedMap;
+
 	Int			m_skillsetSelector;
 
 	Coord3D m_baseCenter; // Center of the initial build list of structures.

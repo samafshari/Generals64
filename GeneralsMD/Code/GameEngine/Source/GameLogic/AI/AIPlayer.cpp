@@ -103,7 +103,8 @@ m_curWarehouseID(INVALID_ID)
 	m_repairDozerOrigin.zero();
 	m_baseCenter.zero();
 	m_baseCenterSet = false;
-	m_difficulty = TheScriptEngine->getGlobalDifficulty(); 
+	m_difficulty = TheScriptEngine->getGlobalDifficulty();
+	m_nightmareRevealedMap = false;
 	m_teamSeconds = TheAI->getAiData()->m_teamSeconds;
 }
 
@@ -210,7 +211,16 @@ void AIPlayer::checkForSupplyCenter( BuildListInfo *info, Object *bldg )
 					desiredGatherers = resInfo->m_normal;
 				}
 				if (difficulty == DIFFICULTY_HARD) {
-					desiredGatherers = resInfo->m_hard;	 
+					desiredGatherers = resInfo->m_hard;
+				}
+				if (difficulty == DIFFICULTY_BRUTAL) {
+					desiredGatherers = resInfo->m_brutal;
+				}
+				if (difficulty == DIFFICULTY_INSANE) {
+					desiredGatherers = resInfo->m_insane;
+				}
+				if (difficulty == DIFFICULTY_NIGHTMARE) {
+					desiredGatherers = resInfo->m_nightmare;
 				}
 			}
 			resInfo = resInfo->m_next;
@@ -707,6 +717,15 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 // ------------------------------------------------------------------------------------------------
 void AIPlayer::processBaseBuilding( void )
 {
+	// Nightmare: grant permanent map vision to this AI player. One-shot
+	// (the flag prevents the per-frame addLooker from stacking).
+	if (m_difficulty == DIFFICULTY_NIGHTMARE && !m_nightmareRevealedMap
+		&& m_player && ThePartitionManager)
+	{
+		ThePartitionManager->revealMapForPlayerPermanently(m_player->getPlayerIndex());
+		m_nightmareRevealedMap = true;
+	}
+
 	//
 	// Refresh base buildings. Scan through list, if a building is missing,
 	// rebuild it, unless it's rebuild count is zero.
@@ -829,7 +848,11 @@ void AIPlayer::processBaseBuilding( void )
 			if (info->getObjectID()==INVALID_ID && info->getObjectTimestamp()>0) {
 				// this object was built at some time, and got destroyed at or near objectTimestamp.
 				// Wait a few seconds before initiating a rebuild.
-				if (info->getObjectTimestamp()+TheAI->getAiData()->m_rebuildDelaySeconds*LOGICFRAMES_PER_SECOND > TheGameLogic->getFrame()) {
+				// Nightmare collapses the rebuild delay to 5 seconds.
+				const Int rebuildDelayFrames = (m_difficulty == DIFFICULTY_NIGHTMARE)
+					? 5 * LOGICFRAMES_PER_SECOND
+					: TheAI->getAiData()->m_rebuildDelaySeconds * LOGICFRAMES_PER_SECOND;
+				if (info->getObjectTimestamp() + rebuildDelayFrames > TheGameLogic->getFrame()) {
 					continue;
 				}	else {
 					DEBUG_LOG(("Enabling rebuild for %s\n", info->getTemplateName().str()));
@@ -852,6 +875,15 @@ void AIPlayer::processBaseBuilding( void )
 					// store the object with the build order
 					if (bldg)
 					{
+						// Nightmare: refund the build cost so the dozer's later
+						// charge nets to zero. Slots whose AIData.ini entry has
+						// Rebuilds = 0 never reach this branch (the gate above
+						// is `info->isBuildable()`), so GLA structures relying
+						// on RebuildHoleBehavior aren't double-built.
+						if (m_difficulty == DIFFICULTY_NIGHTMARE && bldgPlan && m_player) {
+							const Int cost = bldgPlan->calcCostToBuild(m_player);
+							m_player->getMoney()->deposit(cost);
+						}
 						info->setObjectID( bldg->getID() );
 						info->decrementNumRebuilds();
 

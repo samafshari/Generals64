@@ -87,8 +87,8 @@ Int OptionPreferences::getCampaignDifficulty()
 	Int factor = atoi(it->second.str());
 	if (factor < DIFFICULTY_EASY)
 		factor = DIFFICULTY_EASY;
-	if (factor > DIFFICULTY_HARD)
-		factor = DIFFICULTY_HARD;
+	if (factor > DIFFICULTY_NIGHTMARE)
+		factor = DIFFICULTY_NIGHTMARE;
 
 	return factor;
 }

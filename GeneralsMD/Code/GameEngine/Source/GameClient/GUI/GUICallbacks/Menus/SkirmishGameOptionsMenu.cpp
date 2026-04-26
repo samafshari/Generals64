@@ -1703,6 +1703,13 @@ void InitSkirmishGameGadgets()
       GadgetComboBoxSetItemData(comboBoxPlayer[i], 3, reinterpret_cast<void *>(static_cast<intptr_t>(SLOT_MED_AI)));
 			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:HardAI"),white);
       GadgetComboBoxSetItemData(comboBoxPlayer[i], 4, reinterpret_cast<void *>(static_cast<intptr_t>(SLOT_BRUTAL_AI)));
+			// New tiers: no CSF entries available, literal labels until localized.
+			GadgetComboBoxAddEntry(comboBoxPlayer[i], UnicodeString(L"Brutal Army"), white);
+			GadgetComboBoxSetItemData(comboBoxPlayer[i], 5, reinterpret_cast<void *>(static_cast<intptr_t>(SLOT_BRUTAL_REAL_AI)));
+			GadgetComboBoxAddEntry(comboBoxPlayer[i], UnicodeString(L"Insane Army"), white);
+			GadgetComboBoxSetItemData(comboBoxPlayer[i], 6, reinterpret_cast<void *>(static_cast<intptr_t>(SLOT_INSANE_AI)));
+			GadgetComboBoxAddEntry(comboBoxPlayer[i], UnicodeString(L"Nightmare Army"), white);
+			GadgetComboBoxSetItemData(comboBoxPlayer[i], 7, reinterpret_cast<void *>(static_cast<intptr_t>(SLOT_NIGHTMARE_AI)));
 			GadgetComboBoxSetSelectedPos(comboBoxPlayer[i],0);
 
 		}

@@ -129,11 +129,16 @@ void SetDifficultyRadioButton()
 				break;
 			}
 			case DIFFICULTY_HARD:
+			case DIFFICULTY_BRUTAL:
+			case DIFFICULTY_INSANE:
+			case DIFFICULTY_NIGHTMARE:
 			{
+				// Campaign/Challenge UI keeps the existing 3 radio buttons; the
+				// new harder tiers fall back to the Hard button visually.
 				NameKeyType radioButtonHardAIID = TheNameKeyGenerator->nameToKey( "MapSelectMenu.wnd:RadioButtonHardAI" );
 				GameWindow *radioButtonHardAI = TheWindowManager->winGetWindowFromId( parent, radioButtonHardAIID );
 				GadgetRadioSetSelection(radioButtonHardAI, FALSE);
-				s_AIDiff = DIFFICULTY_HARD;
+				s_AIDiff = TheScriptEngine->getGlobalDifficulty();
 				break;
 			}
 

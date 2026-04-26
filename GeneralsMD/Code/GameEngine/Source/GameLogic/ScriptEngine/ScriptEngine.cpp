@@ -7065,10 +7065,16 @@ void ScriptEngine::executeScript( Script *pScript )
 		difficulty = m_currentPlayer->getPlayerDifficulty();
 	}
 	// If script doesn't match difficulty level, return.
+	// Map-script triggers only know Easy/Normal/Hard — treat the harder
+	// tiers (Brutal/Insane/Nightmare) as Hard so existing campaign and
+	// skirmish maps don't need new isBrutal/isInsane/isNightmare flags.
 	switch (difficulty) {
 		case DIFFICULTY_EASY : if (!pScript->isEasy()) return;  break;
 		case DIFFICULTY_NORMAL : if (!pScript->isNormal()) return;  break;
-		case DIFFICULTY_HARD : if (!pScript->isHard()) return;  break;
+		case DIFFICULTY_HARD :
+		case DIFFICULTY_BRUTAL :
+		case DIFFICULTY_INSANE :
+		case DIFFICULTY_NIGHTMARE : if (!pScript->isHard()) return;  break;
 	}
 	// If we are doing periodic evaluation, check the frame.
 	if (TheGameLogic->getFrame()<pScript->getFrameToEvaluate()) {

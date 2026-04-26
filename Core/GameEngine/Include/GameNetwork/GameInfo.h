@@ -39,8 +39,11 @@ enum SlotState : Int
 	SLOT_CLOSED,
 	SLOT_EASY_AI,
 	SLOT_MED_AI,
-	SLOT_BRUTAL_AI,
-	SLOT_PLAYER
+	SLOT_BRUTAL_AI,         // legacy: displayed as "Hard AI" — maps to DIFFICULTY_HARD
+	SLOT_PLAYER,
+	SLOT_BRUTAL_REAL_AI,    // real Brutal tier — maps to DIFFICULTY_BRUTAL
+	SLOT_INSANE_AI,         // maps to DIFFICULTY_INSANE
+	SLOT_NIGHTMARE_AI       // maps to DIFFICULTY_NIGHTMARE
 };
 
 enum

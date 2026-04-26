@@ -209,7 +209,8 @@ void GameSlot::setMapAvailability( Bool hasMap )
 
 void GameSlot::setState( SlotState state, UnicodeString name, UnsignedInt IP )
 {
-	if (!(isAI() &&  (state == SLOT_EASY_AI || state == SLOT_MED_AI || state == SLOT_BRUTAL_AI)))
+	if (!(isAI() &&  (state == SLOT_EASY_AI || state == SLOT_MED_AI || state == SLOT_BRUTAL_AI
+		|| state == SLOT_BRUTAL_REAL_AI || state == SLOT_INSANE_AI || state == SLOT_NIGHTMARE_AI)))
 	{
 		m_color = -1;
 		m_startPos = -1;
@@ -246,6 +247,15 @@ void GameSlot::setState( SlotState state, UnicodeString name, UnsignedInt IP )
 		case SLOT_BRUTAL_AI:
 			m_name = TheGameText->fetch("GUI:HardAI");
 			break;
+		case SLOT_BRUTAL_REAL_AI:
+			m_name = UnicodeString(L"Brutal Army");
+			break;
+		case SLOT_INSANE_AI:
+			m_name = UnicodeString(L"Insane Army");
+			break;
+		case SLOT_NIGHTMARE_AI:
+			m_name = UnicodeString(L"Nightmare Army");
+			break;
 		case SLOT_CLOSED:
 		default:
 			m_name = TheGameText->fetch("GUI:Closed");
@@ -264,12 +274,13 @@ Bool GameSlot::isHuman() const
 
 Bool GameSlot::isOccupied() const
 {
-	return m_state == SLOT_PLAYER || m_state == SLOT_EASY_AI || m_state == SLOT_MED_AI || m_state == SLOT_BRUTAL_AI;
+	return m_state == SLOT_PLAYER || isAI();
 }
 
 Bool GameSlot::isAI() const
 {
-	return m_state == SLOT_EASY_AI || m_state == SLOT_MED_AI || m_state == SLOT_BRUTAL_AI;
+	return m_state == SLOT_EASY_AI || m_state == SLOT_MED_AI || m_state == SLOT_BRUTAL_AI
+		|| m_state == SLOT_BRUTAL_REAL_AI || m_state == SLOT_INSANE_AI || m_state == SLOT_NIGHTMARE_AI;
 }
 
 Bool GameSlot::isPlayer( AsciiString userName ) const
@@ -1057,12 +1068,16 @@ AsciiString GameInfoToAsciiString( const GameInfo *game )
 		else if (slot && slot->isAI())
 		{
 			Char c;
-			if (slot->getState() == SLOT_EASY_AI)
-				c = 'E';
-			else if (slot->getState() == SLOT_MED_AI)
-				c = 'M';
-			else
-				c = 'H';
+			switch (slot->getState())
+			{
+				case SLOT_EASY_AI:        c = 'E'; break;
+				case SLOT_MED_AI:         c = 'M'; break;
+				case SLOT_BRUTAL_REAL_AI: c = 'B'; break;
+				case SLOT_INSANE_AI:      c = 'I'; break;
+				case SLOT_NIGHTMARE_AI:   c = 'N'; break;
+				case SLOT_BRUTAL_AI:
+				default:                  c = 'H'; break;  // legacy "Hard AI" wire char
+			}
 			str.format("C%c,%d,%d,%d,%d,%d:", c,
 				slot->getColor(), slot->getPlayerTemplate(),
 				slot->getStartPos(), slot->getTeamNumber(),
@@ -1491,19 +1506,33 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
 								case 'E':
 								{
 									newSlot[i].setState(SLOT_EASY_AI);
-									//DEBUG_LOG(("ParseAsciiStringToGameInfo - Easy AI"));
 								}
 								break;
 								case 'M':
 								{
 									newSlot[i].setState(SLOT_MED_AI);
-									//DEBUG_LOG(("ParseAsciiStringToGameInfo - Medium AI"));
 								}
 								break;
 								case 'H':
 								{
+									// Legacy "Hard AI" wire char — maps to SLOT_BRUTAL_AI which
+									// the engine still treats as DIFFICULTY_HARD.
 									newSlot[i].setState(SLOT_BRUTAL_AI);
-									//DEBUG_LOG(("ParseAsciiStringToGameInfo - Brutal AI"));
+								}
+								break;
+								case 'B':
+								{
+									newSlot[i].setState(SLOT_BRUTAL_REAL_AI);
+								}
+								break;
+								case 'I':
+								{
+									newSlot[i].setState(SLOT_INSANE_AI);
+								}
+								break;
+								case 'N':
+								{
+									newSlot[i].setState(SLOT_NIGHTMARE_AI);
 								}
 								break;
 								default:
