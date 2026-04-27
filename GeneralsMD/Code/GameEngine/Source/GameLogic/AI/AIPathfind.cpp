@@ -5931,7 +5931,7 @@ void Pathfinder::processPathfindQueue(void)
 #ifdef DEBUG_QPF
 	Int pathsFound = 0;
 #endif
-	while (m_cumulativeCellsAllocated < PATHFIND_CELLS_PER_FRAME && 
+	while (m_cumulativeCellsAllocated < PATHFIND_CELLS_PER_FRAME &&
 		m_queuePRTail!=m_queuePRHead) {
 		Object *obj = TheGameLogic->findObjectByID(m_queuedPathfindRequests[m_queuePRHead]);
 		m_queuedPathfindRequests[m_queuePRHead] = INVALID_ID;
@@ -6392,7 +6392,7 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
  * Find a short, valid path between given locations.
  * Uses A* algorithm.
  */
-Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from, 
+Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 													 const Coord3D *rawTo)
 {
 	LIVE_PERF_SCOPE("Pathfinder::findPath");
@@ -6467,7 +6467,7 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
  * Find a short, valid path between given locations.
  * Uses A* algorithm.
  */
-Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from, 
+Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 													 const Coord3D *rawTo)
 {
 	LIVE_PERF_SCOPE("Pathfinder::internalFindPath");
@@ -6484,7 +6484,7 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	if (obj) {
 		getRadiusAndCenter(obj, radius, centerInCell);
 	}
-	
+
 	Bool isHuman = true;
 	if (obj && obj->getControllingPlayer() && (obj->getControllingPlayer()->getPlayerType()==PLAYER_COMPUTER)) {
 		isHuman = false; // computer gets to cheat.
@@ -6517,7 +6517,7 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	if (goalCell == NULL) {
 		return NULL;
 	}
-	
+
 	ICoord2D cell;
 	worldToCell( to, &cell );
 
@@ -6563,7 +6563,7 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 
 	Int zone1, zone2;
 	Bool isCrusher = obj ? obj->getCrusherLevel() > 0 : false;
-	zone1 = m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), isCrusher, parentCell->getZone()); 
+	zone1 = m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), isCrusher, parentCell->getZone());
 	zone2 =  m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), isCrusher, goalCell->getZone());
 
 	if (layer==LAYER_WALL && zone1 == 0) {
@@ -6579,8 +6579,8 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 		zone2 = m_zoneManager.getEffectiveTerrainZone(zone2);
 		zone2 =  m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), isCrusher, zone2);
 		zone1 = m_zoneManager.getEffectiveTerrainZone(zone1);
-		zone1 = m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), isCrusher, zone1); 
-	}																																 
+		zone1 = m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), isCrusher, zone1);
+	}
 
 	//DEBUG_LOG(("Zones %d to %d\n", zone1, zone2));
 
@@ -6653,7 +6653,7 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 			parentCell->releaseInfo();
 			cleanOpenAndClosedLists();
 			return path;
-		}	
+		}
 
 		// put parent cell onto closed list - its evaluation is finished
 		m_closedList = parentCell->putOnClosedList( m_closedList );
@@ -6663,6 +6663,57 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 
 		cellCount += examineNeighboringCells(parentCell, goalCell, locomotorSet, isHuman, centerInCell, radius, startCellNdx, obj, NO_ATTACK);
 
+		// In-loop cell budget. The legacy A* would happily run for tens of
+		// thousands of cells in a single tick on a hard path (e.g. a long
+		// detour around a cliff) and freeze the simulation for seconds.
+		// We cap a single search at PATHFIND_CELLS_PER_FRAME (5000 cells).
+		//
+		// On overrun we don't return failure — that would leave units
+		// stuck behind cliffs / rivers / building mazes whenever the
+		// detour is longer than the budget (findClosestPath at the
+		// AIUpdate fallback only searches around the *destination*, so
+		// it can't help when the obstruction is between the unit and
+		// the goal). Instead we walk the closed list, find the cell
+		// we explored that has the lowest heuristic distance to the
+		// goal, and return a partial path from start to that cell.
+		// The unit walks that partial path, the AI module re-pathfinds
+		// from the new position, A* explores another 5000 cells from
+		// there, and the route completes over a few stepping-stone
+		// hops. The unit always makes forward progress.
+		//
+		// Determinism: the gate is a cell count and the partial-path
+		// pick is a deterministic min-search over a deterministic list.
+		// No wall-clock, no pointer-comparison.
+		if (m_cumulativeCellsAllocated >= PATHFIND_CELLS_PER_FRAME) {
+			// Pick the explored cell closest to goal. We require a real
+			// pathParent chain so buildActualPath has at least one hop to
+			// walk back through; without that we'd return a degenerate
+			// start-to-start path. If no explored cell actually made
+			// progress, return NULL and let the AI module's findClosestPath
+			// fallback try.
+			PathfindCell *best = NULL;
+			UnsignedInt bestCost = 0xFFFFFFFF;
+			for (PathfindCell *c = m_closedList; c != NULL; c = c->getNextOpen()) {
+				if (!c->hasInfo() || c->getParentCell() == NULL) {
+					continue;
+				}
+				UnsignedInt h = c->costToGoal(goalCell);
+				if (h < bestCost) {
+					bestCost = h;
+					best = c;
+				}
+			}
+			Path *partial = NULL;
+			if (best != NULL) {
+				m_isTunneling = false;
+				partial = buildActualPath(obj, locomotorSet.getValidSurfaces(), from, best, centerInCell, false);
+			}
+			if (goalCell->hasInfo()) {
+				goalCell->releaseInfo();
+			}
+			cleanOpenAndClosedLists();
+			return partial;
+		}
 	}
 
 	// failure - goal cannot be reached
@@ -7010,7 +7061,7 @@ struct GroundCellsStruct
  * Find a short, valid path between given locations.
  * Uses A* algorithm.
  */
-Path *Pathfinder::findGroundPath( const Coord3D *from, 
+Path *Pathfinder::findGroundPath( const Coord3D *from,
 													 const Coord3D *rawTo, Int pathDiameter, Bool crusher)
 {
 	//CRCDEBUG_LOG(("Pathfinder::findGroundPath()\n"));
@@ -7019,7 +7070,7 @@ Path *Pathfinder::findGroundPath( const Coord3D *from,
 #endif
 #ifdef INTENSE_DEBUG
 	DEBUG_LOG(("Find ground path..."));
-#endif	
+#endif
 	Bool centerInCell = false;
 	
 	m_zoneManager.clearPassableFlags();
@@ -8678,7 +8729,7 @@ Int Pathfinder::checkPathCost(Object *obj, const LocomotorSet& locomotorSet, con
  * Find a short, valid path between the FROM location and a location NEAR the to location.
  * Uses A* algorithm.
  */
-Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from, 
+Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 																	Coord3D *rawTo, Bool blocked, Real pathCostMultiplier, Bool moveAllies)
 {
 	//CRCDEBUG_LOG(("Pathfinder::findClosestPath()\n"));
@@ -10385,7 +10436,7 @@ Path *Pathfinder::getMoveAwayFromPath(Object* obj, Object *otherObj,
 
 /** Patch to the exiting path from the current position, either because we became blocked, 
   or because we had to move off the path to avoid other units. */
-Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet, 
+Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet,
 		Path *originalPath, Bool blocked )
 {
 	//CRCDEBUG_LOG(("Pathfinder::patchPath()\n"));
@@ -10572,7 +10623,7 @@ Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet
 
 /** Find a short, valid path to a location that obj can attack victim from.  */
 Path *Pathfinder::findAttackPath( const Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
-		const Object *victim, const Coord3D* victimPos, const Weapon *weapon ) 
+		const Object *victim, const Coord3D* victimPos, const Weapon *weapon )
 {
 	/*
 	CRCDEBUG_LOG(("Pathfinder::findAttackPath() for object %d (%s)\n", obj->getID(), obj->getTemplate()->getName().str()));
@@ -10926,8 +10977,8 @@ Path *Pathfinder::findAttackPath( const Object *obj, const LocomotorSet& locomot
 }
 
 /** Find a short, valid path to a location that is safe from the repulsors.  */
-Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotorSet, 
-		const Coord3D *from, const Coord3D* repulsorPos1, const Coord3D* repulsorPos2, Real repulsorRadius) 
+Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotorSet,
+		const Coord3D *from, const Coord3D* repulsorPos1, const Coord3D* repulsorPos2, Real repulsorRadius)
 {
 	//CRCDEBUG_LOG(("Pathfinder::findSafePath()\n"));
 	if (m_isMapReady == false) return nullptr; // Should always be ok.

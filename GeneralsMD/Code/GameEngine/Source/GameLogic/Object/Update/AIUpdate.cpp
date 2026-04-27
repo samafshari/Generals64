@@ -1732,13 +1732,13 @@ Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Co
 			theNewPath = pathServices->patchPath( getObject(), m_locomotorSet, 
 				getPath(), m_isBlockedAndStuck);
 		}	else {
-			theNewPath = pathServices->findPath( getObject(), m_locomotorSet, getObject()->getPosition(), 
+			theNewPath = pathServices->findPath( getObject(), m_locomotorSet, getObject()->getPosition(),
 				destination);
 		}
 	}
 	if (theNewPath==NULL && m_path==NULL) {
-		Real pathCostFactor = 0.0f;	
-		theNewPath = pathServices->findClosestPath( getObject(), m_locomotorSet, getObject()->getPosition(), 
+		Real pathCostFactor = 0.0f;
+		theNewPath = pathServices->findClosestPath( getObject(), m_locomotorSet, getObject()->getPosition(),
 			destination, m_isBlockedAndStuck, pathCostFactor, FALSE );
 		m_retryPath = true;
 	}
